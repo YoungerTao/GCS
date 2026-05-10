@@ -14,7 +14,7 @@ function crc_calculate(buffer){
 const CRC_EXTRA = {
   0:50, 1:124, 2:151, 4:231, 21:159, 22:220, 24:24, 30:39, 33:104,
   74:20, 75:152, 76:241, 77:143, 83:53, 105:158, 110:115, 163:105, 125:0, 152:0, 62:0,
-  42:0, 36:0, 65:0, 27:144, 116:0, 129:0, 29:0, 137:0, 147:154, 167:106, 191:92, 192:36, 253:83
+  42:0, 36:0, 65:0, 27:144, 116:76, 129:46, 29:0, 137:0, 147:154, 167:106, 191:92, 192:36, 253:83
 };
 const ESC_TELEMETRY_MSG_IDS = new Set([11030, 11031, 11032, 11033]);
 
@@ -164,8 +164,8 @@ if(id === 0){ // HEARTBEAT
     window.highresImuG = { x: gx, y: gy, z: gz, t: Date.now() };
   }
 
-  // SCALED_IMU: time_boot_ms(4) + xacc,yacc,zacc int16 mG
-  if (id === 110 && payload.length >= 10) {
+  // SCALED_IMU / SCALED_IMU2 / SCALED_IMU3：布局相同，time_boot_ms(4) + xacc,yacc,zacc int16 mG
+  if ((id === 110 || id === 116 || id === 129) && payload.length >= 10) {
     const dv = new DataView(new Uint8Array(payload).buffer);
     const gx = dv.getInt16(4, true) / 1000;
     const gy = dv.getInt16(6, true) / 1000;

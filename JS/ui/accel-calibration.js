@@ -3,8 +3,24 @@
   /** @typedef {'level'|'left'|'right'|'up'|'down'|'back'} AccelAxisKey */
 
   /**
-   * mavlink ACCELCAL_VEHICLE_POS
-   * euler: [Pitch, Roll, Yaw] 单位度，机体 FRD（前 X / 右 Y / 下 Z），旋转链 R = Rz(yaw)·Ry(pitch)·Rx(roll)
+   * mavlink ACCELCAL_VEHICLE_POS（与 ArduPilot 六面加速度校准一致，参见
+   * https://ardupilot.org/copter/docs/common-accelerometer-calibration.html ）
+   *
+   * 【机体系 — Body FRD，与 MAVLink MAV_FRAME_BODY_FRD 一致】
+   * - X 轴（前 / Roll 轴）：沿飞行器正前方，通常与飞控板箭头或主朝向标记一致。
+   * - Y 轴（右 / Pitch 轴）：沿飞行器正右方（右翼方向）。
+   * - Z 轴（下 / Yaw 轴）：沿飞行器正下方（地心侧）。
+   * 【欧拉角符号 — 与常见飞控/航空约定一致】
+   * - Roll（绕 X）：向右倾斜（右翼下沉）为正。
+   * - Pitch（绕 Y）：机头抬起为正。
+   * - Yaw（绕 Z）：从上视之顺时针（机头向右转）为正。
+   * 导航里常用的 NED（北–东–地）是当地固定系；机体系随机体转动，二者需用姿态互转，勿混用。
+   *
+   * 【target】静止时 IMU 加速度（已换算为 g）在机体系中的**归一化方向**，用于地面站与遥测比对；
+   * 与六面放置时「重力/比力」主导轴一致。HIGHRES_IMU / SCALED_IMU 在 MAVLink 中一般为机体系；
+   * 水平放置时 |Z|≈1g 很常见，但部分板卡/报文约定下 Z 可为 +1g 或 −1g，故用 imuFlipZForFrd + 水平步自动判别。
+   *
+   * euler: [Pitch, Roll, Yaw] 度，旋转链 R = Rz(yaw)·Ry(pitch)·Rx(roll)，仅用于 3D 画布示意。
    */
   const FACES = [
     {
@@ -20,7 +36,7 @@
       key: "left",
       label: "向左侧立",
       step: "left",
-      target: [-1, 0, 0],
+      target: [0, -1, 0],
       mavlinkPos: 1,
       speak: "第二步，请将飞机向左侧立九十度",
       euler: [0, -90, 0],
@@ -29,7 +45,7 @@
       key: "right",
       label: "向右侧立",
       step: "right",
-      target: [1, 0, 0],
+      target: [0, 1, 0],
       mavlinkPos: 2,
       speak: "第三步，请将飞机向右侧立九十度",
       euler: [0, 90, 0],
@@ -38,7 +54,7 @@
       key: "up",
       label: "头部朝上",
       step: "up",
-      target: [0, 1, 0],
+      target: [-1, 0, 0],
       mavlinkPos: 4,
       speak: "第四步，请将飞机机头垂直朝上",
       euler: [90, 0, 0],
@@ -47,7 +63,7 @@
       key: "down",
       label: "头部朝下",
       step: "down",
-      target: [0, -1, 0],
+      target: [1, 0, 0],
       mavlinkPos: 3,
       speak: "第五步，请将飞机机头垂直朝下",
       euler: [-90, 0, 0],
@@ -62,6 +78,20 @@
       euler: [0, 180, 0],
     },
   ];
+  /**
+   * 六面校准 3D 画布用的视向补偿（度）：叠在 FACES[].euler 的 yaw 上，不改变 MAVLink 姿态语义。
+   * 默认 [0,0,0] 时机头在画面上朝右；+90° 使水平置放时机头朝画布上方，与「机头朝上」步骤的直觉一致。
+   */
+  const ACCEL_CAL_VIEW_YAW_DEG = 90;
+
+  /** 保存前校验：|G| 应接近 1（静止） */
+  const ACCEL_CAL_G_MAG_MIN = 0.82;
+  const ACCEL_CAL_G_MAG_MAX = 1.18;
+  /** 当前加速度方向与当前面期望重力方向的夹角余弦下限（约 28°） */
+  const ACCEL_CAL_ALIGN_DOT_MIN = 0.88;
+  /** 仅用带时间戳的 HIGHRES_IMU / SCALED_IMU 做门控，避免用过期遥测误判 */
+  const ACCEL_CAL_IMU_MAX_AGE_MS = 500;
+
   const MAV_CMD_PREFLIGHT_CALIBRATION = 241;
 
   const AHRS_ORIENT_BY_SELECT = {
@@ -76,11 +106,15 @@
     calibState: "idle",
     currentIndex: 0,
     raf: 0,
-    sim: [0, 0, 1],
+    sim: [0, 0, 0],
     /** @type {number} requestAnimationFrame 时间戳，用于 dt 平滑 */
     lastSimT: 0,
     /** @type {{w:number,x:number,y:number,z:number}} 当前姿态四元数（渲染用） */
     currentQ: { w: 1, x: 0, y: 0, z: 0 },
+    /**
+     * 部分 IMU 报文在水平时 Z 与 FRD「下为 +Z」相反（约 -1g）。为通过第一步校验仅对读数 Z 取反，不能整向量取反（否则会搞反左右翼）。
+     */
+    imuFlipZForFrd: false,
   };
 
   function $(id) {
@@ -495,6 +529,84 @@
     return null;
   }
 
+  /** 六面保存门控：必须近期 IMU 报文（不用无时间戳的 telemetry 缓存） */
+  function getFreshImuGForCalibGate() {
+    const now = Date.now();
+    const hr = window.highresImuG;
+    const sc = window.scaledImuG;
+    if (hr && typeof hr.x === "number" && typeof hr.t === "number" && now - hr.t < ACCEL_CAL_IMU_MAX_AGE_MS) {
+      return { x: hr.x, y: hr.y, z: hr.z };
+    }
+    if (sc && typeof sc.x === "number" && typeof sc.t === "number" && now - sc.t < ACCEL_CAL_IMU_MAX_AGE_MS) {
+      return { x: sc.x, y: sc.y, z: sc.z };
+    }
+    return null;
+  }
+
+  /** 水平静置时：若主要分量在 Z 且为负，则后续比对只对 AccZ 取反（避免整向量取反搞错左右翼） */
+  function probeImuFlipZFromLevelSample(live) {
+    const gmag = vecLen3(live.x, live.y, live.z);
+    if (gmag < ACCEL_CAL_G_MAG_MIN || gmag > ACCEL_CAL_G_MAG_MAX) return false;
+    const inv = 1 / gmag;
+    const mx = live.x * inv;
+    const my = live.y * inv;
+    const mz = live.z * inv;
+    if (Math.abs(mx) > 0.35 || Math.abs(my) > 0.35) return false;
+    if (Math.abs(mz) < 0.85) return false;
+    return mz < 0;
+  }
+
+  /**
+   * 校验加速度计读数是否与当前校准面一致（机体 FRD，与 FACES[].target 一致；可选仅对读数 Z 取反）。
+   * @returns {{ ok: true } | { ok: false, message: string, hint?: string }}
+   */
+  function checkAccelSampleAgainstFace(face, live) {
+    const gmag = vecLen3(live.x, live.y, live.z);
+    if (gmag < ACCEL_CAL_G_MAG_MIN || gmag > ACCEL_CAL_G_MAG_MAX) {
+      return {
+        ok: false,
+        message: `加速度模长异常（|G|≈${gmag.toFixed(2)}g）。请将飞控静止平放或轻拿轻放后再试。`,
+        hint: `请按步骤静止摆放：${face.label}`,
+      };
+    }
+    const inv = 1 / gmag;
+    const mx = live.x * inv;
+    const my = live.y * inv;
+    let mz = live.z * inv;
+    const [tx, ty, tz] = face.target;
+
+    // 水平步：开始校准时若尚未收到 IMU，imuFlipZForFrd 可能未置位；此处根据 ±Z 与期望的吻合度自动锁定 Z 取反，避免误报约 180°。
+    if (face.key === "level" && tx === 0 && ty === 0 && Math.abs(tz) > 0.5) {
+      const dotKeep = mx * tx + my * ty + mz * tz;
+      const dotFlipZ = mx * tx + my * ty + (-mz) * tz;
+      const flipBetter =
+        (dotFlipZ >= ACCEL_CAL_ALIGN_DOT_MIN && dotFlipZ > dotKeep) ||
+        (dotKeep < -ACCEL_CAL_ALIGN_DOT_MIN && dotFlipZ > dotKeep);
+      if (flipBetter) {
+        accel.imuFlipZForFrd = true;
+        mz = -mz;
+        if (dotKeep < -ACCEL_CAL_ALIGN_DOT_MIN) {
+          slog("六面校准：水平步检测到 AccZ 与 +Z 向下约定相反，已自动对 Z 取反（可能与开始时刻无 IMU 有关）。");
+        }
+      }
+    } else if (accel.imuFlipZForFrd) {
+      mz = -mz;
+    }
+
+    const dot = mx * tx + my * ty + mz * tz;
+    if (dot < ACCEL_CAL_ALIGN_DOT_MIN) {
+      const ang = (Math.acos(clamp(dot, -1, 1)) * 180) / Math.PI;
+      const flipNote = accel.imuFlipZForFrd ? "（比对时已对 AccZ 按机载约定取反）" : "";
+      return {
+        ok: false,
+        message:
+          `当前姿态与「${face.label}」不符（与期望方向偏差约 ${ang.toFixed(0)}°）。\n\n飞控仍平放在桌面时无法通过侧立、倒立等步骤。\n请按图示与语音将机体摆到正确朝向后再点「保存」。\n\n期望重力方向（机体系）≈ [${tx}, ${ty}, ${tz}]${flipNote}\n用于比对的归一化加速度 ≈ [${mx.toFixed(2)}, ${my.toFixed(2)}, ${mz.toFixed(2)}]。`,
+        hint: `${face.label} — ${face.speak}`,
+      };
+    }
+    return { ok: true };
+  }
+
   /** 由加速度计向量解算俯仰/横滚（g），偏航使用 ATTITUDE.yaw（弧度） */
   function physicalEulerFromImuG() {
     const live = getLiveImuG();
@@ -511,22 +623,34 @@
     return { pitch, roll, yaw };
   }
 
+  /** 空闲或已完成一轮时：仅在有串口时允许再次「开始校准」；进行中由流程控制按钮状态 */
+  function syncAccelCalibGate() {
+    const start = $("sc-accel-start");
+    if (!start) return;
+    if (accel.calibState === "orienting" || accel.calibState === "measuring") return;
+    start.disabled = !fcConnected();
+  }
+
   function updateAccelLiveLabel() {
     const el = $("sc-accel-live");
     if (!el) return;
     if (!fcConnected()) {
-      el.textContent = "未连接飞控：加速度与 3D 固定翼为演示；连接后启用 IMU 物理对准通道。";
+      el.textContent =
+        "未连接飞控：无法进行加速度计六面校准。请先连接串口。说明：补偿参数由飞控在收到校准指令后自行计算并写入机载参数，地面站不离线保存加速度矩阵。";
       el.style.color = "#8b95a8";
+      syncAccelCalibGate();
       return;
     }
     const live = getLiveImuG();
     if (live) {
-      el.textContent = "已连接：3D 机型与当前校准面姿态一致；加速度读数来自 IMU。";
+      el.textContent =
+        "已连接：每步「保存」前会用 IMU 校验姿态是否与当前面一致；通过后再发 ACCELCAL_VEHICLE_POS。需近期 HIGHRES_IMU 或 SCALED_IMU / IMU2 / IMU3 报文。";
       el.style.color = "#10b981";
     } else {
       el.textContent = "已连接：等待 IMU 数据（请确认已请求消息间隔）…";
       el.style.color = "#f59e0b";
     }
+    syncAccelCalibGate();
   }
 
   /* ---------- Accel six-face ---------- */
@@ -625,11 +749,21 @@
     if (accel.calibState === "success") {
       qTarget = quatFromPRY(0, 0, (now / 38) % 360);
     } else if (accel.calibState === "idle") {
-      const phy = physicalEulerFromImuG();
-      qTarget = phy ? quatFromPRY(phy.pitch, phy.roll, phy.yaw) : qIdleDemo;
+      if (fcConnected()) {
+        const phy = physicalEulerFromImuG();
+        qTarget = phy ? quatFromPRY(phy.pitch, phy.roll, phy.yaw) : qIdleDemo;
+      } else {
+        // 未连接：无 IMU 驱动，但保留演示用慢速旋转（与 success 态同速公式）
+        qTarget = quatFromPRY(18, -12, (now / 38) % 360);
+      }
     } else {
       const face = FACES[accel.currentIndex];
-      qTarget = face ? quatFromPRY(face.euler[0], face.euler[1], face.euler[2]) : qIdleDemo;
+      if (face) {
+        const [fp, fr, fy] = face.euler;
+        qTarget = quatFromPRY(fp, fr, fy + ACCEL_CAL_VIEW_YAW_DEG);
+      } else {
+        qTarget = qIdleDemo;
+      }
     }
 
     const smooth = 1 - Math.exp(-11 * dt);
@@ -637,11 +771,15 @@
     draw3DAircraft("sc-accel-canvas-3d", accel.currentQ);
 
     const live = fcConnected() ? getLiveImuG() : null;
-    if (live) {
+    if (!fcConnected()) {
+      accel.sim[0] = 0;
+      accel.sim[1] = 0;
+      accel.sim[2] = 0;
+    } else if (live) {
       accel.sim[0] = live.x;
       accel.sim[1] = live.y;
       accel.sim[2] = live.z;
-    } else {
+    } else if (accel.calibState === "orienting" || accel.calibState === "measuring") {
       const face = FACES[accel.currentIndex];
       const tgt = face ? face.target : [0, 0, 1];
       const noise = accel.calibState === "measuring" ? 0.022 : 0.008;
@@ -650,6 +788,10 @@
         const goal = tgt[i] + (Math.random() - 0.5) * noise;
         accel.sim[i] = lerp(accel.sim[i], goal, t);
       }
+    } else {
+      accel.sim[0] = 0;
+      accel.sim[1] = 0;
+      accel.sim[2] = 0;
     }
     const g = vecLen3(accel.sim[0], accel.sim[1], accel.sim[2]);
     const x = $("sc-acc-x");
@@ -671,14 +813,14 @@
   function resetAccelUi() {
     accel.calibState = "idle";
     accel.currentIndex = 0;
-    accel.sim = [0, 0, 1];
+    accel.imuFlipZForFrd = false;
+    accel.sim = [0, 0, 0];
     accel.lastSimT = 0;
     accel.currentQ = quatFromPRY(18, -12, 38);
     setDroneStep("level");
-    const start = $("sc-accel-start");
     const abort = $("sc-accel-abort");
     const meas = $("sc-accel-measure");
-    if (start) start.disabled = false;
+    syncAccelCalibGate();
     if (abort) abort.disabled = true;
     if (meas) meas.disabled = true;
     accelHint("请将飞机水平静置在桌面", false);
@@ -688,7 +830,8 @@
   }
 
   async function sendFcAccelStart() {
-    if (!fcConnected() || typeof window.sendCommandLong !== "function") return;
+    if (!fcConnected()) throw new Error("未连接串口");
+    if (typeof window.sendCommandLong !== "function") throw new Error("发送接口不可用");
     await window.sendCommandLong(MAV_CMD_PREFLIGHT_CALIBRATION, 0, 0, 0, 0, 1, 0, 0);
     slog("已发送 PREFLIGHT_CALIBRATION：启动加速度计校准 (param5=1)");
     await sleep(400);
@@ -724,13 +867,32 @@
     });
 
     $("sc-accel-start")?.addEventListener("click", async () => {
-      if (fcConnected()) {
-        try {
-          await sendFcAccelStart();
-        } catch (e) {
-          slog(`加速度计启动命令失败: ${e?.message || e}`);
-          window.alert(`无法启动飞控加速度校准: ${e?.message || e}`);
-          return;
+      if (!fcConnected()) {
+        window.alert(
+          "请先连接串口与飞控后再进行加速度计六面校准。\n\n未连接时不会向飞控写入任何校准数据；补偿由飞控固件在校准流程中完成。"
+        );
+        return;
+      }
+      try {
+        await sendFcAccelStart();
+      } catch (e) {
+        const reason = e?.message || String(e);
+        slog(`加速度计启动命令失败: ${reason}`);
+        window.alert(
+          `无法启动飞控加速度计校准：${reason}\n\n请检查串口、目标系统是否在线、固件是否支持该指令，然后重试。`
+        );
+        return;
+      }
+      accel.imuFlipZForFrd = false;
+      let probe = getFreshImuGForCalibGate();
+      if (!probe) {
+        await sleep(280);
+        probe = getFreshImuGForCalibGate();
+      }
+      if (probe) {
+        accel.imuFlipZForFrd = probeImuFlipZFromLevelSample(probe);
+        if (accel.imuFlipZForFrd) {
+          slog("六面校准：水平时 AccZ 与 FRD +Z 向下约定相反，各步比对仅对加速度 Z 分量取反（左右翼仍按 Y 判断）。");
         }
       }
       accel.calibState = "orienting";
@@ -754,39 +916,88 @@
 
     $("sc-accel-measure")?.addEventListener("click", async () => {
       if (accel.calibState !== "orienting" && accel.calibState !== "measuring") return;
+      if (!fcConnected()) {
+        window.alert("串口已断开，无法继续向飞控下发校准步骤。校准已中止。");
+        speak("校准已中止");
+        resetAccelUi();
+        return;
+      }
       const face = FACES[accel.currentIndex];
       if (!face) return;
+
+      const liveGate = getFreshImuGForCalibGate();
+      if (!liveGate) {
+        window.alert(
+          "未收到近期的 IMU 加速度数据，无法校验姿态。\n\n请确认已连接飞控；地面站会请求 HIGHRES_IMU、SCALED_IMU / IMU2 / IMU3。若仍无数据，请在飞控端提高 IMU 外发速率（如 SR*_IMU）后重连，将飞控静止后再点保存。"
+        );
+        return;
+      }
+      const orientCheck = checkAccelSampleAgainstFace(face, liveGate);
+      if (!orientCheck.ok) {
+        slog(`加速度计姿态校验未通过: ${face.label}`);
+        if (orientCheck.hint) accelHint(orientCheck.hint, false);
+        window.alert(orientCheck.message);
+        return;
+      }
+
       accel.calibState = "measuring";
       updateFaceDom();
       speak("正在保存当前位置，请保持静止");
-      if (fcConnected() && typeof window.sendAccelcalVehiclePos === "function") {
+      if (typeof window.sendAccelcalVehiclePos === "function") {
         try {
-          await window.sendAccelcalVehiclePos(face.mavlinkPos);
+          const ok = await window.sendAccelcalVehiclePos(face.mavlinkPos);
+          if (!ok) {
+            slog(`ACCELCAL_VEHICLE_POS 未发送 (${face.label})`);
+            window.alert("无法下发当前校准面（串口不可用）。校准已中止。");
+            await sendFcAccelAbort();
+            resetAccelUi();
+            return;
+          }
           slog(`ACCELCAL_VEHICLE_POS position=${face.mavlinkPos} (${face.label})`);
         } catch (e) {
           slog(`发送姿态位置失败: ${e?.message || e}`);
+          window.alert(`下发校准姿态失败：${e?.message || e}\n\n校准已中止，请检查连接后重新开始。`);
+          await sendFcAccelAbort();
+          resetAccelUi();
+          return;
         }
         await sleep(1000);
       } else {
-        await sleep(1000);
+        window.alert("当前环境不支持向飞控发送校准指令，无法继续。");
+        await sendFcAccelAbort();
+        resetAccelUi();
+        return;
       }
       accel.calibState = "orienting";
       burstParticles();
       accel.currentIndex += 1;
       if (accel.currentIndex >= FACES.length) {
+        let successSent = false;
         if (fcConnected() && typeof window.sendAccelcalVehiclePos === "function") {
           try {
-            await window.sendAccelcalVehiclePos(6);
-            slog("ACCELCAL_VEHICLE_POS SUCCESS(6)");
-          } catch (e) { /* ignore */ }
+            successSent = await window.sendAccelcalVehiclePos(6);
+            if (successSent) slog("ACCELCAL_VEHICLE_POS SUCCESS(6)");
+          } catch (e) {
+            slog(`发送校准完成指令失败: ${e?.message || e}`);
+          }
         }
         accel.calibState = "success";
         speak("加速度计六面校准全部顺利完成");
-        accelHint("六面加速度计校准完成（若已连接飞控，请留意 STATUSTEXT / 是否需重启）", true);
+        if (successSent) {
+          accelHint(
+            "已向飞控发送六面完成指令。加速度补偿由机载固件计算并写入参数，并非由地面站上传矩阵；请在消息区确认校准成功提示，并按固件要求决定是否重启。",
+            true
+          );
+          slog(
+            "六面位置指令已发齐；是否写入成功以飞控 STATUSTEXT / 参数为准，本界面仅负责下发 MAVLink 校准流程指令。"
+          );
+        } else {
+          accelHint("未能确认已向飞控发送完成指令，请检查连接与日志后重试。", false);
+        }
         setDroneStep("level");
         $("sc-accel-measure").disabled = true;
         $("sc-accel-abort").disabled = true;
-        $("sc-accel-start").disabled = false;
+        syncAccelCalibGate();
         updateFaceDom();
         itemsAllDone();
       } else {

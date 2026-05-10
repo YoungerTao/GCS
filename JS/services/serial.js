@@ -466,7 +466,7 @@ async function requestDataStream() {
   // param1: message id, param2: interval_us
   const intervalUs = 100000; // 10Hz
   const msgIds = [
-    0, 1, 24, 30, 33, 42, 65, 74, 77, 105, 110, 147, 191, 192, 253,
+    0, 1, 24, 30, 33, 42, 65, 74, 77, 105, 110, 116, 129, 147, 191, 192, 253,
     // ESC telemetry groups (MAVLink 2 extended IDs)
     11030, 11031, 11032, 11033
   ];
