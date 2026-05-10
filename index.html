@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GCS HUD + MAP + PARAM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Montserrat:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="CSS/base/layout.css">
+<link rel="stylesheet" href="CSS/components/quick-grid.css">
+<link rel="stylesheet" href="CSS/components/status-messages.css">
+<link rel="stylesheet" href="CSS/components/sensor-calibration.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+</head>
+<body>
+
+<!-- 顶部控制栏 -->
+<div class="top-bar">
+  <select id="comPort">
+    <option value="">-- 选择COM口 --</option>
+  </select>
+  <button id="connectBtn" onclick="connect()">连接串口</button>
+  <button onclick="loadParams()">加载参数</button>
+  <div class="main-tabs" aria-label="主功能切换">
+    <button class="main-tab active" data-view="flight-data">
+      <img src="assets/icons/tab-flight.svg" alt="">
+      <span>飞行数据</span>
+    </button>
+    <button class="main-tab" data-view="flight-plan">
+      <img src="assets/icons/tab-plan.svg" alt="">
+      <span>飞行计划</span>
+    </button>
+    <button class="main-tab" data-view="initial-setup">
+      <img src="assets/icons/tab-setup.svg" alt="">
+      <span>初始设置</span>
+    </button>
+    <button class="main-tab" data-view="config-debug">
+      <img src="assets/icons/tab-debug.svg" alt="">
+      <span>配置调试</span>
+    </button>
+  </div>
+</div>
+
+<div id="view-flight-data" class="main-view active">
+  <!-- 中间主区域 -->
+  <div class="main-area">
+    <!-- 左侧HUD -->
+    <div class="hud-container">
+      <canvas id="hud" width="800" height="800"></canvas>
+    </div>
+    <div class="v-splitter" data-splitter="main" aria-label="调整HUD宽度" title="拖拽调整HUD宽度"></div>
+    <!-- 右侧地图 -->
+    <div class="map-container">
+      <div id="map"></div>
+    </div>
+  </div>
+
+  <!-- 底部信息区 -->
+  <div class="bottom-area">
+    <!-- 左侧日志：增加标签切换面板 -->
+    <div class="log-container">
+      <div class="log-tabs">
+        <button class="log-tab active" data-panel="quick">快速</button>
+        <button class="log-tab" data-panel="actions">动作</button>
+        <button class="log-tab" data-panel="messages" type="button">
+          消息
+          <span id="log-tab-messages-badge" class="log-tab-badge" hidden aria-label="未读警报">0</span>
+        </button>
+        <button class="log-tab" data-panel="servo">舵机</button>
+        <button class="log-tab" data-panel="logs">日志</button>
+      </div>
+      <div class="log-panels">
+        <div id="panel-quick" class="log-panel active">
+          <div id="quick-grid" class="quick-grid" aria-label="Quick telemetry grid"></div>
+
+          <!-- 参数选择模态 -->
+          <div id="param-modal" class="param-modal hidden">
+            <div class="pm-content">
+              <div class="pm-header">
+                <input id="pm-search" placeholder="搜索参数..." autofocus>
+                <button id="pm-close">关闭</button>
+              </div>
+              <div id="pm-list" class="pm-list"></div>
+              <div class="pm-footer">
+                <button id="pm-clear">清除参数</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="panel-actions" class="log-panel">动作面板占位</div>
+        <div id="panel-messages" class="log-panel log-panel--messages">
+          <div class="gcs-messages" aria-label="STATUSTEXT 消息">
+            <div class="gcs-msg-toolbar" role="toolbar" aria-label="按等级过滤">
+              <button type="button" class="gcs-msg-filter active" data-level="critical" title="严重 0–2">Critical</button>
+              <button type="button" class="gcs-msg-filter active" data-level="warning" title="警告 3–4">Warning</button>
+              <button type="button" class="gcs-msg-filter active" data-level="info" title="信息 5–6">Info</button>
+              <button type="button" class="gcs-msg-filter active" data-level="debug" title="调试 7">Debug</button>
+            </div>
+            <div id="gcs-msg-list" class="gcs-msg-list"></div>
+            <div class="gcs-msg-statusbar">
+              <span id="gcs-msg-conn" class="gcs-msg-conn">未连接</span>
+              <span class="gcs-msg-status-right">
+                <span id="gcs-msg-unread">未读警报 0</span>
+                <span id="gcs-msg-total">总计 0</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div id="panel-servo" class="log-panel">舵机面板占位</div>
+        <div id="panel-logs" class="log-panel">日志输出区<div id="log"></div></div>
+      </div>
+    </div>
+    <div class="v-splitter" data-splitter="bottom" aria-label="调整HUD宽度" title="拖拽调整HUD宽度"></div>
+    <!-- 右侧参数 -->
+    <div class="params-container">
+      <div id="params"></div>
+    </div>
+  </div>
+</div>
+
+<div id="view-flight-plan" class="main-view placeholder-view">
+  <div class="placeholder-content">飞行计划（占位）</div>
+</div>
+
+<div id="view-initial-setup" class="main-view">
+  <div class="ov-page">
+    <div class="ov-top-alert">
+      <div class="ov-link-status">
+        <span class="ov-dot ok"></span>
+        串口已连接 / 57600 bps
+      </div>
+      <div class="ov-global-warning danger pulse">
+        部分传感器未校准，机体未定义，禁止起飞
+      </div>
+    </div>
+
+    <aside class="ov-sidebar">
+      <div class="ov-sidebar-header">工业级重载无人机概览</div>
+      <button class="ov-nav-item active" data-setup-panel="overview">概览</button>
+      <button class="ov-nav-item" data-setup-panel="airframe">机体</button>
+      <button class="ov-nav-item" data-setup-panel="rc">遥控器</button>
+      <button class="ov-nav-item" data-setup-panel="mode">飞行模式</button>
+      <button class="ov-nav-item" data-setup-panel="motor">电机</button>
+      <button class="ov-nav-item" data-setup-panel="dronecan">DroneCAN</button>
+      <button class="ov-nav-item" data-setup-panel="sensors">传感器</button>
+      <button class="ov-nav-item" data-setup-panel="radio">电台</button>
+      <button class="ov-nav-item" data-setup-panel="power">电源</button>
+      <button class="ov-nav-item" data-setup-panel="safety">安全</button>
+      <button class="ov-nav-item" data-setup-panel="params">参数</button>
+      <button class="ov-nav-item" data-setup-panel="help">帮助</button>
+    </aside>
+
+    <section class="ov-main">
+      <div class="ov-panel active" id="setup-panel-overview">
+      <div class="ov-cards">
+        <article class="ov-card">
+          <h4>载机与固件</h4>
+          <div class="ov-kv"><span>机体类型</span><span class="danger pulse">Undefined</span></div>
+          <div class="ov-kv"><span>固件版本</span><span class="ok">ArduPilot v4.6.3</span></div>
+          <div class="ov-kv"><span>飞控硬件</span><span>CubeOrange+ (STM32H7)</span></div>
+          <div class="ov-kv"><span>设备 ID</span><span class="muted">00430030-3451510...</span></div>
+        </article>
+
+        <article class="ov-card">
+          <h4>链路与控制</h4>
+          <div class="ov-kv"><span>数传链路</span><span class="ok">已连接 (57600 bps, 丢包 0.1%)</span></div>
+          <div class="ov-kv"><span>遥控链路</span><span class="danger pulse">未连接</span></div>
+          <div class="ov-kv"><span>控制信道</span><span>16 CH (SBUS)</span></div>
+          <div class="ov-kv"><span>链路质量 RSSI</span><span class="muted">--</span></div>
+        </article>
+
+        <article class="ov-card">
+          <h4>高精度定位</h4>
+          <div class="ov-kv"><span>定位状态</span><span class="ok">3D RTK Fixed</span></div>
+          <div class="ov-kv"><span>卫星数量</span><span class="ok">28 颗</span></div>
+          <div class="ov-kv"><span>HDOP</span><span class="ok">0.55</span></div>
+          <div class="ov-kv"><span>RTK 基准站</span><span class="ok">千寻 CORS 已连接</span></div>
+        </article>
+
+        <article class="ov-card">
+          <h4>动力与电池</h4>
+          <div class="ov-kv"><span>电池规格</span><span>12S LiPo (50.4V)</span></div>
+          <div class="ov-kv"><span>实时电压</span><span>49.8 V (单体 4.15 V)</span></div>
+          <div class="ov-kv"><span>实时电流</span><span>0.0 A</span></div>
+          <div class="ov-kv"><span>低压保护</span><span class="warn">Always RTL</span></div>
+          <div class="ov-progress" aria-label="SOC 92%">
+            <span style="width:92%"></span>
+          </div>
+          <div class="ov-kv"><span>SOC</span><span class="ok">92%</span></div>
+        </article>
+
+        <article class="ov-card">
+          <h4>飞行模式与规划</h4>
+          <div class="ov-kv"><span>当前模式</span><span class="warn">Stabilize</span></div>
+          <div class="ov-kv"><span>安全高度 RTL</span><span class="warn">150 m (已纠错)</span></div>
+          <div class="ov-kv"><span>航点规划</span><span class="muted">未载入航线</span></div>
+          <div class="ov-kv"><span>Pre-arm Check</span><span class="danger pulse">FAILED</span></div>
+        </article>
+
+        <article class="ov-card">
+          <h4>安全与围栏</h4>
+          <div class="ov-kv"><span>Geofence</span><span class="ok">已开启 (1000m / 120m)</span></div>
+          <div class="ov-kv"><span>失控保护</span><span class="ok">RTL</span></div>
+          <div class="ov-kv"><span>避障雷达</span><span class="ok">正常 (前/后/下)</span></div>
+          <div class="ov-kv"><span>振动监控</span><span class="ok">正常 (&lt; 15 m/s²)</span></div>
+        </article>
+
+        <article class="ov-card">
+          <h4>IMU 与传感器健康度</h4>
+          <div class="ov-kv"><span>指南针</span><span class="danger pulse">IST8310 (未校准)</span></div>
+          <div class="ov-kv"><span>加速度计</span><span class="ok">ICM20689 (正常)</span></div>
+          <div class="ov-kv"><span>气压计</span><span class="ok">MS5611 (正常)</span></div>
+          <div class="ov-kv"><span>测距仪</span><span class="ok">TF-Luna (1.2m)</span></div>
+        </article>
+
+        <article class="ov-card">
+          <h4>挂载 / 载荷状态</h4>
+          <div class="ov-kv"><span>挂载设备</span><span class="ok">三轴光电吊舱</span></div>
+          <div class="ov-kv"><span>工作状态</span><span class="ok">视频流正常 (1080P)</span></div>
+          <div class="ov-kv"><span>抛投/点火逻辑</span><span class="ok">12V 驱动器 - Ready</span></div>
+          <div class="ov-kv"><span>温度监控</span><span>32 °C</span></div>
+        </article>
+      </div>
+      </div>
+
+      <div class="ov-panel" id="setup-panel-airframe">
+        <div class="af-page">
+          <div class="af-status-bar">
+            <div class="af-status-items">
+              <span>当前机架: <strong id="af-current-frame">未指定 (Undefined)</strong> <span id="af-frame-state" class="af-chip af-chip-danger">⚠️ Unconfigured</span></span>
+              <span>混控算法: <strong id="af-mixer-state">未加载</strong></span>
+              <span>飞控朝向: <strong id="af-orient-state">ROTATION_NONE</strong> <span class="af-chip af-chip-ok">🟢</span></span>
+            </div>
+            <button id="af-write-btn" class="af-write-btn" type="button">写入并重启飞控 (Write &amp; Reboot)</button>
+          </div>
+
+          <div class="af-grid">
+            <section class="af-left card-dark">
+              <div class="rc-card-head">
+                <h3>机载平台与架构选择 (3/8)</h3>
+              </div>
+
+              <div class="af-block">
+                <h4>1. 选择载机平台</h4>
+                <div id="af-platform-grid" class="af-platform-grid">
+                  <button type="button" class="af-platform-card active" data-platform="multirotor">
+                    <span class="af-platform-icon">🛸</span>
+                    <span>多旋翼</span>
+                  </button>
+                  <button type="button" class="af-platform-card" data-platform="vtol">
+                    <span class="af-platform-icon">✈️</span>
+                    <span>垂起 VTOL</span>
+                  </button>
+                  <button type="button" class="af-platform-card" data-platform="plane">
+                    <span class="af-platform-icon">🛩️</span>
+                    <span>固定翼</span>
+                  </button>
+                  <button type="button" class="af-platform-card" data-platform="rover">
+                    <span class="af-platform-icon">🚗</span>
+                    <span>无人车/船</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="af-block">
+                <h4>2. 选择机架混控结构</h4>
+                <div id="af-frame-list" class="af-frame-list"></div>
+              </div>
+            </section>
+
+            <section class="af-right card-dark">
+              <div class="rc-card-head">
+                <h3>机架结构拓扑与传感器朝向 (5/8)</h3>
+              </div>
+
+              <div class="af-block">
+                <h4>2. 机架物理拓扑与转向示意</h4>
+                <div class="af-topology-wrap">
+                  <svg id="af-topology-svg" viewBox="0 0 640 420" aria-label="机架拓扑示意"></svg>
+                  <div id="af-hover-hint" class="af-hover-hint">悬浮电机节点查看输出引脚</div>
+                </div>
+                <div class="af-topology-tip">* 提示：双击电机节点可快速调换转向。</div>
+              </div>
+
+              <div class="af-block">
+                <h4>3. 飞控 / IMU 安装朝向校准</h4>
+                <div class="af-orient-row">
+                  <label for="af-orient-select">安装角度</label>
+                  <select id="af-orient-select"></select>
+                </div>
+                <div class="af-angle-row">
+                  <label>俯仰(Pitch): <input id="af-pitch-input" type="number" value="0" step="1">°</label>
+                  <label>偏航(Yaw): <input id="af-yaw-input" type="number" value="0" step="1">°</label>
+                </div>
+                <div class="af-board-wrap">
+                  <div id="af-board3d" class="af-board3d">
+                    <div class="af-board-face af-board-top">TOP</div>
+                    <div class="af-board-face af-board-front">FORWARD</div>
+                    <div class="af-board-face af-board-side">SIDE</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div class="ov-panel" id="setup-panel-rc">
+        <div class="rc-page">
+          <section class="rc-monitor card-dark">
+            <div class="rc-card-head">
+              <h3>通道实时监控器</h3>
+              <span class="muted">1-14 CH / PWM(us)</span>
+            </div>
+            <div id="rc-channel-list" class="rc-channel-list"></div>
+          </section>
+
+          <section class="rc-wizard card-dark">
+            <div class="rc-card-head">
+              <h3>遥控器配置与校准向导</h3>
+              <div id="rc-status-badge" class="rc-status-badge">IDLE</div>
+            </div>
+
+            <div class="rc-wizard-controls">
+              <p id="rc-guide-text">点击“开始校准”进入摇杆校准流程。</p>
+              <div class="rc-btn-row">
+                <button id="rc-start-btn">开始校准</button>
+                <button id="rc-next-btn" disabled>下一步</button>
+                <button id="rc-finish-btn" disabled>完成校准</button>
+                <button id="rc-save-btn" disabled>保存并写入飞控</button>
+              </div>
+            </div>
+
+            <div class="rc-tx-wrap">
+              <svg id="rc-tx-svg" viewBox="0 0 600 280" aria-label="虚拟遥控器">
+                <rect x="20" y="20" width="560" height="240" rx="24" class="tx-body" />
+                <circle cx="190" cy="140" r="66" class="tx-stick-ring" />
+                <circle cx="410" cy="140" r="66" class="tx-stick-ring" />
+                <line x1="190" y1="74" x2="190" y2="206" class="tx-stick-cross" />
+                <line x1="124" y1="140" x2="256" y2="140" class="tx-stick-cross" />
+                <line x1="410" y1="74" x2="410" y2="206" class="tx-stick-cross" />
+                <line x1="344" y1="140" x2="476" y2="140" class="tx-stick-cross" />
+                <circle id="tx-left-stick" cx="190" cy="140" r="14" class="tx-stick-knob" />
+                <circle id="tx-right-stick" cx="410" cy="140" r="14" class="tx-stick-knob" />
+                <path id="tx-guide-arrow" d="M190 232 L178 252 L186 252 L186 270 L194 270 L194 252 L202 252 Z" class="tx-guide-arrow hidden" />
+              </svg>
+            </div>
+
+            <div class="rc-bottom-tools">
+              <div class="rc-mode-tabs">
+                <button class="rc-mode-tab active" data-rc-mode="mode2">美国手 模式2</button>
+                <button class="rc-mode-tab" data-rc-mode="mode1">日本手 模式1</button>
+              </div>
+
+              <div id="rc-reverse-list" class="rc-reverse-list"></div>
+
+              <div class="rc-utils">
+                <button id="rc-bind-btn">Spektrum 对频</button>
+                <button id="rc-copy-trim-btn">复制微调</button>
+                <button id="rc-map-btn">通道映射</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="ov-panel" id="setup-panel-motor">
+        <div class="motor-page">
+          <div class="motor-top-warning pulse">
+            ⚠️ 警告：请在开始电机测试前卸下所有螺旋桨！确保载机下方无人，保障人身安全！
+          </div>
+
+          <div id="motor-workspace" class="motor-workspace">
+            <section class="motor-left card-dark">
+              <div class="rc-card-head motor-frame-head">
+                <h3>机架拓扑与状态监控</h3>
+                <div class="motor-frame-head-text">
+                  <span id="motor-frame-label" class="muted">等待飞控连接...</span>
+                  <div id="motor-frame-warn" class="motor-frame-warn hidden" role="status"></div>
+                </div>
+              </div>
+
+              <div class="motor-topology-wrap">
+                <div class="motor-topology-fade-inner">
+                  <svg id="motor-topology-svg" aria-label="电机拓扑图" role="img"></svg>
+                </div>
+              </div>
+
+              <div class="motor-table-wrap">
+                <table class="motor-table">
+                  <thead>
+                    <tr>
+                      <th>通道</th>
+                      <th>物理标签</th>
+                      <th>位置</th>
+                      <th>层级</th>
+                      <th>转向确认</th>
+                      <th>RPM</th>
+                      <th>电流(A)</th>
+                      <th>温度(°C)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="motor-diagnostics-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="motor-right card-dark">
+              <div class="rc-card-head">
+                <h3>安全测试控制区</h3>
+                <span id="motor-lock-badge" class="motor-lock-badge">已锁定</span>
+              </div>
+
+              <div class="motor-unlock">
+                <label for="motor-unlock-range">安全解锁滑块</label>
+                <input id="motor-unlock-range" type="range" min="0" max="100" step="1" value="0">
+                <div class="motor-unlock-tip">>>>>>>>> 滑动解锁电机测试 >>>>>>>></div>
+              </div>
+
+              <div class="motor-param-grid">
+                <label>
+                  测试油门 (%)
+                  <input id="motor-throttle-input" type="number" value="5" min="0" max="15" step="1">
+                </label>
+                <label>
+                  持续时间 (秒)
+                  <input id="motor-duration-input" type="number" value="3.0" min="0.5" max="8" step="0.1">
+                </label>
+              </div>
+
+              <div class="motor-btn-block">
+                <div class="motor-btn-title">单机一键诊断</div>
+                <div id="motor-btn-grid" class="motor-btn-grid"></div>
+              </div>
+
+              <button id="motor-test-all-btn" class="motor-test-all-btn">顺次测试所有电机</button>
+              <button id="motor-test-all-quick-btn" class="motor-test-all-btn">测试所有电机</button>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div class="ov-panel" id="setup-panel-dronecan">
+        <div class="sc-page cal-tokens">
+          <nav class="sc-breadcrumb" aria-label="DroneCAN 导航">
+            <span>初始设置</span>
+            <span class="sc-bc-sep">›</span>
+            <span>DroneCAN / UAVCAN 总线</span>
+          </nav>
+          <div class="sc-dc-bar sc-card sc-card--bar">
+            <div class="sc-bar-item">CAN1 总线负载: <span id="sc-dc-load" class="sc-mono">24%</span> <span class="sc-pill sc-pill-ok">正常</span></div>
+            <div class="sc-bar-item">侦听包速率: <span id="sc-dc-fps" class="sc-mono">450</span> frames/s</div>
+            <div class="sc-bar-item">故障帧 Err: <span id="sc-dc-err" class="sc-mono">0</span> <span class="sc-pill sc-pill-ok">正常</span></div>
+          </div>
+          <div class="sc-split sc-split-25">
+            <section class="sc-card">
+              <div class="sc-card-head">
+                <h3>在线 CAN 节点拓扑</h3>
+                <button type="button" id="sc-dc-scan" class="sc-btn sc-btn-ghost sc-btn-sm">重新扫描总线</button>
+              </div>
+              <div class="sc-topology-host">
+                <svg id="sc-dc-svg" viewBox="0 0 420 420" class="sc-dc-svg" aria-label="DroneCAN 拓扑"></svg>
+              </div>
+              <p class="sc-prose sc-prose--sm">双击节点打开参数表。红色为离线/故障。</p>
+            </section>
+            <aside class="sc-card sc-card-side">
+              <div class="sc-subcard">
+                <h4 id="sc-dc-node-title">节点详情: —</h4>
+                <dl id="sc-dc-node-meta" class="sc-dl"></dl>
+              </div>
+              <div class="sc-subcard">
+                <h4>DSDL 实时遥测</h4>
+                <div class="sc-table-wrap">
+                  <table class="sc-dsdl-table" id="sc-dsdl-table">
+                    <thead><tr><th>字段</th><th>数值</th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="sc-subcard">
+                <div class="sc-btn-row">
+                  <button type="button" id="sc-dc-write" class="sc-btn sc-btn-primary">Write Params</button>
+                  <button type="button" class="sc-btn sc-btn-ghost">进入固件升级 (OTA)</button>
+                </div>
+                <div id="sc-dc-write-progress" class="sc-progress-wrap hidden">
+                  <div class="sc-progress-label"><span>下发数据包</span><span id="sc-dc-write-pct" class="sc-mono">0%</span></div>
+                  <div class="sc-progress sc-progress--striped sc-progress--rtl">
+                    <div id="sc-dc-write-bar" class="sc-progress-fill sc-progress-fill--green" style="width:0%"></div>
+                    <div class="sc-progress-sheen sc-progress-sheen--rtl"></div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+
+      <div class="ov-panel" id="setup-panel-power">
+        <div class="power-page">
+          <div class="power-grid">
+            <section class="power-left card-dark">
+              <div class="rc-card-head">
+                <h3>动态电源监控</h3>
+                <span id="power-instance-count" class="muted">0 路电源</span>
+              </div>
+              <div class="power-topology-wrap">
+                <svg id="power-topology-svg" viewBox="0 0 720 150" aria-label="动力汇流拓扑"></svg>
+                <div id="power-risk-banner" class="power-risk-banner hidden">单路供电风险 ⚠️</div>
+              </div>
+              <div id="power-cards" class="power-cards"></div>
+            </section>
+
+            <section class="power-right card-dark">
+              <div class="rc-card-head">
+                <h3>自适应报警阈值设置</h3>
+              </div>
+              <div class="power-failsafe-block">
+                <label for="power-logic-select">双路低压逻辑</label>
+                <select id="power-logic-select">
+                  <option value="any">逻辑A：任意一路低压触发保护</option>
+                  <option value="all">逻辑B：双路同时低压才触发</option>
+                </select>
+              </div>
+              <div class="power-failsafe-block">
+                <label for="power-cells-input">电池串数 (S)</label>
+                <input id="power-cells-input" type="number" value="12" min="3" max="16" step="1">
+              </div>
+              <div class="power-failsafe-block">
+                <label for="power-warn-slider">一级低压阈值 (V)</label>
+                <input id="power-warn-slider" type="range" min="30" max="60" value="44.4" step="0.1">
+                <div id="power-warn-text" class="muted">44.4V</div>
+              </div>
+              <div class="power-failsafe-block">
+                <label for="power-crit-slider">二级低压阈值 (V)</label>
+                <input id="power-crit-slider" type="range" min="30" max="60" value="42.0" step="0.1">
+                <div id="power-crit-text" class="muted">42.0V</div>
+              </div>
+              <div class="power-failsafe-block">
+                <label for="power-fs-low-act">低压保护动作 BATT_FS_LOW_ACT</label>
+                <select id="power-fs-low-act">
+                  <option value="0">0 — 仅警告</option>
+                  <option value="1">1 — Land 降落</option>
+                  <option value="2" selected>2 — RTL 返航</option>
+                  <option value="3">3 — SmartRTL / RTL</option>
+                  <option value="4">4 — Terminate（终止）</option>
+                </select>
+              </div>
+              <div id="power-batt2-panel" class="power-batt2-panel hidden">
+                <h4 class="power-subhead">第二路 BATT2（需 BATT2_MONITOR 已启用）</h4>
+                <div class="power-failsafe-block">
+                  <label for="power-cells-input-2">电池串数 (S)</label>
+                  <input id="power-cells-input-2" type="number" value="12" min="3" max="16" step="1">
+                </div>
+                <div class="power-failsafe-block">
+                  <label for="power-warn-slider-2">一级低压阈值 (V)</label>
+                  <input id="power-warn-slider-2" type="range" min="30" max="60" value="44.4" step="0.1">
+                  <div id="power-warn-text-2" class="muted">44.4V</div>
+                </div>
+                <div class="power-failsafe-block">
+                  <label for="power-crit-slider-2">二级低压阈值 (V)</label>
+                  <input id="power-crit-slider-2" type="range" min="30" max="60" value="42.0" step="0.1">
+                  <div id="power-crit-text-2" class="muted">42.0V</div>
+                </div>
+                <div class="power-failsafe-block">
+                  <label for="power-fs-low-act-2">低压保护 BATT2_FS_LOW_ACT</label>
+                  <select id="power-fs-low-act-2">
+                    <option value="0">0 — 仅警告</option>
+                    <option value="1">1 — Land</option>
+                    <option value="2" selected>2 — RTL</option>
+                    <option value="3">3 — SmartRTL / RTL</option>
+                    <option value="4">4 — Terminate</option>
+                  </select>
+                </div>
+              </div>
+              <div id="power-batt3-panel" class="power-batt2-panel hidden">
+                <h4 class="power-subhead">第三路 BATT3</h4>
+                <div class="power-failsafe-block">
+                  <label for="power-cells-input-3">电池串数 (S)</label>
+                  <input id="power-cells-input-3" type="number" value="12" min="3" max="16" step="1">
+                </div>
+                <div class="power-failsafe-block">
+                  <label for="power-warn-slider-3">一级低压阈值 (V)</label>
+                  <input id="power-warn-slider-3" type="range" min="30" max="60" value="44.4" step="0.1">
+                  <div id="power-warn-text-3" class="muted">44.4V</div>
+                </div>
+                <div class="power-failsafe-block">
+                  <label for="power-crit-slider-3">二级低压阈值 (V)</label>
+                  <input id="power-crit-slider-3" type="range" min="30" max="60" value="42.0" step="0.1">
+                  <div id="power-crit-text-3" class="muted">42.0V</div>
+                </div>
+                <div class="power-failsafe-block">
+                  <label for="power-fs-low-act-3">低压保护 BATT3_FS_LOW_ACT</label>
+                  <select id="power-fs-low-act-3">
+                    <option value="0">0 — 仅警告</option>
+                    <option value="1">1 — Land</option>
+                    <option value="2" selected>2 — RTL</option>
+                    <option value="3">3 — SmartRTL / RTL</option>
+                    <option value="4">4 — Terminate</option>
+                  </select>
+                </div>
+              </div>
+              <div class="power-failsafe-block power-write-actions">
+                <button id="power-write-params-btn" type="button">一键写入飞控</button>
+                <p id="power-write-status" class="muted power-write-status"></p>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div class="ov-panel" id="setup-panel-sensors">
+        <div class="sc-page cal-tokens" data-active-module="accel">
+          <nav class="sc-breadcrumb" aria-label="传感器校准导航">
+            <span>初始设置</span>
+            <span class="sc-bc-sep">›</span>
+            <span>传感器校准</span>
+            <span class="sc-bc-sep">›</span>
+            <span id="sc-breadcrumb-leaf">加速度计校准 (IMU)</span>
+          </nav>
+
+          <div class="sc-module-tabs" role="tablist" aria-label="传感器校准子模块">
+            <button type="button" class="sc-mod-tab active" role="tab" aria-selected="true" data-sc-module="accel">加速度计</button>
+            <button type="button" class="sc-mod-tab" role="tab" aria-selected="false" data-sc-module="compass">罗盘</button>
+          </div>
+
+          <!-- 模块一：加速度计 -->
+          <div id="sc-module-accel" class="sc-module-panel active" role="tabpanel">
+            <div class="sc-split sc-split-35">
+              <section class="sc-card sc-card-visual">
+                <div class="sc-card-head">
+                  <h3>3D 机体姿态向导</h3>
+                  <span id="sc-accel-hint" class="sc-hint sc-hint--amber sc-breathe-wrap">请将飞机水平静置在桌面</span>
+                </div>
+                <div class="sc-visual-stage">
+                  <div id="sc-drone-scene" class="sc-drone-scene sc-accel-canvas-wrap" data-step="level">
+                    <canvas id="sc-accel-canvas-3d" width="400" height="280" aria-label="固定翼三轴校准三维示意"></canvas>
+                    <div class="sc-arrow-legend" aria-hidden="true">
+                      <span class="sc-ar sc-ar-up" data-axis-ref="up">▲ 向上</span>
+                      <span class="sc-ar sc-ar-down" data-axis-ref="down">▼ 向下</span>
+                      <span class="sc-ar sc-ar-left" data-axis-ref="left">◄ 向左</span>
+                      <span class="sc-ar sc-ar-right" data-axis-ref="right">► 向右</span>
+                      <span class="sc-ar sc-ar-spin" data-axis-ref="back">⟲ 倒置</span>
+                    </div>
+                    <div id="sc-accel-particles" class="sc-particles" hidden></div>
+                  </div>
+                </div>
+                <div class="sc-telemetry-row">
+                  <span class="sc-tlabel">实时传感器</span>
+                  <span class="sc-mono">AccX: <strong id="sc-acc-x">0.00</strong>g</span>
+                  <span class="sc-mono">AccY: <strong id="sc-acc-y">0.00</strong>g</span>
+                  <span class="sc-mono">AccZ: <strong id="sc-acc-z">1.00</strong>g</span>
+                  <span class="sc-mono sc-gtotal">|G|: <strong id="sc-acc-g">1.000</strong>g</span>
+                </div>
+              </section>
+
+              <aside class="sc-card sc-card-side">
+                <div class="sc-subcard">
+                  <h4>1. 基础校准选项</h4>
+                  <label class="sc-field">
+                    <span>飞控安装朝向</span>
+                    <select id="sc-orient-select">
+                      <option value="ROTATION_NONE" selected>ROTATION_NONE</option>
+                      <option value="ROTATION_YAW_90">ROTATION_YAW_90</option>
+                      <option value="ROTATION_YAW_180">ROTATION_YAW_180</option>
+                      <option value="ROTATION_YAW_270">ROTATION_YAW_270</option>
+                    </select>
+                  </label>
+                  <label class="sc-field">
+                    <span>校准精度要求</span>
+                    <select id="sc-precision-select">
+                      <option value="standard">标准</option>
+                      <option value="industrial" selected>工业级 (高精度)</option>
+                    </select>
+                  </label>
+                  <p id="sc-accel-live" class="sc-prose sc-prose--sm sc-mono" style="margin-top:10px"></p>
+                  <button type="button" id="sc-ahrs-apply" class="sc-btn sc-btn-ghost sc-btn-sm sc-btn-block">
+                    将安装朝向写入 AHRS_ORIENT
+                  </button>
+                </div>
+                <div class="sc-subcard">
+                  <h4>2. 六面校准状态</h4>
+                  <ul id="sc-six-face-list" class="sc-face-grid" aria-label="六面进度"></ul>
+                </div>
+                <div class="sc-subcard">
+                  <h4>3. 校准控制</h4>
+                  <div class="sc-btn-row">
+                    <button type="button" id="sc-accel-start" class="sc-btn sc-btn-primary">开始校准</button>
+                    <button type="button" id="sc-accel-abort" class="sc-btn sc-btn-ghost" disabled>中止</button>
+                  </div>
+                  <button type="button" id="sc-accel-measure" class="sc-btn sc-btn-accent sc-btn-block" disabled>保存当前位置 (Tap to Measure)</button>
+                  <div class="sc-progress-wrap">
+                    <div class="sc-progress-label"><span>进度</span><span id="sc-accel-progress-text">0% (步骤 0/6)</span></div>
+                    <div class="sc-progress sc-progress--striped" aria-hidden="true">
+                      <div id="sc-accel-progress-bar" class="sc-progress-fill sc-progress-fill--green" style="width:0%"></div>
+                      <div class="sc-progress-sheen"></div>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+
+          <!-- 模块二：罗盘 -->
+          <div id="sc-module-compass" class="sc-module-panel" role="tabpanel" hidden>
+            <div class="sc-compass-status-bar sc-card sc-card--bar">
+              <div class="sc-bar-item"><span>罗盘 1 (内置):</span> <span id="sc-mag1-health" class="sc-pill sc-pill-ok">健康</span></div>
+              <div class="sc-bar-item"><span>罗盘 2 (外置-GPS):</span> <span id="sc-mag2-health" class="sc-pill sc-pill-ok">健康</span></div>
+              <div class="sc-bar-item"><span>外部电磁干扰:</span> <span id="sc-mag-interference" class="sc-mono">2%</span> <span class="sc-pill sc-pill-ok">极低</span></div>
+            </div>
+            <div class="sc-split sc-split-35">
+              <section class="sc-card">
+                <div class="sc-sphere-row">
+                  <div class="sc-sphere-box">
+                    <canvas id="sc-mag-canvas-1" width="340" height="320" aria-label="罗盘 1 采样球"></canvas>
+                    <div class="sc-sphere-cap"><span>罗盘 1 拟合</span><span id="sc-mag-samples-1" class="sc-mono">采样点: 0</span></div>
+                  </div>
+                  <div class="sc-sphere-box">
+                    <canvas id="sc-mag-canvas-2" width="340" height="320" aria-label="罗盘 2 采样球"></canvas>
+                    <div class="sc-sphere-cap"><span>罗盘 2 拟合</span><span id="sc-mag-samples-2" class="sc-mono">采样点: 0</span></div>
+                  </div>
+                </div>
+                <div class="sc-fitness-row sc-mono">
+                  拟合偏差 Fitness: 罗盘1 <span id="sc-fit-1">—</span> / 罗盘2 <span id="sc-fit-2">—</span>
+                </div>
+              </section>
+              <aside class="sc-card sc-card-side">
+                <div class="sc-subcard">
+                  <h4>1. 罗盘参数</h4>
+                  <p id="sc-compass-live" class="sc-prose sc-prose--sm sc-mono"></p>
+                  <label class="sc-check"><input type="checkbox" id="sc-mag1-en" checked> 罗盘 1 启用</label>
+                  <label class="sc-check"><input type="checkbox" id="sc-mag1-dec" checked> 自动适应偏角</label>
+                  <label class="sc-check"><input type="checkbox" id="sc-mag2-en" checked> 罗盘 2 启用</label>
+                  <label class="sc-check"><input type="checkbox" id="sc-mag2-ext" checked> 外部指向 (External)</label>
+                </div>
+                <div class="sc-subcard">
+                  <h4>2. 动作与向导</h4>
+                  <p class="sc-prose">请在空旷无金属干扰处，手持机体做 “8 字形”或全轴翻转，收集地磁数据。</p>
+                  <div class="sc-btn-row">
+                    <button type="button" id="sc-compass-start" class="sc-btn sc-btn-primary">开始在线校准</button>
+                    <button type="button" id="sc-compass-reset" class="sc-btn sc-btn-ghost">重置</button>
+                  </div>
+                </div>
+                <div class="sc-subcard">
+                  <h4>3. 多罗盘进度</h4>
+                  <div class="sc-progress-wrap">
+                    <div class="sc-progress-label"><span>罗盘 1</span><span id="sc-mag-p1-label" class="sc-mono">0% (待机)</span></div>
+                    <div class="sc-progress sc-progress--striped"><div id="sc-mag-p1-bar" class="sc-progress-fill sc-progress-fill--green" style="width:0%"></div><div class="sc-progress-sheen"></div></div>
+                  </div>
+                  <div class="sc-progress-wrap">
+                    <div class="sc-progress-label"><span>罗盘 2</span><span id="sc-mag-p2-label" class="sc-mono">0% (待机)</span></div>
+                    <div class="sc-progress sc-progress--striped"><div id="sc-mag-p2-bar" class="sc-progress-fill sc-progress-fill--green" style="width:0%"></div><div class="sc-progress-sheen"></div></div>
+                  </div>
+                  <p id="sc-compass-toast" class="sc-toast sc-toast--idle" role="status"></p>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="view-config-debug" class="main-view placeholder-view">
+  <div class="placeholder-content">配置调试（占位）</div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script src="JS/core/globals.js" defer></script>
+<script src="JS/ui/status-messages.js" defer></script>
+<script src="JS/core/mavlink.js" defer></script>
+<script src="JS/services/serial.js" defer></script>
+<script src="JS/ui/hud-map-tabs.js" defer></script>
+<script src="JS/ui/quick-grid.js" defer></script>
+<script src="JS/ui/splitter.js" defer></script>
+<script src="JS/ui/rc-setup.js" defer></script>
+<script src="JS/ui/airframe-setup.js" defer></script>
+<script src="JS/ui/motor-maps.js" defer></script>
+<script src="JS/ui/motor-setup.js" defer></script>
+<script src="JS/ui/power-setup.js" defer></script>
+<script src="JS/ui/accel-calibration.js" defer></script>
+<script src="JS/ui/compass-calibration.js" defer></script>
+<script src="JS/ui/sensor-calibration.js" defer></script>
+<script src="JS/ui/dronecan-setup.js" defer></script>
+
+</body>
+</html>

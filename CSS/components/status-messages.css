@@ -1,0 +1,232 @@
+/* GCS STATUSTEXT 消息栏 — 深色主题，等级仅用文字颜色 + Critical 行背景 */
+
+.log-tab {
+  position: relative;
+}
+
+.log-tab-badge {
+  position: absolute;
+  top: -4px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ff6b4a 0%, #c92a2a 100%);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.log-panel.log-panel--messages {
+  display: none;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  background: #0e1116;
+  color: #c8cdd5;
+}
+
+.log-panel.log-panel--messages.active {
+  display: flex;
+}
+
+.gcs-messages {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+  font-size: 12px;
+}
+
+.gcs-msg-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  background: #151a21;
+  border-bottom: 1px solid #252b35;
+  flex-shrink: 0;
+}
+
+.gcs-msg-filter {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+/* Critical — 红 */
+.gcs-msg-filter[data-level="critical"] {
+  color: #ff8a94;
+  border-color: rgba(255, 71, 87, 0.55);
+  background: rgba(255, 71, 87, 0.12);
+}
+
+.gcs-msg-filter[data-level="critical"].active {
+  color: #fff;
+  border-color: #ff4757;
+  background: rgba(255, 71, 87, 0.42);
+  box-shadow: 0 0 0 1px rgba(255, 71, 87, 0.25);
+}
+
+.gcs-msg-filter[data-level="critical"]:not(.active) {
+  opacity: 0.38;
+}
+
+/* Warning — 橙 */
+.gcs-msg-filter[data-level="warning"] {
+  color: #ffc048;
+  border-color: rgba(255, 159, 67, 0.55);
+  background: rgba(255, 159, 67, 0.12);
+}
+
+.gcs-msg-filter[data-level="warning"].active {
+  color: #1a1208;
+  border-color: #ff9f43;
+  background: rgba(255, 159, 67, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 159, 67, 0.3);
+}
+
+.gcs-msg-filter[data-level="warning"]:not(.active) {
+  opacity: 0.38;
+}
+
+/* Info — 蓝 */
+.gcs-msg-filter[data-level="info"] {
+  color: #74b9ff;
+  border-color: rgba(84, 160, 255, 0.55);
+  background: rgba(84, 160, 255, 0.1);
+}
+
+.gcs-msg-filter[data-level="info"].active {
+  color: #fff;
+  border-color: #54a0ff;
+  background: rgba(84, 160, 255, 0.4);
+  box-shadow: 0 0 0 1px rgba(84, 160, 255, 0.25);
+}
+
+.gcs-msg-filter[data-level="info"]:not(.active) {
+  opacity: 0.38;
+}
+
+/* Debug — 灰 */
+.gcs-msg-filter[data-level="debug"] {
+  color: #a4b0be;
+  border-color: rgba(131, 149, 167, 0.45);
+  background: rgba(87, 101, 116, 0.15);
+}
+
+.gcs-msg-filter[data-level="debug"].active {
+  color: #eceff4;
+  border-color: #8395a7;
+  background: rgba(131, 149, 167, 0.35);
+  box-shadow: 0 0 0 1px rgba(131, 149, 167, 0.2);
+}
+
+.gcs-msg-filter[data-level="debug"]:not(.active) {
+  opacity: 0.38;
+}
+
+.gcs-msg-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0;
+  background: #0e1116;
+}
+
+.gcs-msg-row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  align-items: start;
+  column-gap: 14px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  line-height: 1.4;
+  background: transparent;
+}
+
+.gcs-msg-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.gcs-msg-body {
+  word-break: break-word;
+  font-size: 12px;
+  min-width: 0;
+}
+
+/* 等级：时间 + 正文统一文字色 */
+.gcs-msg-row--critical {
+  background: rgba(255, 71, 87, 0.14);
+}
+
+.gcs-msg-row--critical .gcs-msg-time,
+.gcs-msg-row--critical .gcs-msg-body {
+  color: #ff6b7a;
+}
+
+.gcs-msg-row--critical .gcs-msg-body {
+  font-weight: 700;
+}
+
+.gcs-msg-row--warning .gcs-msg-time,
+.gcs-msg-row--warning .gcs-msg-body {
+  color: #ffc048;
+}
+
+.gcs-msg-row--warning .gcs-msg-body {
+  font-weight: 600;
+}
+
+.gcs-msg-row--info .gcs-msg-time,
+.gcs-msg-row--info .gcs-msg-body {
+  color: #74b9ff;
+}
+
+.gcs-msg-row--debug .gcs-msg-time,
+.gcs-msg-row--debug .gcs-msg-body {
+  color: #8395a7;
+}
+
+.gcs-msg-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  background: #151a21;
+  border-top: 1px solid #252b35;
+  font-size: 11px;
+  color: #7d8694;
+}
+
+.gcs-msg-conn.gcs-msg-conn--ok {
+  color: #26de81;
+}
+
+.gcs-msg-conn.gcs-msg-conn--wait {
+  color: #fed330;
+}
+
+.gcs-msg-conn.gcs-msg-conn--err {
+  color: #ff4757;
+}
+
+.gcs-msg-status-right {
+  display: flex;
+  gap: 14px;
+}
