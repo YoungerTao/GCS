@@ -23,6 +23,12 @@
   padding-bottom: 16px;
 }
 
+/* 传感器页：统一盒模型，避免 width:100% 按钮/进度条 + border 撑破右侧卡片 */
+#setup-panel-sensors .sc-page,
+#setup-panel-sensors .sc-page * {
+  box-sizing: border-box;
+}
+
 .sc-breadcrumb {
   display: flex;
   align-items: center;
@@ -76,6 +82,51 @@
   display: block;
 }
 
+/* 传感器页在 ov-main 内纵向铺满；避免 grid 子项 height:100% 未解析导致左侧/canvas 高度坍塌 */
+#setup-panel-sensors.ov-panel.active {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+#setup-panel-sensors .sc-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: 2px;
+  padding-bottom: 8px;
+}
+
+#setup-panel-sensors .sc-breadcrumb,
+#setup-panel-sensors .sc-module-tabs {
+  flex-shrink: 0;
+}
+
+/* 传感器页：收紧顶部留白，主内容区整体上移，减少纵向挤压 */
+#setup-panel-sensors .sc-breadcrumb {
+  padding: 6px 4px 8px;
+}
+
+#setup-panel-sensors .sc-module-tabs {
+  margin-bottom: 8px;
+}
+
+#setup-panel-sensors #sc-module-accel.sc-module-panel.active,
+#setup-panel-sensors #sc-module-compass.sc-module-panel.active {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#setup-panel-sensors #sc-module-compass.sc-module-panel.active .sc-split.sc-split-35 {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .sc-split {
   display: grid;
   gap: 14px;
@@ -96,6 +147,145 @@
   .sc-split-25 {
     grid-template-columns: 1fr;
   }
+
+  /* 单列时两行网格，勿用单行 1fr 误约束 */
+  #sc-module-accel .sc-split.sc-split-35 {
+    grid-template-rows: minmax(260px, auto) auto;
+  }
+}
+
+/* 加速度计：左右两栏拉伸对齐；行高须 ≥ 左右列内容，否则右侧进度条会画在卡片圆角背景外 */
+#sc-module-accel .sc-split.sc-split-35 {
+  flex: 1 1 auto;
+  min-height: min-content;
+  align-items: stretch;
+  grid-template-rows: minmax(min-content, 1fr);
+}
+
+#sc-module-accel .sc-card-visual {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  align-self: stretch;
+}
+
+#sc-module-accel .sc-card-visual .sc-card-head {
+  flex-shrink: 0;
+}
+
+#sc-module-accel aside.sc-card-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: min-content;
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  /* 勿用 overflow-x:hidden：会触发规范中 overflow-y→auto，出现右侧竖向滚动条 */
+  overflow-x: clip;
+  overflow-y: visible;
+  padding: 12px 14px 18px;
+}
+
+#sc-module-accel .sc-split.sc-split-35 > .sc-card,
+#sc-module-accel .sc-split.sc-split-35 > aside.sc-card-side {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+#sc-module-accel aside.sc-card-side .sc-subcard {
+  margin-bottom: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+#sc-module-accel aside.sc-card-side .sc-face-grid {
+  min-width: 0;
+}
+
+#sc-module-accel aside.sc-card-side .sc-face-item {
+  min-width: 0;
+  word-break: break-word;
+}
+
+#sc-module-accel aside.sc-card-side .sc-progress-fill {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+#sc-module-accel aside.sc-card-side .sc-progress-wrap {
+  max-width: 100%;
+  flex-shrink: 0;
+  margin-top: 2px;
+  padding-bottom: 2px;
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+#sc-module-accel aside.sc-card-side .sc-progress-label {
+  gap: 10px;
+  min-width: 0;
+}
+
+#sc-module-accel aside.sc-card-side .sc-progress-label > span:last-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+#sc-module-accel aside.sc-card-side .sc-progress {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+#sc-module-accel aside.sc-card-side .sc-btn-block,
+#sc-module-accel aside.sc-card-side .sc-btn-row .sc-btn {
+  max-width: 100%;
+  min-width: 0;
+}
+
+#sc-module-accel aside.sc-card-side .sc-btn-block {
+  white-space: normal;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+#sc-module-accel aside.sc-card-side .sc-field select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+#sc-module-accel aside.sc-card-side .sc-btn-row {
+  min-width: 0;
+}
+
+#sc-module-accel .sc-visual-stage {
+  flex: 1 1 auto;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+#sc-module-accel #sc-drone-scene.sc-drone-scene {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+#sc-module-accel .sc-telemetry-row {
+  flex-shrink: 0;
 }
 
 .sc-card {
@@ -182,7 +372,7 @@
 .sc-drone-scene {
   position: relative;
   width: 100%;
-  min-height: 280px;
+  min-height: 260px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -191,9 +381,21 @@
 .sc-accel-canvas-wrap #sc-accel-canvas-3d {
   display: block;
   width: 100%;
-  max-width: 440px;
+  max-width: none;
   height: auto;
+  min-height: 260px;
+  aspect-ratio: 16 / 10;
   border-radius: 10px;
+}
+
+/* 覆盖上一段：加速度计页 canvas 填满等高栏内的 3D 区 */
+#sc-module-accel .sc-accel-canvas-wrap #sc-accel-canvas-3d {
+  height: 100%;
+  min-height: 260px;
+  max-height: none;
+  aspect-ratio: unset;
+  flex: 1 1 auto;
+  align-self: stretch;
 }
 
 .sc-drone-pivot {
@@ -296,17 +498,31 @@
 }
 
 .sc-arrow-legend {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 10px;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px 12px;
   font-size: 11px;
   color: var(--sc-muted);
   pointer-events: none;
+}
+
+/* 与 3D 画布分离，避免姿态旋转时与 WebGL 区域叠字、格子互挤 */
+#sc-module-accel .sc-arrow-legend {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px 8px;
+  margin: 0;
+  border-top: 1px solid rgba(42, 49, 72, 0.9);
+  background: linear-gradient(180deg, rgba(15, 18, 28, 0.92) 0%, rgba(15, 18, 28, 0.35) 100%);
+  z-index: 1;
+}
+
+#sc-module-accel .sc-arrow-legend .sc-ar {
+  flex: 0 1 auto;
+  min-width: min(100%, 5.5rem);
+  text-align: center;
+  box-sizing: border-box;
 }
 
 .sc-ar {
@@ -317,17 +533,17 @@
   transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
 }
 
-.sc-drone-scene[data-step="up"] .sc-ar-up,
-.sc-drone-scene[data-step="down"] .sc-ar-down,
-.sc-drone-scene[data-step="left"] .sc-ar-left,
-.sc-drone-scene[data-step="right"] .sc-ar-right,
-.sc-drone-scene[data-step="back"] .sc-ar-spin {
+#sc-module-accel .sc-visual-stage[data-step="up"] .sc-ar-up,
+#sc-module-accel .sc-visual-stage[data-step="down"] .sc-ar-down,
+#sc-module-accel .sc-visual-stage[data-step="left"] .sc-ar-left,
+#sc-module-accel .sc-visual-stage[data-step="right"] .sc-ar-right,
+#sc-module-accel .sc-visual-stage[data-step="back"] .sc-ar-spin {
   color: var(--sc-amber);
   border-color: rgba(245, 158, 11, 0.5);
   animation: sc-breathe 2s ease-in-out infinite;
 }
 
-.sc-drone-scene[data-step="level"] .sc-ar-up {
+#sc-module-accel .sc-visual-stage[data-step="level"] .sc-ar-up {
   color: var(--sc-amber);
   border-color: rgba(245, 158, 11, 0.5);
   animation: sc-breathe 2s ease-in-out infinite;
@@ -570,6 +786,7 @@
   background: #0a0e18;
   border: 1px solid var(--sc-border);
   overflow: hidden;
+  contain: paint;
 }
 
 .sc-progress-fill {
@@ -662,6 +879,33 @@
 .sc-prose--sm {
   font-size: 11px;
   margin-top: 8px;
+}
+
+.sc-progress-wrap--muted {
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.sc-sphere-box--muted {
+  pointer-events: none;
+}
+
+.sc-sphere-box--muted canvas {
+  opacity: 0.48;
+}
+
+.sc-sphere-cap .sc-mag-cap--on,
+.sc-progress-label .sc-mag-p-title--on,
+label.sc-check .sc-mag-p-title--on {
+  color: var(--sc-green);
+  font-weight: 600;
+}
+
+.sc-sphere-cap .sc-mag-cap--off,
+.sc-progress-label .sc-mag-p-title--off,
+label.sc-check .sc-mag-p-title--off {
+  color: var(--sc-muted);
+  font-weight: 500;
 }
 
 .sc-sphere-row {

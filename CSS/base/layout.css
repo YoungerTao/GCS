@@ -233,6 +233,13 @@ body {
   color: #fff;
 }
 
+/* 初始设置作为主视图 flex 子项时，用 flex 占满剩余高度（仅 height:100% 时子面板链易断裂） */
+#view-initial-setup.main-view.active > .ov-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
 .ov-top-alert {
   grid-column: 1 / -1;
   display: flex;
@@ -311,22 +318,123 @@ body {
   min-width: 0;
   min-height: 0;
   padding: 12px;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .ov-panel {
   display: none;
-  height: 100%;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .ov-panel.active {
   display: block;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.ov-cards {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(210px, 1fr));
+/* 仅概览：占满 .ov-main 剩余高度；各窗体内容在 .ov-card-scroll 内滚动，不撑破卡片 */
+.ov-panel#setup-panel-overview.active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ov-cards.ov-cards-deck {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.ov-cards-deck {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
   gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ov-cards-main-grid {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-content: stretch;
+  overflow: hidden;
+}
+
+.ov-cards-main-grid > .ov-card {
+  min-width: 0;
+  min-height: 0;
+  align-self: stretch;
+  justify-self: stretch;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  z-index: 0;
+}
+
+.ov-cards-sensor-rail {
+  flex: 0 0 clamp(232px, 26%, 340px);
+  width: clamp(232px, 26%, 340px);
+  min-width: 220px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  align-self: stretch;
+  overflow: hidden;
+}
+
+.ov-cards-sensor-rail > .ov-card-sensors {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  z-index: 0;
+}
+
+.ov-card-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 2px;
+  overflow-wrap: anywhere;
+  word-wrap: break-word;
+}
+
+.ov-card-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ov-card-scroll::-webkit-scrollbar-thumb {
+  background: #3d4666;
+  border-radius: 999px;
+}
+
+.ov-card-scroll::-webkit-scrollbar-track {
+  background: #15192a;
+  border-radius: 999px;
+}
+
+.ov-cards-sensor-rail .ov-sensor-overview {
+  min-height: 0;
+}
+
+.ov-cards-deck .ov-card > h4 {
+  flex-shrink: 0;
 }
 
 .ov-card {
@@ -340,8 +448,9 @@ body {
 
 .ov-card:hover {
   border-color: rgba(99, 115, 255, 0.65);
-  box-shadow: 0 0 0 1px rgba(99, 115, 255, 0.18), 0 0 20px rgba(99, 115, 255, 0.12);
-  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(99, 115, 255, 0.18), 0 0 16px rgba(99, 115, 255, 0.1);
+  /* 禁用 translateY：在密网格里上移会产生与相邻窗体重叠的观感 */
+  transform: none;
 }
 
 .ov-card h4 {
@@ -367,6 +476,59 @@ body {
 .ov-kv span:last-child {
   color: #ecf1ff;
   text-align: right;
+}
+
+.ov-sensor-block {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #262c44;
+}
+
+.ov-sensor-block:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.ov-sensor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.ov-sensor-head .ov-sensor-title {
+  color: #8a94a6;
+  font-weight: 600;
+}
+
+.ov-sensor-list {
+  margin: 0;
+  padding: 0 0 0 14px;
+  list-style: disc;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #dce3f5;
+}
+
+.ov-sensor-list li {
+  margin: 3px 0;
+}
+
+.ov-sensor-list li[title] {
+  cursor: help;
+}
+
+.ov-sensor-list .ov-sensor-model {
+  color: #f0f4ff;
+  font-weight: 600;
+}
+
+.ov-sensor-list .ov-sensor-meta {
+  color: #7d89a8;
+  font-weight: 400;
 }
 
 .ov-progress {
@@ -417,8 +579,18 @@ body {
 }
 
 @media (max-width: 1400px) {
-  .ov-cards {
-    grid-template-columns: repeat(3, minmax(210px, 1fr));
+  .ov-cards-deck {
+    flex-direction: column;
+  }
+
+  .ov-cards-sensor-rail {
+    flex: none;
+    width: 100%;
+    max-width: none;
+  }
+
+  .ov-cards-main-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -437,8 +609,8 @@ body {
   .ov-sidebar-header {
     grid-column: 1 / -1;
   }
-  .ov-cards {
-    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  .ov-cards-main-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

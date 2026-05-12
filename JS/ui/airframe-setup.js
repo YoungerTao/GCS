@@ -106,6 +106,8 @@
     const orientEl = document.getElementById("af-orient-state");
     if (!frameEl || !frameStateEl || !mixerEl || !orientEl) return;
 
+    const frameKeys = getFrameParamKeys();
+
     if (state.frameMap) {
       frameEl.textContent = `${state.frameMap.name} (CLASS=${state.frameClass}, TYPE=${state.frameType})`;
       frameStateEl.textContent = "🟢 Active";
@@ -117,13 +119,34 @@
       frameStateEl.className = "af-chip af-chip-danger";
       mixerEl.textContent = "未加载";
     } else {
-      frameEl.textContent = "未指定 (Undefined)";
-      frameStateEl.textContent = "⚠️ Unconfigured";
+      frameEl.textContent = "飞控尚未下发机架参数";
+      frameStateEl.textContent = "⚠️ 无参数";
       frameStateEl.className = "af-chip af-chip-danger";
       mixerEl.textContent = "未加载";
     }
 
     orientEl.textContent = orientByValue(state.ahrsOrient).key;
+
+    const ovEl = document.getElementById("ov-airframe-type");
+    if (ovEl) {
+      if (state.frameMap) {
+        ovEl.textContent = `${state.frameMap.name}（飞控）`;
+        ovEl.className = "ok";
+        ovEl.title = frameKeys
+          ? `飞控参数：${frameKeys.classKey}=${state.frameClass}, ${frameKeys.typeKey}=${state.frameType}`
+          : "飞控 FRAME_CLASS / FRAME_TYPE";
+      } else if (state.frameClass != null && state.frameType != null) {
+        const kc = frameKeys ? frameKeys.classKey : "FRAME_CLASS";
+        const kt = frameKeys ? frameKeys.typeKey : "FRAME_TYPE";
+        ovEl.textContent = `CLASS ${state.frameClass} / TYPE ${state.frameType}（飞控·地面站未匹配混控名）`;
+        ovEl.className = "warn";
+        ovEl.title = `飞控参数：${kc}=${state.frameClass}, ${kt}=${state.frameType}`;
+      } else {
+        ovEl.textContent = "等待飞控下发机架参数（需参数列表含 FRAME_CLASS / FRAME_TYPE）";
+        ovEl.className = "danger pulse";
+        ovEl.title = "连接飞控并加载参数列表后，此处显示飞控内配置的机架类型";
+      }
+    }
   }
 
   function renderFrameList() {

@@ -38,6 +38,10 @@ function setConnectionUI(state) {
 }
 
 async function fetchSystemComPorts() {
+  const now = Date.now();
+  if (typeof window._comBridgeBackoffUntil === "number" && now < window._comBridgeBackoffUntil) {
+    return Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : [];
+  }
   const urls = [
     "http://127.0.0.1:8765/com-ports",
     "http://localhost:8765/com-ports"
@@ -50,6 +54,8 @@ async function fetchSystemComPorts() {
       const ports = Array.isArray(data.ports) ? data.ports : [];
       if (ports.length || data.ports) {
         window._comBridgeOnline = true;
+        window._comBridgeBackoffUntil = 0;
+        window._lastFetchedSystemPorts = ports;
         return ports;
       }
     } catch (e) {
@@ -57,7 +63,9 @@ async function fetchSystemComPorts() {
     }
   }
   window._comBridgeOnline = false;
-  return [];
+  window._comBridgeBackoffUntil = Date.now() + 25000;
+  window._lastFetchedSystemPorts = window._lastFetchedSystemPorts || [];
+  return window._lastFetchedSystemPorts;
 }
 
 function portLabel(p, idx) {
@@ -333,7 +341,8 @@ async function connect() {
 
     const port = selectedPort;
     if (!port) throw new Error("未获取到串口端口对象（可能已取消权限弹窗）");
-    await port.open({ baudRate: 57600 });
+    /** 与常见 Pixhawk/ChibiOS USB 默认 115200 对齐；若仍无 COMMAND_ACK 可改为与飞控 SERIAL*_BAUD 一致。 */
+    await port.open({ baudRate: 115200 });
 
     window.port = port;
     reader = port.readable.getReader();
@@ -341,8 +350,9 @@ async function connect() {
     window.reader = reader;
     window.writer = writer;
 
-    log("✅ 已连接串口");
+    log("✅ 已连接串口（115200 8N1，与多数飞控 USB 一致）");
 
+    window._readLoopLostWarned = false;
     setInterval(sendHeartbeat, 1000);
     readLoop();
     startTelemetryRequests();
@@ -365,13 +375,25 @@ async function connect() {
   }
 }
 
+/** 与 Mission Planner `MAVLinkInterface.generatePacket` 一致：帧头 compid 使用地面站组件 ID，勿用 0 */
+const MAV_COMP_ID_MISSIONPLANNER = 190;
+
 async function send_v2(msgid, payload, crc_extra) {
+  if (typeof window._mavlinkTxSeq !== "number" || window._mavlinkTxSeq < 0 || window._mavlinkTxSeq > 255) {
+    window._mavlinkTxSeq = 0;
+  }
+  window._mavlinkTxSeq = (window._mavlinkTxSeq + 1) & 0xff;
+
+  const srcSys = (typeof window.sysid !== "undefined" && window.sysid > 0) ? window.sysid : 1;
+
   let pkt = [
     0xFD,
     payload.length,
-    0, 0, 0,
-    255,
     0,
+    0,
+    window._mavlinkTxSeq,
+    srcSys,                    // 关键修复：使用实际 sysid
+    MAV_COMP_ID_MISSIONPLANNER & 0xff,
     msgid & 0xff,
     (msgid >> 8) & 0xff,
     (msgid >> 16) & 0xff,
@@ -383,6 +405,50 @@ async function send_v2(msgid, payload, crc_extra) {
 
   pkt.push(crc & 0xff, crc >> 8);
   await writer.write(new Uint8Array(pkt));
+
+  if (window._MAVLINK_DEBUG_TX) {
+    console.log(`[MAVLink TX] msgid=${msgid} srcSys=${srcSys} len=${payload.length}`);
+  }
+}
+
+async function sendCommandLong(
+  command,
+  p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0,
+  confirmation = 0,
+  targetSystem,
+  targetComponent,
+) {
+  if (!(window.writer || (typeof writer !== "undefined" && writer))) {
+    throw new Error("未连接串口");
+  }
+
+  const ts = targetSystem != null && Number.isFinite(Number(targetSystem)) && Number(targetSystem) > 0
+    ? Number(targetSystem) : (window.sysid || 1);
+  const tc = targetComponent != null && Number.isFinite(Number(targetComponent))
+    ? Number(targetComponent) : (window.compid || 1);
+
+  if (window._MAVLINK_DEBUG_TX) {
+    console.log(`[DEBUG sendCommandLong] cmd=${command} (PREFLIGHT_CAL=${command === 241}) p5=${p5} ts=${ts} tc=${tc}`);
+  }
+
+  const payload = [
+    ts & 0xff,
+    tc & 0xff,
+    ...u16bytes(command),
+    confirmation & 0xff,
+    ...f32bytes(p1),
+    ...f32bytes(p2),
+    ...f32bytes(p3),
+    ...f32bytes(p4),
+    ...f32bytes(p5),
+    ...f32bytes(p6),
+    ...f32bytes(p7),
+  ];
+
+  await send_v2(76, payload, 152);
+  if (window._MAVLINK_DEBUG_TX) {
+    console.log(`[DEBUG] ✅ 已成功发送 COMMAND_LONG cmd=${command} (p5=${p5})`);
+  }
 }
 
 async function sendHeartbeat() {
@@ -400,31 +466,19 @@ function u16bytes(v) {
   return [v & 0xff, (v >> 8) & 0xff];
 }
 
-// COMMAND_LONG: msgid=76, crc_extra=152
-async function sendCommandLong(command, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, confirmation = 0) {
-  if (!(window.writer || (typeof writer !== "undefined" && writer))) {
-    throw new Error("未连接串口");
-  }
-  const payload = [
-    ...f32bytes(p1),
-    ...f32bytes(p2),
-    ...f32bytes(p3),
-    ...f32bytes(p4),
-    ...f32bytes(p5),
-    ...f32bytes(p6),
-    ...f32bytes(p7),
-    ...u16bytes(command),
-    sysid || 1,      // target_system
-    compid || 1,     // target_component
-    confirmation
-  ];
-  await send_v2(76, payload, 152);
-}
+/**
+ * 加速度计六面：向飞控下发当前姿态步骤。
+ * 新固件走 MAV_CMD_ACCELCAL_VEHICLE_POS（42429）的 COMMAND_LONG，param1 为枚举值；
+ * 旧版单字节消息 id=167 已不再被 ArduPilot 处理，会导致飞控不收位姿、灯态异常。
+ * 参见 pymavlink：LEVEL=1…BACK=6，SUCCESS=16777215，FAILED=16777216。
+ */
+const MAV_CMD_ACCELCAL_VEHICLE_POS = 42429;
 
-/** ArduPilot / MAVLink: ACCELCAL_VEHICLE_POS (id 167), 单字节 position 枚举 */
-async function sendAccelcalVehiclePos(positionU8) {
+async function sendAccelcalVehiclePos(position) {
   if (!(window.writer || (typeof writer !== "undefined" && writer))) return false;
-  await send_v2(167, [positionU8 & 0xff], 106);
+  const p1 = Number(position);
+  if (!Number.isFinite(p1)) return false;
+  await sendCommandLong(MAV_CMD_ACCELCAL_VEHICLE_POS, p1, 0, 0, 0, 0, 0, 0, 0);
   return true;
 }
 
@@ -450,6 +504,10 @@ window.sendParamSet = async function sendParamSet(name, value) {
   return true;
 };
 
+function _sleepMs(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // 兼容老流控（REQUEST_DATA_STREAM）+ 新接口（SET_MESSAGE_INTERVAL）
 async function requestDataStream() {
   // 1) 老接口，部分固件仍依赖它
@@ -466,12 +524,22 @@ async function requestDataStream() {
   // param1: message id, param2: interval_us
   const intervalUs = 100000; // 10Hz
   const msgIds = [
-    0, 1, 24, 30, 33, 42, 65, 74, 77, 105, 110, 116, 129, 147, 191, 192, 253,
-    // ESC telemetry groups (MAVLink 2 extended IDs)
+    0, 1, 24, 30, 33, 42, 65, 74, 77, 105, 110, 116, 129, 132, 147, 148, 191, 192, 253,
+    // ESC telemetry groups（MAVLink 2 扩展 ID）
     11030, 11031, 11032, 11033
   ];
+  // 串口/USB 带宽有限：连续几十条 COMMAND_LONG 易拥塞导致下游 CRC 失败、UI 假死；逐条小间隔发送
+  const gapMs = 6;
   for (const msgId of msgIds) {
     await sendCommandLong(511, msgId, intervalUs);
+    await _sleepMs(gapMs);
+  }
+
+  // 显式请求 AUTOPILOT_VERSION（固件 / 板型 / UID），部分栈仅应答 MAV_CMD_REQUEST_MESSAGE
+  try {
+    await sendCommandLong(512, 148, 0, 0, 0, 0, 0, 0);
+  } catch (e) {
+    /* ignore */
   }
 }
 
@@ -493,14 +561,14 @@ function startTelemetryRequests() {
     }
   }, 1200);
 
-  // 周期重发，保证飞控持续主动推送（类似 Mission Planner）
+  // 周期重发（间隔勿过短，避免与 PARAM 流等争用串口）
   window._telemetryReqTimer = setInterval(async () => {
     try {
       await requestDataStream();
     } catch (e) {
       log(`⚠️ 周期遥测请求失败: ${e.message}`);
     }
-  }, 5000);
+  }, 12000);
 }
 
 async function loadParams() {
@@ -525,11 +593,39 @@ async function loadParams() {
 
 async function readLoop() {
   while (true) {
-    const { value } = await reader.read();
-    if (!value) continue;
-    for (let b of value) {
-      buf.push(b);
-      parse();
+    try {
+      const { value } = await reader.read();
+      if (!value) continue;
+      for (let b of value) {
+        buf.push(b);
+        parse();
+      }
+    } catch (e) {
+      const msg = String(e?.message || e || "");
+      const lost =
+        e?.name === "NetworkError" || /device has been lost|设备丢失/i.test(msg);
+      if (lost) {
+        try {
+          if (typeof reader !== "undefined" && reader && typeof reader.releaseLock === "function") {
+            reader.releaseLock();
+          }
+        } catch (_) { /* ignore */ }
+        reader = null;
+        writer = null;
+        window.reader = null;
+        window.writer = null;
+        if (!window._readLoopLostWarned) {
+          window._readLoopLostWarned = true;
+          try {
+            log("⚠️ 串口读取中断（设备已断开），请重新连接。");
+          } catch (_) { /* ignore */ }
+        }
+        try {
+          setConnectionUI("error");
+        } catch (_) { /* ignore */ }
+        return;
+      }
+      throw e;
     }
   }
 }

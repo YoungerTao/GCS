@@ -127,7 +127,7 @@
     <div class="ov-top-alert">
       <div class="ov-link-status">
         <span class="ov-dot ok"></span>
-        串口已连接 / 57600 bps
+        串口已连接 / 115200 8N1（USB 常见，占位）
       </div>
       <div class="ov-global-warning danger pulse">
         部分传感器未校准，机体未定义，禁止起飞
@@ -152,33 +152,41 @@
 
     <section class="ov-main">
       <div class="ov-panel active" id="setup-panel-overview">
-      <div class="ov-cards">
+      <div class="ov-cards ov-cards-deck">
+        <div class="ov-cards-main-grid">
         <article class="ov-card">
           <h4>载机与固件</h4>
-          <div class="ov-kv"><span>机体类型</span><span class="danger pulse">Undefined</span></div>
-          <div class="ov-kv"><span>固件版本</span><span class="ok">ArduPilot v4.6.3</span></div>
-          <div class="ov-kv"><span>飞控硬件</span><span>CubeOrange+ (STM32H7)</span></div>
-          <div class="ov-kv"><span>设备 ID</span><span class="muted">00430030-3451510...</span></div>
+          <div class="ov-card-scroll">
+          <div class="ov-kv"><span>机架类型（飞控参数）</span><span id="ov-airframe-type" class="muted" title="由飞控通过 MAVLink 参数 FRAME_CLASS / FRAME_TYPE（或 VTOL 的 Q_*）下发">未连接或未收到机架参数</span></div>
+          <div class="ov-kv"><span>固件版本</span><span id="ov-fw-version" class="muted" title="MAVLink AUTOPILOT_VERSION.flight_sw_version">等待飞控上报…</span></div>
+          <div class="ov-kv"><span>飞控硬件</span><span id="ov-board-hardware" class="muted" title="board_version 高 16 位为 ArduPilot 板型 ID">等待飞控上报…</span></div>
+          <div class="ov-kv"><span>设备 ID</span><span id="ov-device-id" class="muted" title="uid2 优先，否则 uid">等待飞控上报…</span></div>
+          </div>
         </article>
 
         <article class="ov-card">
           <h4>链路与控制</h4>
-          <div class="ov-kv"><span>数传链路</span><span class="ok">已连接 (57600 bps, 丢包 0.1%)</span></div>
+          <div class="ov-card-scroll">
+          <div class="ov-kv"><span>数传链路</span><span class="ok">已连接 (115200 bps Web Serial / USB，占位)</span></div>
           <div class="ov-kv"><span>遥控链路</span><span class="danger pulse">未连接</span></div>
           <div class="ov-kv"><span>控制信道</span><span>16 CH (SBUS)</span></div>
           <div class="ov-kv"><span>链路质量 RSSI</span><span class="muted">--</span></div>
+          </div>
         </article>
 
         <article class="ov-card">
           <h4>高精度定位</h4>
+          <div class="ov-card-scroll">
           <div class="ov-kv"><span>定位状态</span><span class="ok">3D RTK Fixed</span></div>
           <div class="ov-kv"><span>卫星数量</span><span class="ok">28 颗</span></div>
           <div class="ov-kv"><span>HDOP</span><span class="ok">0.55</span></div>
           <div class="ov-kv"><span>RTK 基准站</span><span class="ok">千寻 CORS 已连接</span></div>
+          </div>
         </article>
 
         <article class="ov-card">
           <h4>动力与电池</h4>
+          <div class="ov-card-scroll">
           <div class="ov-kv"><span>电池规格</span><span>12S LiPo (50.4V)</span></div>
           <div class="ov-kv"><span>实时电压</span><span>49.8 V (单体 4.15 V)</span></div>
           <div class="ov-kv"><span>实时电流</span><span>0.0 A</span></div>
@@ -187,39 +195,70 @@
             <span style="width:92%"></span>
           </div>
           <div class="ov-kv"><span>SOC</span><span class="ok">92%</span></div>
+          </div>
         </article>
 
         <article class="ov-card">
           <h4>飞行模式与规划</h4>
+          <div class="ov-card-scroll">
           <div class="ov-kv"><span>当前模式</span><span class="warn">Stabilize</span></div>
           <div class="ov-kv"><span>安全高度 RTL</span><span class="warn">150 m (已纠错)</span></div>
           <div class="ov-kv"><span>航点规划</span><span class="muted">未载入航线</span></div>
           <div class="ov-kv"><span>Pre-arm Check</span><span class="danger pulse">FAILED</span></div>
+          </div>
         </article>
 
         <article class="ov-card">
           <h4>安全与围栏</h4>
+          <div class="ov-card-scroll">
           <div class="ov-kv"><span>Geofence</span><span class="ok">已开启 (1000m / 120m)</span></div>
           <div class="ov-kv"><span>失控保护</span><span class="ok">RTL</span></div>
           <div class="ov-kv"><span>避障雷达</span><span class="ok">正常 (前/后/下)</span></div>
           <div class="ov-kv"><span>振动监控</span><span class="ok">正常 (&lt; 15 m/s²)</span></div>
-        </article>
-
-        <article class="ov-card">
-          <h4>IMU 与传感器健康度</h4>
-          <div class="ov-kv"><span>指南针</span><span class="danger pulse">IST8310 (未校准)</span></div>
-          <div class="ov-kv"><span>加速度计</span><span class="ok">ICM20689 (正常)</span></div>
-          <div class="ov-kv"><span>气压计</span><span class="ok">MS5611 (正常)</span></div>
-          <div class="ov-kv"><span>测距仪</span><span class="ok">TF-Luna (1.2m)</span></div>
+          </div>
         </article>
 
         <article class="ov-card">
           <h4>挂载 / 载荷状态</h4>
+          <div class="ov-card-scroll">
           <div class="ov-kv"><span>挂载设备</span><span class="ok">三轴光电吊舱</span></div>
           <div class="ov-kv"><span>工作状态</span><span class="ok">视频流正常 (1080P)</span></div>
           <div class="ov-kv"><span>抛投/点火逻辑</span><span class="ok">12V 驱动器 - Ready</span></div>
           <div class="ov-kv"><span>温度监控</span><span>32 °C</span></div>
+          </div>
         </article>
+
+        <article class="ov-card">
+          <h4>EKF / 导航健康</h4>
+          <div class="ov-card-scroll">
+          <div class="ov-kv"><span>EKF 状态</span><span class="muted">等待遥测</span></div>
+          <div class="ov-kv"><span>位置源</span><span class="muted">—</span></div>
+          <div class="ov-kv"><span>速度 / 高度融合</span><span class="muted">—</span></div>
+          <div class="ov-kv"><span>备注</span><span class="muted">可接 SYS_STATUS / 参数扩展</span></div>
+          </div>
+        </article>
+
+        <article class="ov-card">
+          <h4>日志与告警摘要</h4>
+          <div class="ov-card-scroll">
+          <div class="ov-kv"><span>STATUSTEXT</span><span class="muted">见底部消息区</span></div>
+          <div class="ov-kv"><span>严重告警</span><span class="ok">0 条</span></div>
+          <div class="ov-kv"><span>参数写入</span><span class="muted">—</span></div>
+          <div class="ov-kv"><span>备注</span><span class="muted">占位面板，后续可接 ingest</span></div>
+          </div>
+        </article>
+        </div>
+
+        <div class="ov-cards-sensor-rail">
+        <article class="ov-card ov-card-sensors">
+          <h4>IMU 与传感器（飞控参数 / 遥测）</h4>
+          <div class="ov-card-scroll">
+          <div id="ov-sensor-overview-rows" class="ov-sensor-overview">
+            <div class="ov-kv"><span>状态</span><span class="muted">加载中…</span></div>
+          </div>
+          </div>
+        </article>
+        </div>
       </div>
       </div>
 
@@ -631,17 +670,17 @@
                   <h3>3D 机体姿态向导</h3>
                   <span id="sc-accel-hint" class="sc-hint sc-hint--amber sc-breathe-wrap">请将飞机水平静置在桌面</span>
                 </div>
-                <div class="sc-visual-stage">
-                  <div id="sc-drone-scene" class="sc-drone-scene sc-accel-canvas-wrap" data-step="level">
-                    <canvas id="sc-accel-canvas-3d" width="400" height="280" aria-label="固定翼三轴校准三维示意"></canvas>
-                    <div class="sc-arrow-legend" aria-hidden="true">
-                      <span class="sc-ar sc-ar-up" data-axis-ref="up">▲ 向上</span>
-                      <span class="sc-ar sc-ar-down" data-axis-ref="down">▼ 向下</span>
-                      <span class="sc-ar sc-ar-left" data-axis-ref="left">◄ 向左</span>
-                      <span class="sc-ar sc-ar-right" data-axis-ref="right">► 向右</span>
-                      <span class="sc-ar sc-ar-spin" data-axis-ref="back">⟲ 倒置</span>
-                    </div>
+                <div class="sc-visual-stage" id="sc-accel-visual-stage" data-step="level">
+                  <div id="sc-drone-scene" class="sc-drone-scene sc-accel-canvas-wrap">
+                    <canvas id="sc-accel-canvas-3d" width="960" height="600" aria-label="固定翼三轴校准三维示意"></canvas>
                     <div id="sc-accel-particles" class="sc-particles" hidden></div>
+                  </div>
+                  <div class="sc-arrow-legend" aria-hidden="true">
+                    <span class="sc-ar sc-ar-up" data-axis-ref="up">▲ 向上</span>
+                    <span class="sc-ar sc-ar-down" data-axis-ref="down">▼ 向下</span>
+                    <span class="sc-ar sc-ar-left" data-axis-ref="left">◄ 向左</span>
+                    <span class="sc-ar sc-ar-right" data-axis-ref="right">► 向右</span>
+                    <span class="sc-ar sc-ar-spin" data-axis-ref="back">⟲ 倒置</span>
                   </div>
                 </div>
                 <div class="sc-telemetry-row">
@@ -702,35 +741,34 @@
 
           <!-- 模块二：罗盘 -->
           <div id="sc-module-compass" class="sc-module-panel" role="tabpanel" hidden>
-            <div class="sc-compass-status-bar sc-card sc-card--bar">
-              <div class="sc-bar-item"><span>罗盘 1 (内置):</span> <span id="sc-mag1-health" class="sc-pill sc-pill-ok">健康</span></div>
-              <div class="sc-bar-item"><span>罗盘 2 (外置-GPS):</span> <span id="sc-mag2-health" class="sc-pill sc-pill-ok">健康</span></div>
-              <div class="sc-bar-item"><span>外部电磁干扰:</span> <span id="sc-mag-interference" class="sc-mono">2%</span> <span class="sc-pill sc-pill-ok">极低</span></div>
-            </div>
             <div class="sc-split sc-split-35">
               <section class="sc-card">
                 <div class="sc-sphere-row">
-                  <div class="sc-sphere-box">
-                    <canvas id="sc-mag-canvas-1" width="340" height="320" aria-label="罗盘 1 采样球"></canvas>
-                    <div class="sc-sphere-cap"><span>罗盘 1 拟合</span><span id="sc-mag-samples-1" class="sc-mono">采样点: 0</span></div>
+                  <div id="sc-sphere-wrap-0" class="sc-sphere-box" data-mag-slot="0">
+                    <canvas id="sc-mag-canvas-1" width="300" height="280" aria-label="罗盘 1 采样球"></canvas>
+                    <div class="sc-sphere-cap"><span id="sc-mag-cap-0">罗盘 1 拟合</span><span id="sc-mag-samples-1" class="sc-mono">采样点: 0</span></div>
                   </div>
-                  <div class="sc-sphere-box">
-                    <canvas id="sc-mag-canvas-2" width="340" height="320" aria-label="罗盘 2 采样球"></canvas>
-                    <div class="sc-sphere-cap"><span>罗盘 2 拟合</span><span id="sc-mag-samples-2" class="sc-mono">采样点: 0</span></div>
+                  <div id="sc-sphere-wrap-1" class="sc-sphere-box" data-mag-slot="1">
+                    <canvas id="sc-mag-canvas-2" width="300" height="280" aria-label="罗盘 2 采样球"></canvas>
+                    <div class="sc-sphere-cap"><span id="sc-mag-cap-1">罗盘 2 拟合</span><span id="sc-mag-samples-2" class="sc-mono">采样点: 0</span></div>
+                  </div>
+                  <div id="sc-sphere-wrap-2" class="sc-sphere-box" data-mag-slot="2">
+                    <canvas id="sc-mag-canvas-3" width="300" height="280" aria-label="罗盘 3 采样球"></canvas>
+                    <div class="sc-sphere-cap"><span id="sc-mag-cap-2">罗盘 3 拟合</span><span id="sc-mag-samples-3" class="sc-mono">采样点: 0</span></div>
                   </div>
                 </div>
                 <div class="sc-fitness-row sc-mono">
-                  拟合偏差 Fitness: 罗盘1 <span id="sc-fit-1">—</span> / 罗盘2 <span id="sc-fit-2">—</span>
+                  拟合偏差 Fitness: 罗盘1 <span id="sc-fit-1">—</span> · 罗盘2 <span id="sc-fit-2">—</span> · 罗盘3 <span id="sc-fit-3">—</span>
                 </div>
               </section>
               <aside class="sc-card sc-card-side">
                 <div class="sc-subcard">
                   <h4>1. 罗盘参数</h4>
                   <p id="sc-compass-live" class="sc-prose sc-prose--sm sc-mono"></p>
-                  <label class="sc-check"><input type="checkbox" id="sc-mag1-en" checked> 罗盘 1 启用</label>
-                  <label class="sc-check"><input type="checkbox" id="sc-mag1-dec" checked> 自动适应偏角</label>
-                  <label class="sc-check"><input type="checkbox" id="sc-mag2-en" checked> 罗盘 2 启用</label>
-                  <label class="sc-check"><input type="checkbox" id="sc-mag2-ext" checked> 外部指向 (External)</label>
+                  <label class="sc-check"><input type="checkbox" id="sc-compass-use1"><span id="sc-compass-use-line-0">COMPASS_USE：（等待飞控参数…）</span></label>
+                  <label class="sc-check"><input type="checkbox" id="sc-compass-use2"><span id="sc-compass-use-line-1">COMPASS_USE2：（等待飞控参数…）</span></label>
+                  <label class="sc-check"><input type="checkbox" id="sc-compass-use3"><span id="sc-compass-use-line-2">COMPASS_USE3：（等待飞控参数…）</span></label>
+                  <p class="sc-prose sc-prose--sm sc-mono" style="margin-top:10px">修改启用后建议重启飞控再校准；写入失败时请确认已连接且允许写参数。</p>
                 </div>
                 <div class="sc-subcard">
                   <h4>2. 动作与向导</h4>
@@ -742,13 +780,17 @@
                 </div>
                 <div class="sc-subcard">
                   <h4>3. 多罗盘进度</h4>
-                  <div class="sc-progress-wrap">
-                    <div class="sc-progress-label"><span>罗盘 1</span><span id="sc-mag-p1-label" class="sc-mono">0% (待机)</span></div>
+                  <div id="sc-mag-progress-wrap-0" class="sc-progress-wrap" data-mag-slot="0">
+                    <div class="sc-progress-label"><span id="sc-mag-p-title-0">罗盘 1</span><span id="sc-mag-p1-label" class="sc-mono">0% (待机)</span></div>
                     <div class="sc-progress sc-progress--striped"><div id="sc-mag-p1-bar" class="sc-progress-fill sc-progress-fill--green" style="width:0%"></div><div class="sc-progress-sheen"></div></div>
                   </div>
-                  <div class="sc-progress-wrap">
-                    <div class="sc-progress-label"><span>罗盘 2</span><span id="sc-mag-p2-label" class="sc-mono">0% (待机)</span></div>
+                  <div id="sc-mag-progress-wrap-1" class="sc-progress-wrap" data-mag-slot="1">
+                    <div class="sc-progress-label"><span id="sc-mag-p-title-1">罗盘 2</span><span id="sc-mag-p2-label" class="sc-mono">0% (待机)</span></div>
                     <div class="sc-progress sc-progress--striped"><div id="sc-mag-p2-bar" class="sc-progress-fill sc-progress-fill--green" style="width:0%"></div><div class="sc-progress-sheen"></div></div>
+                  </div>
+                  <div id="sc-mag-progress-wrap-2" class="sc-progress-wrap" data-mag-slot="2">
+                    <div class="sc-progress-label"><span id="sc-mag-p-title-2">罗盘 3</span><span id="sc-mag-p3-label" class="sc-mono">0% (待机)</span></div>
+                    <div class="sc-progress sc-progress--striped"><div id="sc-mag-p3-bar" class="sc-progress-fill sc-progress-fill--green" style="width:0%"></div><div class="sc-progress-sheen"></div></div>
                   </div>
                   <p id="sc-compass-toast" class="sc-toast sc-toast--idle" role="status"></p>
                 </div>
@@ -768,9 +810,12 @@
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
 <script src="JS/core/globals.js" defer></script>
+<script src="JS/core/ardupilot-board-types.js" defer></script>
+<script src="JS/core/ardupilot-devid.js" defer></script>
 <script src="JS/ui/status-messages.js" defer></script>
 <script src="JS/core/mavlink.js" defer></script>
 <script src="JS/services/serial.js" defer></script>
+<script src="JS/ui/overview-sensors.js" defer></script>
 <script src="JS/ui/hud-map-tabs.js" defer></script>
 <script src="JS/ui/quick-grid.js" defer></script>
 <script src="JS/ui/splitter.js" defer></script>
@@ -779,6 +824,8 @@
 <script src="JS/ui/motor-maps.js" defer></script>
 <script src="JS/ui/motor-setup.js" defer></script>
 <script src="JS/ui/power-setup.js" defer></script>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js" defer></script>
+<script src="JS/ui/accel-calib-three.js" defer></script>
 <script src="JS/ui/accel-calibration.js" defer></script>
 <script src="JS/ui/compass-calibration.js" defer></script>
 <script src="JS/ui/sensor-calibration.js" defer></script>
