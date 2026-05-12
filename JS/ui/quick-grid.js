@@ -397,7 +397,8 @@
     }
 
     startUpdater(){
-      const update = ()=>{
+      this.refreshTelemetryCells = () => {
+        if (!this.container) return;
         const cells = Array.from(this.container.children);
         cells.forEach(cell=>{
           const idx = parseInt(cell.dataset.index,10);
@@ -414,7 +415,6 @@
           }
           top.textContent = this.getDisplayLabel(key);
           let v = this.resolveTelemetryValue(key);
-          // accept numeric strings
           if(typeof v === 'string' && v.trim() !== '' && !isNaN(parseFloat(v))){
             v = parseFloat(v);
           }
@@ -425,8 +425,7 @@
           if(cls) cell.classList.add(cls);
         });
       };
-      setInterval(update,300);
-      update();
+      this.refreshTelemetryCells();
     }
 
     determineStatusClass(key,v){
@@ -460,7 +459,14 @@
 
   // 初始化并尝试恢复配置
   document.addEventListener('DOMContentLoaded', ()=>{
-    try{ window.quickGrid = new QuickGrid(); }catch(e){console.error('QuickGrid init failed',e)}
+    try{
+      window.quickGrid = new QuickGrid();
+      window.refreshQuickGrid = function () {
+        if (window.quickGrid && typeof window.quickGrid.refreshTelemetryCells === "function") {
+          window.quickGrid.refreshTelemetryCells();
+        }
+      };
+    }catch(e){console.error('QuickGrid init failed',e)}
   });
 
 })();

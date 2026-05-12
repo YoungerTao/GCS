@@ -377,8 +377,8 @@
       writeConfig();
     });
 
-    document.addEventListener("gcs-airframe-params-changed", () => {
-      if (state.dirty) return;
+    document.addEventListener("gcs-airframe-params-changed", (ev) => {
+      if (state.dirty && !(ev.detail && ev.detail.bulk)) return;
       syncFromParams();
       platformAutoFromFrameClass();
       renderAll();

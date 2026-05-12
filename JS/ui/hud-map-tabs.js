@@ -410,8 +410,8 @@ function drawFlightStatusOverlay() {
   ctx.restore();
 }
 
-// ==================== 主循环 + 调试信息 ====================
-function drawHUD(){
+// ==================== HUD 绘制（由 scheduleUIUpdate / 250ms 兜底 驱动） ====================
+function renderHudToCanvas() {
   updateSmoothedData();
   ctx.clearRect(0, 0, 800, 800);
 
@@ -426,7 +426,6 @@ function drawHUD(){
   drawFlightStatusOverlay();
   drawAirspeedGroundspeed();
 
-  // === 调试文字（左上角显示实时数值）===
   const rollDeg = toDegrees(getSafe(window.roll));
   const pitchDeg = toDegrees(getSafe(window.pitch));
   const yawDeg = normalizeHeadingDegrees(toDegrees(getSafe(window.yaw)));
@@ -437,12 +436,12 @@ function drawHUD(){
   ctx.fillText(`Yaw:  ${yawDeg.toFixed(1)}°`, 20, 80);
   ctx.fillText(`Alt:  ${getSafe(window.altitude).toFixed(1)}m`, 20, 105);
   ctx.fillText(`Speed:${getSafe(window.airspeed).toFixed(1)}`, 20, 130);
-
-  requestAnimationFrame(drawHUD);
 }
 
-drawHUD();
-console.log("✅ ui.js 完整加载，HUD 循环已启动");
+window.renderHudToCanvas = renderHudToCanvas;
+// drawHUD 为调度器与兜底定时器使用的别名（实际绘制函数体为 renderHudToCanvas）
+window.drawHUD = renderHudToCanvas;
+console.log("✅ HUD 绘制已导出为 window.renderHudToCanvas / window.drawHUD");
 
 
 
@@ -587,3 +586,20 @@ window.appendLog = function(msg) {
   logEl.appendChild(line);
   logEl.scrollTop = logEl.scrollHeight;
 };
+
+// ==================== 遥测 → canvas#hud / #quick-grid 调度 ====================
+let _uiDirty = false;
+window.scheduleUIUpdate = function () {
+  if (_uiDirty) return;
+  _uiDirty = true;
+  requestAnimationFrame(() => {
+    _uiDirty = false;
+    if (typeof window.drawHUD === "function") window.drawHUD();
+    if (typeof window.refreshQuickGrid === "function") window.refreshQuickGrid();
+  });
+};
+
+setInterval(() => {
+  if (typeof window.drawHUD === "function") window.drawHUD();
+  if (typeof window.refreshQuickGrid === "function") window.refreshQuickGrid();
+}, 250);

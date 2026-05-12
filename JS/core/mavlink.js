@@ -14,42 +14,55 @@ function crc_calculate(buffer){
 const CRC_EXTRA = {
   0:50, 1:124, 2:151, 4:231, 21:159, 22:220, 24:24, 30:39, 33:104,
   74:20, 75:152, 76:152, 77:143, 83:53, 105:158, 110:115, 111:34, 163:105, 125:0, 152:0, 62:0,
-  42:0, 36:0, 65:118, 27:144, 116:76, 129:46, 29:0, 132:85, 137:0, 147:154, 148:178, 167:106, 191:92, 192:36, 253:83
+  42:0, 36:0, 65:118, 27:144, 116:76, 129:46, 29:0, 132:85, 137:0, 147:154, 148:178, 167:106, 191:92, 192:36, 193:71, 253:83
 };
 const ESC_TELEMETRY_MSG_IDS = new Set([11030, 11031, 11032, 11033]);
 
-function parse(){
-  while(buf.length > 10){
-    if(buf[0] !== 0xFD){ buf.shift(); continue; }
+/** MAVLink 负载可能是父缓冲区的子视图，必须用 byteOffset，否则 HEARTBEAT 等会读错内存 */
+function mavlinkPayloadView(payload) {
+  const u8 = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+  return new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+}
 
-    let len = buf[1];
-    let full = 10 + len + 2;
-    if(buf.length < full) return;
+/** 单次 parse 最多解多少帧，剩余交给 microtask，避免 PARAM 洪峰等长时间占满主线程 */
+const PARSE_MAX_FRAMES_PER_SLICE = 160;
+const PARSE_MAX_RESYNC_BYTES = 8192;
 
-    let pkt = buf.slice(0, full);
+function parse(parseDepth) {
+  const depth = typeof parseDepth === "number" ? parseDepth : 0;
+  if (depth > 24) return;
+
+  let frames = 0;
+  let resync = 0;
+  while (buf.length > 10 && frames < PARSE_MAX_FRAMES_PER_SLICE) {
+    if (buf[0] !== 0xFD) {
+      buf.shift();
+      if (++resync > PARSE_MAX_RESYNC_BYTES) {
+        buf.length = 0;
+        return;
+      }
+      continue;
+    }
+
+    const len = buf[1];
+    const full = 10 + len + 2;
+    if (buf.length < full) return;
+
+    const pkt = buf.slice(0, full);
     buf = buf.slice(full);
+    frames++;
 
-    let msgid = pkt[7] | (pkt[8]<<8) | (pkt[9]<<16);
+    const msgid = pkt[7] | (pkt[8] << 8) | (pkt[9] << 16);
 
-    let crc = crc_calculate(pkt.slice(1, 10+len));
+    let crc = crc_calculate(pkt.slice(1, 10 + len));
     crc = crc_accumulate(CRC_EXTRA[msgid] || 0, crc);
 
-    let rx = pkt[10+len] | (pkt[11+len]<<8);
+    const rx = pkt[10 + len] | (pkt[11 + len] << 8);
 
-    if(crc !== rx){
-      // ESC 扩展消息在不同方言下 CRC_EXTRA 可能不一致，允许按消息头/长度继续解析
-      if (ESC_TELEMETRY_MSG_IDS.has(msgid)) {
-        if (!window._escCrcBypassWarned) {
-          console.warn("ESC 遥测 CRC 校验未命中，已启用兼容解析模式");
-          window._escCrcBypassWarned = true;
-        }
-      } else {
-      // 只在第一次看到未知消息时警告，减少刷屏
-        if(!window.crcWarned) {
-          console.warn(`CRC 错误 msg=${msgid} (已忽略，继续解析)`);
-          window.crcWarned = true;
-        }
-        continue;
+    if (crc !== rx) {
+      if (!window.crcWarned) {
+        console.warn(`CRC 错误 msg=${msgid}，继续解析`);
+        window.crcWarned = true;
       }
     }
 
@@ -59,17 +72,27 @@ function parse(){
       console.error(`MAVLink handle 异常 msgid=${msgid}`, e);
     }
   }
+
+  if (buf.length > 10) {
+    queueMicrotask(() => {
+      try {
+        parse(depth + 1);
+      } catch (e) {
+        console.error("parse microtask", e);
+      }
+    });
+  }
 }
 
 function handle(id, payload, sys, comp){
   if(sys) window.sysid = sys;
   if(comp) window.compid = comp;
 
-if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode, custom_mode u32, …）
+if(id === 0){ // HEARTBEAT — 本项目约定线序（与 MAVLink common.xml 标准字段顺序不同）：0~3 custom_mode LE, 4 type, 5 autopilot, 6 base_mode, 7 system_status, 8 mavlink_version
     if (payload.length < 9) return;
-    const dv = new DataView(new Uint8Array(payload).buffer);
-    const base_mode = dv.getUint8(2);
-    const custom_mode = dv.getUint32(3, true);
+    const dv = mavlinkPayloadView(payload);
+    const custom_mode = dv.getUint32(0, true);
+    const base_mode = dv.getUint8(6);
 
     window.flight_mode = getFlightModeString(custom_mode);
     window.armed = (base_mode & 0x80) !== 0;
@@ -81,7 +104,7 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
     }
 }
   if(id === 1){ // SYS_STATUS
-    let dv = new DataView(new Uint8Array(payload).buffer);
+    let dv = mavlinkPayloadView(payload);
     if (payload.length >= 12) {
       window._sysStatusSensors = {
         present: dv.getUint32(0, true),
@@ -108,19 +131,19 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
   if(id === 22) parseParam(payload);
 
   if(id === 24){ // GPS_RAW_INT
-    let dv = new DataView(new Uint8Array(payload).buffer);
+    let dv = mavlinkPayloadView(payload);
     window.gps_fix_type = dv.getUint8(4);
   }
 
   if(id === 30){ // ATTITUDE
-    let dv = new DataView(new Uint8Array(payload).buffer);
+    let dv = mavlinkPayloadView(payload);
     window.roll = dv.getFloat32(4,true);
     window.pitch = dv.getFloat32(8,true);
     window.yaw = dv.getFloat32(12,true);
   }
 
   if(id === 33){ // GLOBAL_POSITION_INT
-    let dv = new DataView(new Uint8Array(payload).buffer);
+    let dv = mavlinkPayloadView(payload);
     window.lat = dv.getInt32(4,true)/1e7;
     window.lon = dv.getInt32(8,true)/1e7;
     window.altitude = dv.getInt32(16,true)/1000;   // relative_alt
@@ -128,20 +151,20 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
   }
 
   if(id === 74){ // VFR_HUD
-    let dv = new DataView(new Uint8Array(payload).buffer);
+    let dv = mavlinkPayloadView(payload);
     window.airspeed = dv.getFloat32(0, true);
     window.groundspeed = dv.getFloat32(4, true);
     window.climb_rate = dv.getFloat32(12, true);
   }
 
   if(id === 42){ // MISSION_CURRENT
-    let dv = new DataView(new Uint8Array(payload).buffer);
+    let dv = mavlinkPayloadView(payload);
     // seq: uint16 at offset 0
     window.wp_current = dv.getUint16(0, true);
   }
 
   if(id === 65){ // RC_CHANNELS (MAVLink2 wire: time_boot_ms + chan1..18 + chancount + rssi)
-    let dv = new DataView(new Uint8Array(payload).buffer);
+    let dv = mavlinkPayloadView(payload);
     window.rcChannels = window.rcChannels || Array.from({ length: 16 }, () => 1500);
     for (let i = 0; i < 16; i++) {
       const offset = 4 + i * 2;
@@ -167,9 +190,13 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
     parseAutopilotVersion(payload);
   }
 
+  if (id === 193) {
+    parseEkfStatusReport(payload);
+  }
+
   // DISTANCE_SENSOR：current_distance 在 offset 8（cm），用于概览测距
   if (id === 132 && payload.length >= 12) {
-    const dv = new DataView(new Uint8Array(payload).buffer);
+    const dv = mavlinkPayloadView(payload);
     window._rangefinderTelemetry = {
       currentCm: dv.getUint16(8, true),
       sensorId: dv.getUint8(11),
@@ -179,7 +206,7 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
 
   // HIGHRES_IMU: time_usec(8) + xacc,yacc,zacc(float) — 加速度 m/s²，换算为 g
   if (id === 105 && payload.length >= 20) {
-    const dv = new DataView(new Uint8Array(payload).buffer);
+    const dv = mavlinkPayloadView(payload);
     const gx = dv.getFloat32(8, true) / 9.80665;
     const gy = dv.getFloat32(12, true) / 9.80665;
     const gz = dv.getFloat32(16, true) / 9.80665;
@@ -190,7 +217,7 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
 
   // SCALED_IMU / SCALED_IMU2 / SCALED_IMU3：布局相同，time_boot_ms(4) + xacc,yacc,zacc int16 mG
   if ((id === 110 || id === 116 || id === 129) && payload.length >= 10) {
-    const dv = new DataView(new Uint8Array(payload).buffer);
+    const dv = mavlinkPayloadView(payload);
     const gx = dv.getInt16(4, true) / 1000;
     const gy = dv.getInt16(6, true) / 1000;
     const gz = dv.getInt16(8, true) / 1000;
@@ -201,7 +228,7 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
 
   // COMMAND_ACK: command(uint16) + result(uint8) + …
   if (id === 77 && payload.length >= 3) {
-    const dv = new DataView(new Uint8Array(payload).buffer);
+    const dv = mavlinkPayloadView(payload);
     const command = dv.getUint16(0, true);
     const result = dv.getUint8(2);
     const MAV_RESULT_NAMES = [
@@ -275,7 +302,7 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
   //   16     completion_pct  ← 真实进度字段
   //   17..26 completion_mask[10]
   if (id === 191 && payload.length >= 17) {
-    const dv = new DataView(new Uint8Array(payload).buffer);
+    const dv = mavlinkPayloadView(payload);
     const direction_x = dv.getFloat32(0, true);
     const direction_y = dv.getFloat32(4, true);
     const direction_z = dv.getFloat32(8, true);
@@ -310,7 +337,7 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
   //   43     autosaved
   //   44..   orientation_confidence(float) 及扩展字段（可截断，MIN_LEN=44）
   if (id === 192 && payload.length >= 44) {
-    const dv = new DataView(new Uint8Array(payload).buffer);
+    const dv = mavlinkPayloadView(payload);
     const fitness = dv.getFloat32(0, true);
     const compass_id = dv.getUint8(40);
     const cal_mask = dv.getUint8(41);
@@ -327,6 +354,7 @@ if(id === 0){ // HEARTBEAT（MAVLink common 线序：type, autopilot, base_mode,
 
   // 每次解析完消息后，同步重要变量到统一的 window.telemetry
   try{ if(typeof syncToTelemetry === 'function') syncToTelemetry(); }catch(e){console.warn('syncToTelemetry error',e)}
+  try { if (typeof window.scheduleUIUpdate === "function") window.scheduleUIUpdate(); } catch (e) { /* ignore */ }
 }
 
 function parseStatustext(payload, sys, comp) {
@@ -381,18 +409,22 @@ function humanizeBoardIdName(raw) {
     .replace(/_/g, " ");
 }
 
-/** MAVLink2 线格式：uint64×2 + uint32×4 + uint16×2 + uint8[8]×3 + uid2[18] */
+/** MAVLink2 线序与 pymavlink 一致：QQ + IIII + HH + 三组 8B custom + uid2[18]（capabilities、uid 在前） */
 function parseAutopilotVersion(payload) {
-  if (!payload || payload.length < 36) return;
+  if (!payload || payload.length < 32) return;
   try {
     const u8 = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
-    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const dv = mavlinkPayloadView(payload);
     const flight_sw_version = dv.getUint32(16, true);
     const middleware_sw_version = dv.getUint32(20, true);
     const os_sw_version = dv.getUint32(24, true);
     const board_version = dv.getUint32(28, true);
-    const vendor_id = dv.getUint16(32, true);
-    const product_id = dv.getUint16(34, true);
+    let vendor_id = 0;
+    let product_id = 0;
+    if (payload.length >= 36) {
+      vendor_id = dv.getUint16(32, true);
+      product_id = dv.getUint16(34, true);
+    }
 
     const boardType = (board_version >>> 16) & 0xffff;
     const boardRev = board_version & 0xffff;
@@ -454,8 +486,59 @@ function parseAutopilotVersion(payload) {
   }
 }
 
+/** EKF_STATUS_REPORT：flags + 方差；线序与 ardupilotmega/common 一致（flags 在首 uint16） */
+function parseEkfStatusReport(payload) {
+  if (!payload || payload.length < 14) return;
+  try {
+    const dv = mavlinkPayloadView(payload);
+    const flags = dv.getUint16(0, true);
+    const posHoriz = dv.getFloat32(6, true);
+    const posVert = dv.getFloat32(10, true);
+    window._ekfStatusReport = { flags, posHoriz, posVert, t: Date.now() };
+
+    const bits = [];
+    if (flags & 0x0001) bits.push("姿态");
+    if (flags & 0x0002) bits.push("水平速度");
+    if (flags & 0x0004) bits.push("垂直速度");
+    if (flags & 0x0010) bits.push("水平位置");
+    if (flags & 0x0020) bits.push("垂直位置");
+    const summary = bits.length ? `${bits.join("·")} 已融合` : `flags=0x${flags.toString(16)}（初始化或未对齐）`;
+
+    const statusEl = document.getElementById("ov-ekf-status");
+    if (statusEl) {
+      statusEl.textContent = summary;
+      statusEl.className = bits.length >= 3 ? "ok" : bits.length ? "warn" : "muted";
+    }
+    const posEl = document.getElementById("ov-ekf-pos");
+    if (posEl && Number.isFinite(posHoriz)) {
+      posEl.textContent = posHoriz < 1 ? `水平方差 ${posHoriz.toExponential(2)}（较好）` : `水平方差 ${posHoriz.toExponential(2)} m²`;
+      posEl.className = posHoriz < 1 ? "ok" : "warn";
+    }
+    const velEl = document.getElementById("ov-ekf-vel");
+    if (velEl && Number.isFinite(posVert)) {
+      velEl.textContent = `垂直方差 ${posVert.toExponential(2)} m²`;
+      velEl.className = posVert < 2 ? "ok" : "warn";
+    }
+  } catch (e) {
+    console.warn("parseEkfStatusReport", e);
+  }
+}
+
+let _paramTableRenderRaf = null;
+function scheduleParamTableRender() {
+  if (window._paramLoadActive) return;
+  if (_paramTableRenderRaf != null) return;
+  _paramTableRenderRaf = requestAnimationFrame(() => {
+    _paramTableRenderRaf = null;
+    renderSortedParams();
+    try {
+      if (typeof window.refreshAllParamsTable === "function") window.refreshAllParamsTable();
+    } catch (_) { /* 忽略：全部参数面板可能尚未加载 */ }
+  });
+}
+
 function parseParam(p){ /* 保持不变 */ 
-  let dv = new DataView(new Uint8Array(p).buffer);
+  let dv = mavlinkPayloadView(p);
   let val = dv.getFloat32(0,true);
   let count = dv.getUint16(4,true);
   let index = dv.getUint16(6,true);
@@ -465,10 +548,28 @@ function parseParam(p){ /* 保持不变 */
     name+=String.fromCharCode(p[i]);
   }
   if(!name) return;
-  params.set(name,val);
+  const pmap = window.params;
+  pmap.set(name,val);
   window._paramCount = count;
   window._paramLastIndex = index;
-  renderSortedParams();
+
+  if (window._paramLoadActive) {
+    const totalKnown = Number.isFinite(count) && count > 0 ? count : NaN;
+    if (typeof window.updateParamLoadProgress === "function") {
+      window.updateParamLoadProgress(pmap.size, totalKnown);
+    }
+    if (
+      !window._paramLoadCancel &&
+      Number.isFinite(count) && count > 0 &&
+      pmap.size >= count &&
+      typeof window.endParamLoadingUI === "function"
+    ) {
+      window.endParamLoadingUI(true, "complete");
+    }
+  } else {
+    scheduleParamTableRender();
+  }
+
   const u = name.toUpperCase();
   if (u === "FRAME_CLASS" || u === "FRAME_TYPE" || u === "Q_FRAME_CLASS" || u === "Q_FRAME_TYPE") {
     try {
@@ -489,9 +590,10 @@ function parseParam(p){ /* 保持不变 */
 
 function renderSortedParams() {
   const el = document.getElementById("params");
-  if (!el || !(params instanceof Map)) return;
-  const total = Number.isFinite(window._paramCount) ? window._paramCount : params.size;
-  const rows = Array.from(params.entries())
+  const pmap = window.params;
+  if (!el || !(pmap instanceof Map)) return;
+  const total = Number.isFinite(window._paramCount) ? window._paramCount : pmap.size;
+  const rows = Array.from(pmap.entries())
     .sort((a, b) => a[0].localeCompare(b[0], "en", { sensitivity: "base" }))
     .map(([k, v], i) => `${i + 1}/${total} ${k}=${Number(v).toFixed(4)}`);
   el.innerHTML = rows.join("<br>");
@@ -511,7 +613,7 @@ function getFlightModeString(custom_mode){
 
 function parseEscTelemetryGroup(id, payload) {
   const baseMotor = ((id - 11030) * 4) + 1;
-  const dv = new DataView(new Uint8Array(payload).buffer);
+  const dv = mavlinkPayloadView(payload);
   window.escTelemetry = window.escTelemetry || {};
   const now = Date.now();
 
@@ -541,7 +643,7 @@ function parseEscTelemetryGroup(id, payload) {
 }
 
 function parseBatteryStatus(payload) {
-  const dv = new DataView(new Uint8Array(payload).buffer);
+  const dv = mavlinkPayloadView(payload);
   window.powerInstances = window.powerInstances || new Map();
   const batteryId = payload.length > 32 ? dv.getUint8(32) : 0;
   const currentRaw = payload.length > 31 ? dv.getInt16(30, true) : -1;
@@ -611,12 +713,12 @@ function syncToTelemetry(){
       window.telemetry.accel_z_g = imuG.z;
     }
 
-    // 额外尝试从参数表 params（Map）读取并写入 telemetry
-    if(typeof params !== 'undefined' && params instanceof Map){
+    const pmap = window.params;
+    if (pmap instanceof Map) {
       const supplement = ['esc1_temp','battery_remaining','battery_usedmah','battery_temp','esc1_volt','esc1_curr','battery_cell1','battery_voltage2'];
       for(const k of supplement){
-        if(params.has(k) && (typeof params.get(k) !== 'undefined')){
-          window.telemetry[k] = params.get(k);
+        if(pmap.has(k) && (typeof pmap.get(k) !== 'undefined')){
+          window.telemetry[k] = pmap.get(k);
         }
       }
       // 也把所有已知 params 列表小范围优先同步（避免覆盖已经存在的 telemetry 值）
@@ -629,3 +731,6 @@ function syncToTelemetry(){
 
   }catch(e){ console.warn('syncToTelemetry failed', e); }
 }
+
+window.syncToTelemetry = syncToTelemetry;
+window.renderSortedParams = renderSortedParams;

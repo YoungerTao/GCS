@@ -7,8 +7,11 @@ window.buf = [];
 // 全局 telemetry 容器：确保其他模块可以统一读取
 window.telemetry = window.telemetry || {};
 
+// 飞控目标（从下行帧里更新）；勿用作本地面站发出的 MAVLink 帧头 sysid
 window.sysid = 1;
 window.compid = 1;
+// 与 Mission Planner 一致：地面站自身 MAVLink system id 用 255，避免与飞控(常为1)冲突
+window.gcsSysId = 255;
 
 window.params = new Map();
 
@@ -66,5 +69,7 @@ function log(s, key = null) {
     console.error('log error', e);
   }
 }
+
+// 遥测→界面：mavlink handle 末尾调用 window.scheduleUIUpdate()；hud-map-tabs.js 内 RAF + 250ms 刷新 canvas#hud 与 window.refreshQuickGrid（#quick-grid）
 
 console.log("✅ main.js 全局变量已正确挂载到 window");

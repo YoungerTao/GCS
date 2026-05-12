@@ -10,17 +10,40 @@
 <link rel="stylesheet" href="CSS/components/quick-grid.css">
 <link rel="stylesheet" href="CSS/components/status-messages.css">
 <link rel="stylesheet" href="CSS/components/sensor-calibration.css">
+<link rel="stylesheet" href="CSS/components/all-params.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 </head>
 <body>
+
+<div id="param-load-overlay" class="param-load-overlay hidden" role="alertdialog" aria-modal="true" aria-labelledby="param-load-title" aria-busy="false">
+  <div class="param-load-panel">
+    <h2 id="param-load-title" class="param-load-title">正在加载飞控参数表</h2>
+    <p id="param-load-progress" class="param-load-progress">准备中…</p>
+    <div class="param-load-bar-wrap" aria-hidden="true">
+      <div id="param-load-bar" class="param-load-bar-fill" style="width:0%"></div>
+    </div>
+    <button type="button" id="param-load-cancel" class="param-load-cancel">取消</button>
+  </div>
+</div>
 
 <!-- 顶部控制栏 -->
 <div class="top-bar">
   <select id="comPort">
     <option value="">-- 选择COM口 --</option>
   </select>
-  <button id="connectBtn" onclick="connect()">连接串口</button>
-  <button onclick="loadParams()">加载参数</button>
+  <label class="top-bar-baud" for="serialBaud" title="USB 虚拟串口常可设较高波特率；须与飞控 SERIAL 端口波特率一致">波特率</label>
+  <select id="serialBaud" class="top-bar-baud-select" title="须与飞控该串口波特率一致（USB 可尝试 921600 等）">
+    <option value="57600">57600</option>
+    <option value="115200" selected>115200</option>
+    <option value="230400">230400</option>
+    <option value="460800">460800</option>
+    <option value="921600">921600</option>
+    <option value="1500000">1500000</option>
+    <option value="2000000">2000000</option>
+    <option value="3000000">3000000</option>
+  </select>
+  <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
+  <button id="loadParamsBtn" type="button" onclick="loadParams()">加载参数</button>
   <div class="main-tabs" aria-label="主功能切换">
     <button class="main-tab active" data-view="flight-data">
       <img src="assets/icons/tab-flight.svg" alt="">
@@ -87,7 +110,7 @@
             </div>
           </div>
         </div>
-        <div id="panel-actions" class="log-panel">动作面板占位</div>
+        <div id="panel-actions" class="log-panel">动作面板（开发中）</div>
         <div id="panel-messages" class="log-panel log-panel--messages">
           <div class="gcs-messages" aria-label="STATUSTEXT 消息">
             <div class="gcs-msg-toolbar" role="toolbar" aria-label="按等级过滤">
@@ -106,7 +129,7 @@
             </div>
           </div>
         </div>
-        <div id="panel-servo" class="log-panel">舵机面板占位</div>
+        <div id="panel-servo" class="log-panel">舵机面板（开发中）</div>
         <div id="panel-logs" class="log-panel">日志输出区<div id="log"></div></div>
       </div>
     </div>
@@ -118,8 +141,10 @@
   </div>
 </div>
 
-<div id="view-flight-plan" class="main-view placeholder-view">
-  <div class="placeholder-content">飞行计划（占位）</div>
+<div id="view-flight-plan" class="main-view">
+  <div class="fp-plan-shell" role="status">
+    <p class="fp-plan-msg">飞行计划：航线编辑、任务列表等功能尚未接入，后续版本提供。</p>
+  </div>
 </div>
 
 <div id="view-initial-setup" class="main-view">
@@ -127,7 +152,7 @@
     <div class="ov-top-alert">
       <div class="ov-link-status">
         <span class="ov-dot ok"></span>
-        串口已连接 / 115200 8N1（USB 常见，占位）
+        串口已连接 / 115200 8N1（USB 常见）
       </div>
       <div class="ov-global-warning danger pulse">
         部分传感器未校准，机体未定义，禁止起飞
@@ -167,7 +192,7 @@
         <article class="ov-card">
           <h4>链路与控制</h4>
           <div class="ov-card-scroll">
-          <div class="ov-kv"><span>数传链路</span><span class="ok">已连接 (115200 bps Web Serial / USB，占位)</span></div>
+          <div class="ov-kv"><span>数传链路</span><span class="ok">已连接 (115200 bps Web Serial / USB)</span></div>
           <div class="ov-kv"><span>遥控链路</span><span class="danger pulse">未连接</span></div>
           <div class="ov-kv"><span>控制信道</span><span>16 CH (SBUS)</span></div>
           <div class="ov-kv"><span>链路质量 RSSI</span><span class="muted">--</span></div>
@@ -231,9 +256,9 @@
         <article class="ov-card">
           <h4>EKF / 导航健康</h4>
           <div class="ov-card-scroll">
-          <div class="ov-kv"><span>EKF 状态</span><span class="muted">等待遥测</span></div>
-          <div class="ov-kv"><span>位置源</span><span class="muted">—</span></div>
-          <div class="ov-kv"><span>速度 / 高度融合</span><span class="muted">—</span></div>
+          <div class="ov-kv"><span>EKF 状态</span><span id="ov-ekf-status" class="muted">等待遥测</span></div>
+          <div class="ov-kv"><span>位置源</span><span id="ov-ekf-pos" class="muted">—</span></div>
+          <div class="ov-kv"><span>速度 / 高度融合</span><span id="ov-ekf-vel" class="muted">—</span></div>
           <div class="ov-kv"><span>备注</span><span class="muted">可接 SYS_STATUS / 参数扩展</span></div>
           </div>
         </article>
@@ -244,7 +269,7 @@
           <div class="ov-kv"><span>STATUSTEXT</span><span class="muted">见底部消息区</span></div>
           <div class="ov-kv"><span>严重告警</span><span class="ok">0 条</span></div>
           <div class="ov-kv"><span>参数写入</span><span class="muted">—</span></div>
-          <div class="ov-kv"><span>备注</span><span class="muted">占位面板，后续可接 ingest</span></div>
+          <div class="ov-kv"><span>备注</span><span class="muted">可接外部日志与统计</span></div>
           </div>
         </article>
         </div>
@@ -803,8 +828,35 @@
   </div>
 </div>
 
-<div id="view-config-debug" class="main-view placeholder-view">
-  <div class="placeholder-content">配置调试（占位）</div>
+<div id="view-config-debug" class="main-view cfg-debug-page">
+  <header class="cfg-debug-head">
+    <h2 class="cfg-debug-title">配置调试</h2>
+    <button type="button" class="cfg-subtab active" disabled>全部参数</button>
+  </header>
+  <div class="cfg-all-params-wrap">
+    <div class="cfg-ap-toolbar" role="toolbar" aria-label="参数表工具">
+      <button type="button" id="cfg-ap-refresh">刷新参数</button>
+      <button type="button" id="cfg-ap-compare-btn">比对参数…</button>
+      <button type="button" id="cfg-ap-compare-clear">清除比对</button>
+      <button type="button" id="cfg-ap-write" class="cfg-ap-btn-primary">写入参数</button>
+      <input type="file" id="cfg-ap-compare-file" class="visually-hidden" accept=".param,.txt,text/plain">
+      <input type="search" id="cfg-ap-filter" placeholder="筛选名称或说明…" autocomplete="off" aria-label="筛选参数">
+    </div>
+    <p id="cfg-ap-status" class="cfg-ap-status" aria-live="polite"></p>
+    <div class="cfg-ap-table-scroll">
+      <table class="cfg-ap-table" aria-label="飞控全部参数">
+        <thead>
+          <tr>
+            <th scope="col">名称</th>
+            <th scope="col">值</th>
+            <th scope="col">比对文件</th>
+            <th scope="col">说明</th>
+          </tr>
+        </thead>
+        <tbody id="cfg-ap-tbody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -830,6 +882,7 @@
 <script src="JS/ui/compass-calibration.js" defer></script>
 <script src="JS/ui/sensor-calibration.js" defer></script>
 <script src="JS/ui/dronecan-setup.js" defer></script>
+<script src="JS/ui/all-params.js" defer></script>
 
 </body>
 </html>
