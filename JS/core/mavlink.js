@@ -353,7 +353,7 @@ if(id === 0){ // HEARTBEAT — 本项目约定线序（与 MAVLink common.xml �
   }
 
   // 每次解析完消息后，同步重要变量到统一的 window.telemetry
-  try{ if(typeof syncToTelemetry === 'function') syncToTelemetry(); }catch(e){console.warn('syncToTelemetry error',e)}
+  try{ if(typeof window.syncToTelemetry === 'function') window.syncToTelemetry(); }catch(e){console.warn('syncToTelemetry error',e)}
   try { if (typeof window.scheduleUIUpdate === "function") window.scheduleUIUpdate(); } catch (e) { /* ignore */ }
 }
 
@@ -371,59 +371,30 @@ function parseStatustext(payload, sys, comp) {
   }
 }
 
-/** MAVLink AUTOPILOT_VERSION.flight_sw_version → semver + release type（MAVLink 语义版本字节） */
-function decodeFlightSwVersion(u32) {
-  const major = (u32 >>> 24) & 0xff;
-  const minor = (u32 >>> 16) & 0xff;
-  const patch = (u32 >>> 8) & 0xff;
-  const typ = u32 & 0xff;
-  let s = `${major}.${minor}.${patch}`;
-  if (typ === 64) s += " (alpha)";
-  else if (typ === 128) s += " (beta)";
-  else if (typ === 192) s += " (rc)";
-  else if (typ !== 255 && typ !== 0) s += ` (type ${typ})`;
-  return s;
-}
+// decodeFlightSwVersion / formatUidWordPair / bytesToHexTrim / humanizeBoardIdName
+//移至 JS/ui/mavlink-helpers.js
 
-function formatUidWordPair(dv, off) {
-  const lo = dv.getUint32(off, true);
-  const hi = dv.getUint32(off + 4, true);
-  if ((lo | hi) === 0) return "";
-  return `${hi.toString(16).padStart(8, "0")}${lo.toString(16).padStart(8, "0")}`;
-}
-
-function bytesToHexTrim(u8, start, len) {
-  let end = start + len;
-  while (end > start && u8[end - 1] === 0) end -= 1;
-  if (end <= start) return "";
-  let s = "";
-  for (let i = start; i < end; i += 1) s += u8[i].toString(16).padStart(2, "0");
-  return s;
-}
-
-function humanizeBoardIdName(raw) {
-  if (!raw || typeof raw !== "string") return "";
-  return raw
-    .replace(/^AP_HW_/i, "")
-    .replace(/^TARGET_HW_/i, "")
-    .replace(/_/g, " ");
-}
-
-/** MAVLink2 线序与 pymavlink 一致：QQ + IIII + HH + 三组 8B custom + uid2[18]（capabilities、uid 在前） */
+/** MAVLink common AUTOPILOT_VERSION（#148）线序：capabilities(8) + 四段 sw + board + 三组 custom[8] + vendor/product + uid(8) + uid2[18] */
 function parseAutopilotVersion(payload) {
-  if (!payload || payload.length < 32) return;
+  if (!payload || payload.length < 24) {
+    if (typeof log === "function") log(`⚠️ #148 载荷过短：${payload?.length ?? 0} byte，放弃解析`, "debug");
+    return;
+  }
+  if (typeof log === "function") log(`📥 #148 AUTOPILOT_VERSION 收到，载荷 ${payload.length} byte`, "debug");
   try {
     const u8 = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
     const dv = mavlinkPayloadView(payload);
-    const flight_sw_version = dv.getUint32(16, true);
-    const middleware_sw_version = dv.getUint32(20, true);
-    const os_sw_version = dv.getUint32(24, true);
-    const board_version = dv.getUint32(28, true);
+
+    const flight_sw_version = dv.getUint32(8, true);
+    const middleware_sw_version = dv.getUint32(12, true);
+    const os_sw_version = dv.getUint32(16, true);
+    const board_version = dv.getUint32(20, true);
+
     let vendor_id = 0;
     let product_id = 0;
-    if (payload.length >= 36) {
-      vendor_id = dv.getUint16(32, true);
-      product_id = dv.getUint16(34, true);
+    if (payload.length >= 52) {
+      vendor_id = dv.getUint16(48, true);
+      product_id = dv.getUint16(50, true);
     }
 
     const boardType = (board_version >>> 16) & 0xffff;
@@ -437,16 +408,20 @@ function parseAutopilotVersion(payload) {
       hardwareText += ` · vendor ${vendor_id} / product ${product_id}`;
     }
 
-    const git = u8.length >= 44 ? bytesToHexTrim(u8, 36, 8) : "";
+    const git = u8.length >= 32 ? bytesToHexTrim(u8, 24, 8) : "";
     let firmwareText = decodeFlightSwVersion(flight_sw_version);
     if (git) firmwareText += ` · ${git.slice(0, 12)}${git.length > 12 ? "…" : ""}`;
+
+    if (typeof log === "function") {
+      log(`🔍 #148 解析结果：固件=${firmwareText} 硬件=${hardwareText} 板型=${boardType}`, "debug");
+    }
 
     let uidText = "";
     if (u8.length >= 78) {
       uidText = bytesToHexTrim(u8, 60, 18);
     }
-    if (!uidText) {
-      uidText = formatUidWordPair(dv, 8);
+    if (!uidText && u8.length >= 60) {
+      uidText = formatUidWordPair(dv, 52);
     }
     if (uidText && !uidText.startsWith("0x")) uidText = `0x${uidText}`;
 
@@ -478,11 +453,17 @@ function parseAutopilotVersion(payload) {
     }
     if (idEl) {
       idEl.textContent = uidText || "—";
-      idEl.className = uidText ? "muted" : "muted";
+      idEl.className = uidText ? "ok" : "muted";
       idEl.title = uidText ? "uid2 优先，否则 64-bit uid" : "飞控未提供 UID";
+    }
+    if (typeof log === "function") {
+      log(`✅ 概览字段已更新：固件 → ${firmwareText} / 硬件 → ${hardwareText} / UID → ${uidText || "—"}`, "debug");
     }
   } catch (e) {
     console.warn("parseAutopilotVersion", e);
+    if (typeof log === "function") {
+      log(`⚠️ #148 解析异常：${e?.message || e}`, "debug");
+    }
   }
 }
 
@@ -524,18 +505,7 @@ function parseEkfStatusReport(payload) {
   }
 }
 
-let _paramTableRenderRaf = null;
-function scheduleParamTableRender() {
-  if (window._paramLoadActive) return;
-  if (_paramTableRenderRaf != null) return;
-  _paramTableRenderRaf = requestAnimationFrame(() => {
-    _paramTableRenderRaf = null;
-    renderSortedParams();
-    try {
-      if (typeof window.refreshAllParamsTable === "function") window.refreshAllParamsTable();
-    } catch (_) { /* 忽略：全部参数面板可能尚未加载 */ }
-  });
-}
+// scheduleParamTableRender 移至 JS/core/mavlink-helpers.js
 
 function parseParam(p){ /* 保持不变 */ 
   let dv = mavlinkPayloadView(p);
@@ -565,6 +535,13 @@ function parseParam(p){ /* 保持不变 */
       typeof window.endParamLoadingUI === "function"
     ) {
       window.endParamLoadingUI(true, "complete");
+      setTimeout(() => {
+        try {
+          if (typeof window.requestAutopilotVersionFromVehicle === "function") {
+            window.requestAutopilotVersionFromVehicle();
+          }
+        } catch (_) { /* ignore */ }
+      }, 250);
     }
   } else {
     scheduleParamTableRender();
@@ -588,28 +565,9 @@ function parseParam(p){ /* 保持不变 */
   }
 }
 
-function renderSortedParams() {
-  const el = document.getElementById("params");
-  const pmap = window.params;
-  if (!el || !(pmap instanceof Map)) return;
-  const total = Number.isFinite(window._paramCount) ? window._paramCount : pmap.size;
-  const rows = Array.from(pmap.entries())
-    .sort((a, b) => a[0].localeCompare(b[0], "en", { sensitivity: "base" }))
-    .map(([k, v], i) => `${i + 1}/${total} ${k}=${Number(v).toFixed(4)}`);
-  el.innerHTML = rows.join("<br>");
-}
+// renderSortedParams 移至 JS/core/mavlink-helpers.js
 
-function getFlightModeString(custom_mode){
-  const modes = {
-    0: "STABILIZE", 1: "ACRO", 2: "ALT_HOLD", 3: "AUTO", 4: "GUIDED",
-    5: "LOITER", 6: "RTL", 9: "LAND", 10: "DRIFT", 11: "CIRCLE",
-    13: "SPORT", 14: "POSHOLD", 15: "BRAKE", 16: "THROW",
-    17: "AVOID_ADSB", 18: "GUIDED_NOGPS", 19: "SMART_RTL",
-    20: "FLOWHOLD", 21: "FOLLOW", 22: "ZIGZAG", 23: "SYSTEMID",
-    24: "AUTOROTATE", 25: "AUTO_RTL"
-  };
-  return modes[custom_mode] || `UNKNOWN(${custom_mode})`;
-}
+// getFlightModeString 移至 JS/core/mavlink-helpers.js
 
 function parseEscTelemetryGroup(id, payload) {
   const baseMotor = ((id - 11030) * 4) + 1;
@@ -685,52 +643,4 @@ function parseBatteryStatus(payload) {
   });
 }
 
-// 把常用的已解析变量同步到 window.telemetry，优先使用 window 上的即时变量，
-// 并从 params Map 中读取参数表中的值作为补充。
-function syncToTelemetry(){
-  try{
-    window.telemetry = window.telemetry || {};
-    // 基本映射（key 名称与 PARAM_LIST 保持一致）
-    window.telemetry.roll = (typeof window.roll !== 'undefined') ? window.roll : window.telemetry.roll;
-    window.telemetry.pitch = (typeof window.pitch !== 'undefined') ? window.pitch : window.telemetry.pitch;
-    window.telemetry.yaw = (typeof window.yaw !== 'undefined') ? window.yaw : window.telemetry.yaw;
-    // 注意：GLOBAL_POSITION_INT 中设置为 window.altitude
-    if(typeof window.altitude !== 'undefined') window.telemetry.alt = window.altitude;
-    if(typeof window.airspeed !== 'undefined') window.telemetry.airspeed = window.airspeed;
-    if(typeof window.groundspeed !== 'undefined') window.telemetry.groundspeed = window.groundspeed;
-    if(typeof window.climb_rate !== 'undefined') window.telemetry.climbrate = window.climb_rate;
-    if(typeof window.battery_voltage !== 'undefined') window.telemetry.battery_voltage = window.battery_voltage;
-    if(typeof window.armed !== 'undefined') window.telemetry.armed = window.armed;
-    if(typeof window.flight_mode !== 'undefined') window.telemetry.flight_mode = window.flight_mode;
-    const imuG = (typeof window.highresImuG === 'object' && window.highresImuG && (Date.now() - window.highresImuG.t) < 500)
-      ? window.highresImuG
-      : (typeof window.scaledImuG === 'object' && window.scaledImuG && (Date.now() - window.scaledImuG.t) < 500)
-        ? window.scaledImuG
-        : null;
-    if (imuG) {
-      window.telemetry.accel_x_g = imuG.x;
-      window.telemetry.accel_y_g = imuG.y;
-      window.telemetry.accel_z_g = imuG.z;
-    }
-
-    const pmap = window.params;
-    if (pmap instanceof Map) {
-      const supplement = ['esc1_temp','battery_remaining','battery_usedmah','battery_temp','esc1_volt','esc1_curr','battery_cell1','battery_voltage2'];
-      for(const k of supplement){
-        if(pmap.has(k) && (typeof pmap.get(k) !== 'undefined')){
-          window.telemetry[k] = pmap.get(k);
-        }
-      }
-      // 也把所有已知 params 列表小范围优先同步（避免覆盖已经存在的 telemetry 值）
-      // 但避免把大量无关参数一次性写入，只有上面的 supplement 和已存在于 telemetry 的 key 会被覆盖。
-    }
-
-    // 兼容性：将单独存在于 window 上但未写入 telemetry 的常见变量，也写入
-    const extraFromWindow = ['lat','lon','gps_fix_type','wp_current','vibe_status','ekf_status'];
-    extraFromWindow.forEach(k=>{ if(typeof window[k] !== 'undefined' && typeof window.telemetry[k] === 'undefined') window.telemetry[k] = window[k]; });
-
-  }catch(e){ console.warn('syncToTelemetry failed', e); }
-}
-
-window.syncToTelemetry = syncToTelemetry;
-window.renderSortedParams = renderSortedParams;
+// syncToTelemetry 与 renderSortedParams 移至 mavlink-helpers.js

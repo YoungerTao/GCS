@@ -186,6 +186,7 @@
           <div class="ov-kv"><span>固件版本</span><span id="ov-fw-version" class="muted" title="MAVLink AUTOPILOT_VERSION.flight_sw_version">等待飞控上报…</span></div>
           <div class="ov-kv"><span>飞控硬件</span><span id="ov-board-hardware" class="muted" title="board_version 高 16 位为 ArduPilot 板型 ID">等待飞控上报…</span></div>
           <div class="ov-kv"><span>设备 ID</span><span id="ov-device-id" class="muted" title="uid2 优先，否则 uid">等待飞控上报…</span></div>
+          <div class="ov-kv"><span></span><button type="button" id="ov-refresh-version" style="font-size:0.75em;padding:2px 8px;cursor:pointer;">🔄 刷新固件/硬件信息</button></div>
           </div>
         </article>
 
@@ -866,7 +867,10 @@
 <script src="JS/core/ardupilot-devid.js" defer></script>
 <script src="JS/ui/status-messages.js" defer></script>
 <script src="JS/core/mavlink.js" defer></script>
+<script src="JS/core/mavlink-helpers.js" defer></script>
 <script src="JS/services/serial.js" defer></script>
+<script src="JS/services/com-bridge.js" defer></script>
+<script src="JS/services/param-loader.js" defer></script>
 <script src="JS/ui/overview-sensors.js" defer></script>
 <script src="JS/ui/hud-map-tabs.js" defer></script>
 <script src="JS/ui/quick-grid.js" defer></script>

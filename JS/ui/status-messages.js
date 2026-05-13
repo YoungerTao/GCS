@@ -191,7 +191,30 @@
     return null;
   }
 
-  async function translateToZh(en) {
+  let _translateQueue = [];
+  let _translateTimer = null;
+
+  /** 防抖 + 限速翻译：最多每 500ms 翻译一条，避免 MyMemory 拒绝、429 限流或频繁翻译无意义文本 */
+  function enqueueTranslation(en, callback) {
+    _translateQueue.push({ en, callback });
+    if (_translateTimer) return;
+    _translateTimer = setInterval(() => {
+      if (!_translateQueue.length) {
+        clearInterval(_translateTimer);
+        _translateTimer = null;
+        return;
+      }
+      const job = _translateQueue.shift();
+      translateOne(job.en, job.callback);
+    }, 500);
+  }
+
+  async function translateOne(en, callback) {
+    const result = await doTranslate(en);
+    try { if (typeof callback === "function") callback(result); } catch (_) { /* ignore */ }
+  }
+
+  async function doTranslate(en) {
     const t = (en || "").trim();
     if (!t) return "";
     const low = t.toLowerCase();
@@ -203,10 +226,7 @@
     }
     try {
       const q = t.slice(0, 450);
-      const url =
-        "https://api.mymemory.translated.net/get?q=" +
-        encodeURIComponent(q) +
-        "&langpair=en|zh-CN";
+      const url = "https://api.mymemory.translated.net/get?q=" + encodeURIComponent(q) + "&langpair=en|zh-CN";
       const r = await fetch(url);
       const j = await r.json();
       let zh = t;
@@ -301,7 +321,7 @@
       list.removeChild(list.lastChild);
     }
 
-    translateToZh(entry.textEn).then((zh) => {
+    enqueueTranslation(entry.textEn, (zh) => {
       const line = zh || entry.textEn;
       if (body.isConnected) body.textContent = line;
     });
