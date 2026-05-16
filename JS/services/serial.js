@@ -244,7 +244,15 @@ async function connect() {
     try { await refreshPorts(); } catch (e) { /* ignore */ }
     setConnectionUI("connected");
     schedulePostConnectMavlinkInfoRequests();
-    setDefaultStreamRates().catch((e) => log(`⚠️ 流速率/遥测初始化失败: ${e?.message || e}`));
+    if (typeof window.applyConnectionTelemetrySetup === "function") {
+      window.applyConnectionTelemetrySetup()
+        .then(() => {
+          if (typeof window.startTelemetryMaintenance === "function") {
+            window.startTelemetryMaintenance(window._telemetryProfile || "sr0");
+          }
+        })
+        .catch((e) => log(`⚠️ 流速率/遥测初始化失败: ${e?.message || e}`));
+    }
 
     // 概览「刷新固件/硬件信息」按钮
     const refreshBtn = document.getElementById("ov-refresh-version");
@@ -409,38 +417,8 @@ function schedulePostConnectMavlinkInfoRequests() {
   }, 500);
 }
 
-async function setDefaultStreamRates() {
-  await _sleepMs(1500);
-  const rates = { SR0_EXTRA1: 4, SR0_EXTRA2: 4, SR0_EXTRA3: 2, SR0_EXT_STAT: 2, SR0_POSITION: 2, SR0_RC_CHAN: 2 };
-  for (const [name, value] of Object.entries(rates)) {
-    await window.sendParamSet(name, value);
-    await _sleepMs(80);
-  }
-  log("✅ SR0 流速率已写入飞控");
-  await _sleepMs(500);
-  await requestDataStream();
-  log("✅ 已请求遥测推送");
-}
-
-async function requestDataStream() {
-  const ts = window.sysid || 1;
-  const tc = window.compid || 1;
-  const streams = [
-    { sid: 10, hz: 4 }, { sid: 11, hz: 4 },
-    { sid: 6, hz: 2 }, { sid: 2, hz: 2 },
-    { sid: 3, hz: 2 }, { sid: 12, hz: 2 },
-  ];
-  for (const { sid, hz } of streams) {
-    await send_v2(66, [ts, tc, sid & 0xff, hz & 0xff, (hz >> 8) & 0xff, 1], 21);
-    await _sleepMs(50);
-  }
-}
-
 function startTelemetryRequests() {
-  if (window._telemetryReqTimer) clearInterval(window._telemetryReqTimer);
-  window._telemetryReqTimer = setInterval(async () => {
-    try { await requestDataStream(); } catch (e) { log(`⚠️ 周期遥测请求失败: ${e.message}`); }
-  }, 30000);
+  /* 周期遥测维护由 applyConnectionTelemetrySetup → startTelemetryMaintenance 按固件版本启动 */
 }
 
 // ========== 参数加载（保留引用 param-loader.js） ==========

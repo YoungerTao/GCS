@@ -76,7 +76,7 @@
   },
   "AEROM_PATH_SCALE": {
     "n": "路径比例",
-    "d": "Scale factor for Path/Box size. 0.5 would half the distances in maneuvers. Radii are unaffected.\n\n范围: 0.1 … 100",
+    "d": "路径/框大小的比例因子。 0.5 将使机动距离减半。半径不受影响。\n\n范围：0.1 … 100",
     "src": "Copter"
   },
   "AEROM_ROL_COR_TC": {
@@ -963,8 +963,8 @@
     "src": "Copter"
   },
   "LTE_SCRPORT": {
-    "n": "Scripting Serial Port",
-    "d": "Scripting Serial port to use for the LTE modem. This is the index of the SCR_SDEV ports that are set to 2 for \"MAVLink2\"\n\n范围: 0 … 8",
+    "n": "编写串行端口脚本",
+    "d": "编写用于 LTE 调制解调器的串行端口脚本。这是“MAVLink2”设置为 2 的 SCR_SDEV 端口的索引\n\n范围：0 … 8",
     "src": "Copter"
   },
   "LTE_SERPORT": {
@@ -1030,7 +1030,7 @@
     "src": "Copter"
   },
   "PORT": {
-    "n": "Scripting serial port number",
+    "n": "脚本串口号",
     "d": "Which Scripting serial port the sensor is connected at.\n\n范围: 1 … 10",
     "src": "Copter"
   },
@@ -1184,7 +1184,7 @@
   },
   "RK9_SCRPORT": {
     "n": "Rockblock 脚本串行端口",
-    "d": "Scripting Serial port number to which the Rockblock is connected for HL2 messages This is the index of the SCR_SDEV ports that are set to 2 for \"MavlinkHL\"\n\n范围: 0 … 8",
+    "d": "脚本 Rockblock 连接用于 HL2 消息的串行端口号 这是 SCR_SDEV 端口的索引，对于“MavlinkHL”设置为 2\n\n范围：0 … 8",
     "src": "Copter"
   },
   "RK9_SERPORT": {
@@ -1454,7 +1454,7 @@
   },
   "TOFSENSE_ID2": {
     "n": "TOFSENSE-M Second ID",
-    "d": "Second TOFSENSE-M sensor ID. This cannot be 0. You can change ID of sensor from NAssistant Software\n\n范围: 1 … 255",
+    "d": "第二个 TOFSENSE-M 传感器 ID。该值不能为 0。您可以通过 NAssistant 软件更改传感器的 ID\n\n范围：1 … 255",
     "src": "Copter"
   },
   "TOFSENSE_ID3": {
@@ -3287,7 +3287,7 @@
     "u": "V"
   },
   "BATT2_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -3499,7 +3499,7 @@
     "u": "V"
   },
   "BATT3_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -3711,7 +3711,7 @@
     "u": "V"
   },
   "BATT4_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -3923,7 +3923,7 @@
     "u": "V"
   },
   "BATT5_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -4135,7 +4135,7 @@
     "u": "V"
   },
   "BATT6_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -4347,7 +4347,7 @@
     "u": "V"
   },
   "BATT7_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -4559,7 +4559,7 @@
     "u": "V"
   },
   "BATT8_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -4771,7 +4771,7 @@
     "u": "V"
   },
   "BATT9_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -4983,7 +4983,7 @@
     "u": "V"
   },
   "BATTA_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -5195,7 +5195,7 @@
     "u": "V"
   },
   "BATTB_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -5407,7 +5407,7 @@
     "u": "V"
   },
   "BATTC_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -5619,7 +5619,7 @@
     "u": "V"
   },
   "BATTD_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -5831,7 +5831,7 @@
     "u": "V"
   },
   "BATTE_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -6043,7 +6043,7 @@
     "u": "V"
   },
   "BATTF_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -6255,7 +6255,7 @@
     "u": "V"
   },
   "BATTG_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -6467,7 +6467,7 @@
     "u": "V"
   },
   "BATT_CURR_MULT": {
-    "n": "Scales reported power monitor current",
+    "n": "缩放报告的功率监视器电流",
     "d": "乘数应用于所有当前相关报告，以便在没有 UAVCAN 参数访问或当前拆分应用程序时进行调整\n\n范围：0.1 … 10",
     "src": "Copter"
   },
@@ -7815,23 +7815,23 @@
     "src": "Copter"
   },
   "CAN_SLCAN_CPORT": {
-    "n": "SLCAN Route",
+    "n": "SLCAN路线",
     "d": "路由到SLCAN的CAN接口ID，0表示不路由\n\n取值：\n  0：禁用\n  1: First interface\n  2: Second interface",
     "src": "Copter",
     "rb": true
   },
   "CAN_SLCAN_SDELAY": {
-    "n": "SLCAN Start Delay",
+    "n": "SLCAN 启动延迟",
     "d": "设置 SERNUM 后 slcan 启动的持续时间（以秒为单位）。\n\n范围：0 … 127",
     "src": "Copter"
   },
   "CAN_SLCAN_SERNUM": {
-    "n": "SLCAN Serial Port",
+    "n": "SLCAN串口",
     "d": "Serial Port ID to be used for temporary SLCAN iface, -1 means no temporary serial. This parameter is automatically reset on reboot or on timeout. See CAN_SLCAN_TIMOUT for timeout details\n\n取值:\n  -1: Disabled\n  0: Serial0\n  1: Serial1\n  2: Serial2\n  3: Serial3\n  4: Serial4\n  5: Serial5\n  6: Serial6",
     "src": "Copter"
   },
   "CAN_SLCAN_TIMOUT": {
-    "n": "SLCAN Timeout",
+    "n": "SLCAN 超时",
     "d": "SLCAN 在数秒内切换回原始驱动程序之前的不活动持续时间。\n\n范围：0 … 127",
     "src": "Copter"
   },
@@ -8494,17 +8494,17 @@
   },
   "COMPASS_SCALE": {
     "n": "罗盘1比例因子",
-    "d": "Scaling factor for first compass to compensate for sensor scaling errors. If this is 0 then no scaling is done\n\n范围: 0 … 1.3",
+    "d": "第一个罗盘的比例因子，用于补偿传感器比例误差。如果为 0，则不进行缩放\n\n范围：0 … 1.3",
     "src": "Copter"
   },
   "COMPASS_SCALE2": {
     "n": "指南针2比例因子",
-    "d": "Scaling factor for 2nd compass to compensate for sensor scaling errors. If this is 0 then no scaling is done\n\n范围: 0 … 1.3",
+    "d": "第二个罗盘的比例因子，用于补偿传感器比例误差。如果为 0，则不进行缩放\n\n范围：0 … 1.3",
     "src": "Copter"
   },
   "COMPASS_SCALE3": {
     "n": "Compass3 比例因子",
-    "d": "Scaling factor for 3rd compass to compensate for sensor scaling errors. If this is 0 then no scaling is done\n\n范围: 0 … 1.3",
+    "d": "第三罗盘的比例因子，用于补偿传感器比例误差。如果为 0，则不进行缩放\n\n范围：0 … 1.3",
     "src": "Copter"
   },
   "COMPASS_USE": {
@@ -9279,7 +9279,7 @@
   },
   "EFI_THRLIN_COEF2": {
     "n": "Throttle linearisation - Second Order",
-    "d": "Second Order Polynomial Coefficient (=0, if throttle is second order polynomial trendline)\n\n范围: -1 … 1",
+    "d": "二阶多项式系数（=0，如果节流是二阶多项式趋势线）\n\n范围：-1 … 1",
     "src": "Copter",
     "rb": true
   },
@@ -10217,8 +10217,8 @@
     "rb": true
   },
   "FFT_SAMPLE_MODE": {
-    "n": "Sample Mode",
-    "d": "Sampling mode (and therefore rate). 0: Gyro rate sampling, 1: Fast loop rate sampling, 2: Fast loop rate / 2 sampling, 3: Fast loop rate / 3 sampling. Takes effect on reboot.\n\n范围: 0 … 4",
+    "n": "采样模式",
+    "d": "采样模式（以及采样率）。 0：陀螺仪速率采样，1：快速循环速率采样，2：快速循环速率/2 采样，3：快速循环速率/3 采样。重启后生效。\n\n范围：0 … 4",
     "src": "Copter",
     "rb": true
   },
@@ -10837,7 +10837,7 @@
     "rb": true
   },
   "GPS_SAVE_CFG": {
-    "n": "Save GPS configuration",
+    "n": "保存 GPS 配置",
     "d": "确定是否应将此 GPS 的配置写入 GPS 上的非易失性存储器。目前适用于 UBlox 6 系列及以上版本。\n\n取值：\n  0：不保存配置\n  1：保存配置\n  2：仅在需要时保存",
     "src": "Copter"
   },
@@ -11185,7 +11185,7 @@
   },
   "H_DCP_SCALER": {
     "n": "差分集体音调缩放器",
-    "d": "Scaling factor applied to the differential-collective-pitch\n\n范围: 0 … 1",
+    "d": "应用于差分集体节距的比例因子\n\n范围：0 … 1",
     "src": "Copter"
   },
   "H_DCP_TRIM": {
@@ -11360,8 +11360,8 @@
     "src": "Copter"
   },
   "H_YAW_SCALER": {
-    "n": "Scaler for yaw mixing",
-    "d": "Scaler for mixing yaw into roll or pitch.\n\n范围: -10 … 10",
+    "n": "用于偏航混合的定标器",
+    "d": "用于将偏航混合为横滚或俯仰的缩放器。\n\n范围：-10 … 10",
     "src": "Copter"
   },
   "H_YAW_TRIM": {
@@ -16335,7 +16335,7 @@
   },
   "OSD_ARM_SCR": {
     "n": "手臂屏",
-    "d": "Screen to be shown on Arm event. Zero to disable the feature.\n\n范围: 0 … 4",
+    "d": "Arm 事件上显示的屏幕。为零则禁用该功能。\n\n范围：0 … 4",
     "src": "Copter"
   },
   "OSD_BTN_DELAY": {
@@ -16349,13 +16349,13 @@
     "src": "Copter"
   },
   "OSD_CHAN": {
-    "n": "Screen switch transmitter channel",
+    "n": "屏幕切换发射通道",
     "d": "This sets the channel used to switch different OSD screens.\n\n取值:\n  0: Disable\n  10: Chan10\n  11: Chan11\n  12: Chan12\n  13: Chan13\n  14: Chan14\n  15: Chan15\n  16: Chan16\n  5: Chan5\n  6: Chan6\n  7: Chan7\n  8: Chan8\n  9: Chan9",
     "src": "Copter"
   },
   "OSD_DSARM_SCR": {
     "n": "撤防屏幕",
-    "d": "Screen to be shown on disarm event. Zero to disable the feature.\n\n范围: 0 … 4",
+    "d": "撤防事件时显示的屏幕。为零则禁用该功能。\n\n范围：0 … 4",
     "src": "Copter"
   },
   "OSD_FONT": {
@@ -16366,7 +16366,7 @@
   },
   "OSD_FS_SCR": {
     "n": "故障保护屏幕",
-    "d": "Screen to be shown on failsafe event. Zero to disable the feature.\n\n范围: 0 … 4",
+    "d": "发生故障安全事件时显示的屏幕。为零则禁用该功能。\n\n范围：0 … 4",
     "src": "Copter"
   },
   "OSD_H_OFFSET": {
@@ -16396,7 +16396,7 @@
     "src": "Copter"
   },
   "OSD_SW_METHOD": {
-    "n": "Screen switch method",
+    "n": "画面切换方式",
     "d": "This sets the method used to switch different OSD screens.\n\n取值:\n  0: switch to next screen if channel value was changed\n  1: select screen based on pwm ranges specified for each screen\n  2: switch to next screen after low to high transition and every 1s while channel value is high",
     "src": "Copter"
   },
@@ -17335,17 +17335,17 @@
     "src": "Copter"
   },
   "OSD1_STATS_EN": {
-    "n": "STATS_EN",
+    "n": "统计_EN",
     "d": "显示航班统计数据\n\n取值：\n  0：禁用\n  1：启用",
     "src": "Copter"
   },
   "OSD1_STATS_X": {
-    "n": "STATS_X",
+    "n": "统计_X",
     "d": "屏幕上的水平位置\n\n范围：0 … 59",
     "src": "Copter"
   },
   "OSD1_STATS_Y": {
-    "n": "STATS_Y",
+    "n": "统计_Y",
     "d": "Vertical position on screen\n\n范围: 0 … 21",
     "src": "Copter"
   },
@@ -18340,17 +18340,17 @@
     "src": "Copter"
   },
   "OSD2_STATS_EN": {
-    "n": "STATS_EN",
+    "n": "统计_EN",
     "d": "显示航班统计数据\n\n取值：\n  0：禁用\n  1：启用",
     "src": "Copter"
   },
   "OSD2_STATS_X": {
-    "n": "STATS_X",
+    "n": "统计_X",
     "d": "屏幕上的水平位置\n\n范围：0 … 59",
     "src": "Copter"
   },
   "OSD2_STATS_Y": {
-    "n": "STATS_Y",
+    "n": "统计_Y",
     "d": "Vertical position on screen\n\n范围: 0 … 21",
     "src": "Copter"
   },
@@ -19345,17 +19345,17 @@
     "src": "Copter"
   },
   "OSD3_STATS_EN": {
-    "n": "STATS_EN",
+    "n": "统计_EN",
     "d": "显示航班统计数据\n\n取值：\n  0：禁用\n  1：启用",
     "src": "Copter"
   },
   "OSD3_STATS_X": {
-    "n": "STATS_X",
+    "n": "统计_X",
     "d": "屏幕上的水平位置\n\n范围：0 … 59",
     "src": "Copter"
   },
   "OSD3_STATS_Y": {
-    "n": "STATS_Y",
+    "n": "统计_Y",
     "d": "Vertical position on screen\n\n范围: 0 … 21",
     "src": "Copter"
   },
@@ -20350,17 +20350,17 @@
     "src": "Copter"
   },
   "OSD4_STATS_EN": {
-    "n": "STATS_EN",
+    "n": "统计_EN",
     "d": "显示航班统计数据\n\n取值：\n  0：禁用\n  1：启用",
     "src": "Copter"
   },
   "OSD4_STATS_X": {
-    "n": "STATS_X",
+    "n": "统计_X",
     "d": "屏幕上的水平位置\n\n范围：0 … 59",
     "src": "Copter"
   },
   "OSD4_STATS_Y": {
-    "n": "STATS_Y",
+    "n": "统计_Y",
     "d": "Vertical position on screen\n\n范围: 0 … 21",
     "src": "Copter"
   },
@@ -23211,7 +23211,7 @@
   },
   "RNGFND1_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -23358,7 +23358,7 @@
   },
   "RNGFND2_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -23505,7 +23505,7 @@
   },
   "RNGFND3_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -23652,7 +23652,7 @@
   },
   "RNGFND4_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -23799,7 +23799,7 @@
   },
   "RNGFND5_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -23946,7 +23946,7 @@
   },
   "RNGFND6_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -24093,7 +24093,7 @@
   },
   "RNGFND7_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -24240,7 +24240,7 @@
   },
   "RNGFND8_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -24387,7 +24387,7 @@
   },
   "RNGFND9_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -24534,7 +24534,7 @@
   },
   "RNGFNDA_SCALING": {
     "n": "测距仪缩放",
-    "d": "Scaling factor between rangefinder reading and distance. For the linear and inverted functions this is in meters per volt. For the hyperbolic function the units are meterVolts. For Maxbotix serial sonar this is unit conversion to meters.",
+    "d": "测距仪读数和距离之间的比例因子。对于线性和反函数，单位为米每伏。对于双曲函数，单位是米伏特。对于 Maxbotix 串行声纳，这是单位转换为米。",
     "src": "Copter",
     "u": "m/V"
   },
@@ -24620,7 +24620,7 @@
   },
   "RPM1_SCALING": {
     "n": "转速缩放",
-    "d": "Scaling factor between sensor reading and RPM.",
+    "d": "传感器读数和 RPM 之间的比例因子。",
     "src": "Copter"
   },
   "RPM1_TYPE": {
@@ -24665,7 +24665,7 @@
   },
   "RPM2_SCALING": {
     "n": "转速缩放",
-    "d": "Scaling factor between sensor reading and RPM.",
+    "d": "传感器读数和 RPM 之间的比例因子。",
     "src": "Copter"
   },
   "RPM2_TYPE": {
@@ -24710,7 +24710,7 @@
   },
   "RPM3_SCALING": {
     "n": "转速缩放",
-    "d": "Scaling factor between sensor reading and RPM.",
+    "d": "传感器读数和 RPM 之间的比例因子。",
     "src": "Copter"
   },
   "RPM3_TYPE": {
@@ -24755,7 +24755,7 @@
   },
   "RPM4_SCALING": {
     "n": "转速缩放",
-    "d": "Scaling factor between sensor reading and RPM.",
+    "d": "传感器读数和 RPM 之间的比例因子。",
     "src": "Copter"
   },
   "RPM4_TYPE": {
@@ -24827,24 +24827,24 @@
     "u": "m/s"
   },
   "SCHED_DEBUG": {
-    "n": "Scheduler debug level",
+    "n": "调度程序调试级别",
     "d": "Set to non-zero to enable scheduler debug messages. When set to show \"Slips\" the scheduler will display a message whenever a scheduled task is delayed due to too much CPU load. When set to ShowOverruns the scheduled will display a message whenever a task takes longer than the limit promised in the task table.\n\n取值:\n  0: Disabled\n  2: ShowSlips\n  3: ShowOverruns",
     "src": "Copter"
   },
   "SCHED_LOOP_RATE": {
-    "n": "Scheduling main loop rate",
+    "n": "调度主循环速率",
     "d": "This controls the rate of the main control loop in Hz. This should only be changed by developers. This only takes effect on restart. Values over 400 are considered highly experimental.\n\n范围: 50 … 400",
     "src": "Copter",
     "u": "Hz",
     "rb": true
   },
   "SCHED_OPTIONS": {
-    "n": "Scheduling options",
+    "n": "日程安排选项",
     "d": "This controls optional aspects of the scheduler.\n\n位定义:\n  bit0: Enable per-task perf info",
     "src": "Copter"
   },
   "SCR_DEBUG_OPTS": {
-    "n": "Scripting Debug Level",
+    "n": "脚本调试级别",
     "d": "调试选项\n\n位定义：\n  bit0：如果所有脚本都已停止，则没有可运行的脚本消息\n  bit1：有关内存使用情况和执行时间的运行时消息\n  bit2：禁止将脚本记录到数据闪存\n  bit3：记录运行时内存使用情况和执行时间\n  bit4：禁用预解锁检查\n  bit5：将当前脚本的 CRC 保存到加载和运行的校验和参数中，启用预准备\n  bit6：分配失败时禁用堆扩展",
     "src": "Copter"
   },
@@ -24861,7 +24861,7 @@
     "rb": true
   },
   "SCR_HEAP_SIZE": {
-    "n": "Scripting Heap Size",
+    "n": "脚本堆大小",
     "d": "可用于脚本编写的内存量\n\n范围：1024 … 1048576",
     "src": "Copter",
     "rb": true
@@ -24895,49 +24895,49 @@
     "rb": true
   },
   "SCR_SDEV_EN": {
-    "n": "Scripting serial device enable",
+    "n": "编写串行设备启用脚本",
     "d": "启用串行设备脚本\n\n取值：\n  0：禁用\n  1：启用",
     "src": "Copter",
     "rb": true
   },
   "SCR_THD_PRIORITY": {
-    "n": "Scripting thread priority",
+    "n": "脚本线程优先级",
     "d": "This sets the priority of the scripting thread. This is normally set to a low priority to prevent scripts from interfering with other parts of the system. Advanced users can change this priority if scripting needs to be prioritised for realtime applications. WARNING: changing this parameter can impact the stability of your flight controller. The scipting thread priority in this parameter is chosen based on a set of system level priorities for other subsystems. It is strongly recommended that you use the lowest priority that is sufficient for your application. Note that all scripts run at the same priority, so if you raise this priority you must carefully audit all lua scripts for behaviour that does not interfere with the operation of the system.\n\n取值:\n  0: Normal\n  1: IO Priority\n  2: Storage Priority\n  3: UART Priority\n  4: I2C Priority\n  5: SPI Priority\n  6: Timer Priority\n  7: Main Priority\n  8: Boost Priority",
     "src": "Copter",
     "rb": true
   },
   "SCR_USER1": {
-    "n": "Scripting User Parameter1",
+    "n": "编写用户参数1",
     "d": "脚本的通用用户变量输入",
     "src": "Copter"
   },
   "SCR_USER2": {
-    "n": "Scripting User Parameter2",
+    "n": "编写用户参数2的脚本",
     "d": "脚本的通用用户变量输入",
     "src": "Copter"
   },
   "SCR_USER3": {
-    "n": "Scripting User Parameter3",
+    "n": "编写用户参数3的脚本",
     "d": "脚本的通用用户变量输入",
     "src": "Copter"
   },
   "SCR_USER4": {
-    "n": "Scripting User Parameter4",
+    "n": "编写用户参数4的脚本",
     "d": "脚本的通用用户变量输入",
     "src": "Copter"
   },
   "SCR_USER5": {
-    "n": "Scripting User Parameter5",
+    "n": "编写用户参数5的脚本",
     "d": "脚本的通用用户变量输入",
     "src": "Copter"
   },
   "SCR_USER6": {
-    "n": "Scripting User Parameter6",
+    "n": "编写用户参数6的脚本",
     "d": "脚本的通用用户变量输入",
     "src": "Copter"
   },
   "SCR_VM_I_COUNT": {
-    "n": "Scripting Virtual Machine Instruction Count",
+    "n": "编写虚拟机指令计数脚本",
     "d": "The number virtual machine instructions that can be run before considering a script to have taken an excessive amount of time\n\n范围: 1000 … 1000000",
     "src": "Copter"
   },
@@ -26657,20 +26657,20 @@
     "src": "Copter"
   },
   "SIM_GYR2_BIAS_X": {
-    "n": "Second Gyro bias",
-    "d": "Second Gyro bias (X-axis)",
+    "n": "第二陀螺仪偏置",
+    "d": "第二陀螺仪偏置（X 轴）",
     "src": "Copter",
     "u": "rad/s"
   },
   "SIM_GYR2_BIAS_Y": {
-    "n": "Second Gyro bias",
-    "d": "Second Gyro bias (Y-axis)",
+    "n": "第二陀螺仪偏置",
+    "d": "第二陀螺仪偏置（Y 轴）",
     "src": "Copter",
     "u": "rad/s"
   },
   "SIM_GYR2_BIAS_Z": {
-    "n": "Second Gyro bias",
-    "d": "Second Gyro bias (Z-axis)",
+    "n": "第二陀螺仪偏置",
+    "d": "第二陀螺仪偏置（Z 轴）",
     "src": "Copter",
     "u": "rad/s"
   },
@@ -27499,7 +27499,7 @@
   },
   "SIM_MAG1_SCALING": {
     "n": "MAG1 比例因子",
-    "d": "Scale the compass 1 to simulate sensor scale factor errors",
+    "d": "缩放罗盘 1 以模拟传感器比例因子误差",
     "src": "Copter"
   },
   "SIM_MAG2_DEVID": {
@@ -27564,7 +27564,7 @@
   },
   "SIM_MAG2_SCALING": {
     "n": "MAG2 比例因子",
-    "d": "Scale the compass 2 to simulate sensor scale factor errors",
+    "d": "缩放指南针 2 以模拟传感器比例因子误差",
     "src": "Copter"
   },
   "SIM_MAG3_DEVID": {
@@ -27629,7 +27629,7 @@
   },
   "SIM_MAG3_SCALING": {
     "n": "MAG3 比例因子",
-    "d": "Scale the compass 3 to simulate sensor scale factor errors",
+    "d": "缩放 Compass 3 以模拟传感器比例因子误差",
     "src": "Copter"
   },
   "SIM_MAG4_DEVID": {
@@ -27707,11 +27707,11 @@
   },
   "SIM_MAG_RND": {
     "n": "磁电机噪声系数",
-    "d": "Scaling factor for simulated vibration from motors",
+    "d": "电机模拟振动的比例因子",
     "src": "Copter"
   },
   "SIM_MAG_SAVE_IDS": {
-    "n": "Save MAG devids on startup",
+    "n": "启动时保存 MAG 设备",
     "d": "This forces saving of compass devids on startup so that simulated compasses start as calibrated\n\n取值:\n  0: Disabled\n  1: Enabled",
     "src": "Copter"
   },
@@ -27830,7 +27830,7 @@
   },
   "SIM_SONAR_RND": {
     "n": "Sonar noise factor",
-    "d": "Scaling factor for simulated sonar noise",
+    "d": "模拟声纳噪声的比例因子",
     "src": "Copter"
   },
   "SIM_SONAR_ROT": {
@@ -27879,7 +27879,7 @@
   },
   "SIM_THML_SCENARI": {
     "n": "Thermal scenarios",
-    "d": "Scenario for thermalling simulation, for soaring",
+    "d": "热力模拟场景，用于翱翔",
     "src": "Copter"
   },
   "SIM_TIDE_DIR": {
@@ -28046,7 +28046,7 @@
   },
   "SIM_WOW_PIN": {
     "n": "Weight on Wheels Pin",
-    "d": "SITL set this simulated pin to true if vehicle is on ground",
+    "d": "如果车辆在地面上，SITL 将此模拟引脚设置为 true",
     "src": "Copter"
   },
   "SIM_AIS_COUNT": {
@@ -29295,102 +29295,102 @@
     "src": "Copter"
   },
   "SIM_VICON_FAIL": {
-    "n": "SITL vicon failure",
-    "d": "SITL vicon failure\n\n取值:\n  0: Vicon Healthy\n  1: Vicon Failed",
+    "n": "SITL vicon 故障",
+    "d": "SITL vicon 故障\n\n取值：\n  0：维康健康\n  1：维康失败",
     "src": "Copter"
   },
   "SIM_VICON_GLIT_X": {
-    "n": "SITL vicon position glitch North",
-    "d": "SITL vicon position glitch North",
+    "n": "SITL vicon 位置故障北",
+    "d": "SITL vicon 位置故障北",
     "src": "Copter",
     "u": "m"
   },
   "SIM_VICON_GLIT_Y": {
-    "n": "SITL vicon position glitch East",
-    "d": "SITL vicon position glitch East",
+    "n": "SITL vicon 位置故障东",
+    "d": "SITL vicon 位置故障东",
     "src": "Copter",
     "u": "m"
   },
   "SIM_VICON_GLIT_Z": {
-    "n": "SITL vicon position glitch Down",
-    "d": "SITL vicon position glitch Down",
+    "n": "SITL vicon 位置故障 向下",
+    "d": "SITL vicon 位置故障 向下",
     "src": "Copter",
     "u": "m"
   },
   "SIM_VICON_POS_X": {
-    "n": "SITL vicon position on vehicle in Forward direction",
-    "d": "SITL vicon position on vehicle in Forward direction\n\n范围: 0 … 10",
+    "n": "SITL vicon 在车辆前进方向上的位置",
+    "d": "SITL vicon 在车辆前进方向上的位置\n\n范围：0 … 10",
     "src": "Copter",
     "u": "m"
   },
   "SIM_VICON_POS_Y": {
-    "n": "SITL vicon position on vehicle in Right direction",
-    "d": "SITL vicon position on vehicle in Right direction\n\n范围: 0 … 10",
+    "n": "SITL vicon 在车辆上的正确方向位置",
+    "d": "SITL vicon 在车辆上的正确方向位置\n\n范围：0 … 10",
     "src": "Copter",
     "u": "m"
   },
   "SIM_VICON_POS_Z": {
-    "n": "SITL vicon position on vehicle in Down direction",
-    "d": "SITL vicon position on vehicle in Down direction\n\n范围: 0 … 10",
+    "n": "SITL vicon 在车辆上的向下方向位置",
+    "d": "SITL vicon 在车辆上的向下方向位置\n\n范围：0 … 10",
     "src": "Copter",
     "u": "m"
   },
   "SIM_VICON_P_SD": {
-    "n": "SITL vicon position standard deviation for gaussian noise",
-    "d": "SITL vicon position standard deviation for gaussian noise",
+    "n": "高斯噪声的 SITL vicon 位置标准差",
+    "d": "高斯噪声的 SITL vicon 位置标准差",
     "src": "Copter",
     "u": "m"
   },
   "SIM_VICON_QUAL": {
-    "n": "SITL vicon odometry quality",
-    "d": "SITL vicon odometry quality field sent in MAVLink ODOMETRY message (-1=failure, 0=unknown, 1-100=quality)\n\n范围: -1 … 100",
+    "n": "SITL vicon 里程计质量",
+    "d": "在 MAVLink ODOMETRY 消息中发送的 SITL vicon 里程计质量字段（-1=失败，0=未知，1-100=质量）\n\n范围：-1 … 100",
     "src": "Copter",
     "u": "%"
   },
   "SIM_VICON_RATE": {
-    "n": "SITL vicon rate",
-    "d": "SITL vicon rate",
+    "n": "SITL维康率",
+    "d": "SITL维康率",
     "src": "Copter",
     "u": "Hz"
   },
   "SIM_VICON_TMASK": {
-    "n": "SITL vicon type mask",
-    "d": "SITL vicon messages sent\n\n位定义:\n  bit0: VISION_POSITION_ESTIMATE\n  bit1: VISION_SPEED_ESTIMATE\n  bit2: VICON_POSITION_ESTIMATE\n  bit3: VISION_POSITION_DELTA\n  bit4: ODOMETRY",
+    "n": "SITL vicon型面罩",
+    "d": "SITL vicon 消息已发送\n\n位定义：\n  位0：VISION_POSITION_ESTIMATE\n  位 1：VISION_SPEED_ESTIMATE\n  位 2：VICON_POSITION_ESTIMATE\n  位 3：VISION_POSITION_DELTA\n  bit4：里程计",
     "src": "Copter"
   },
   "SIM_VICON_VGLI_X": {
-    "n": "SITL vicon velocity glitch North",
-    "d": "SITL vicon velocity glitch North",
+    "n": "SITL vicon 速度故障北",
+    "d": "SITL vicon 速度故障北",
     "src": "Copter",
     "u": "m/s"
   },
   "SIM_VICON_VGLI_Y": {
-    "n": "SITL vicon velocity glitch East",
-    "d": "SITL vicon velocity glitch East",
+    "n": "SITL vicon 速度故障东",
+    "d": "SITL vicon 速度故障东",
     "src": "Copter",
     "u": "m/s"
   },
   "SIM_VICON_VGLI_Z": {
-    "n": "SITL vicon velocity glitch Down",
-    "d": "SITL vicon velocity glitch Down",
+    "n": "SITL vicon 速度故障 下降",
+    "d": "SITL vicon 速度故障 下降",
     "src": "Copter",
     "u": "m/s"
   },
   "SIM_VICON_V_SD": {
-    "n": "SITL vicon velocity standard deviation for gaussian noise",
-    "d": "SITL vicon velocity standard deviation for gaussian noise",
+    "n": "高斯噪声的 SITL vicon 速度标准差",
+    "d": "高斯噪声的 SITL vicon 速度标准差",
     "src": "Copter",
     "u": "m/s"
   },
   "SIM_VICON_YAW": {
-    "n": "SITL vicon yaw angle in earth frame",
-    "d": "SITL vicon yaw angle in earth frame\n\n范围: 0 … 360",
+    "n": "地球坐标系中的 SITL vicon 偏航角",
+    "d": "地球坐标系中的 SITL vicon 偏航角\n\n范围：0 … 360",
     "src": "Copter",
     "u": "deg"
   },
   "SIM_VICON_YAWERR": {
-    "n": "SITL vicon yaw error",
-    "d": "SITL vicon yaw added to reported yaw sent to vehicle\n\n范围: -180 … 180",
+    "n": "SITL 维康偏航误差",
+    "d": "SITL vicon 偏航添加到发送至车辆的偏航报告中\n\n范围：-180 … 180",
     "src": "Copter",
     "u": "deg"
   },
@@ -32454,7 +32454,7 @@
     "u": "m/s"
   },
   "Q_BACKTRANS_MS": {
-    "n": "SLT and Tiltrotor back transition pitch limit duration",
+    "n": "SLT 和倾斜旋翼机向后过渡俯仰限制持续时间",
     "d": "当在位置控制模式下切换到 VTOL 飞行时，俯仰角将从 0 增加到最大角度。 0 禁用。\n\n范围：0 … 10000",
     "src": "Plane",
     "u": "ms"
@@ -32633,7 +32633,7 @@
   },
   "Q_TKOFF_FAIL_SCL": {
     "n": "Takeoff time failure scalar",
-    "d": "Scalar for how long past the expected takeoff time a takeoff should be considered as failed and the vehicle will switch to QLAND. If set to 0 there is no limit on takeoff time.\n\n范围: 1.1 … 5.0",
+    "d": "超过预期起飞时间多长时间后应将起飞视为失败并且飞行器将切换到 QLAND 的标量。如果设置为 0，则起飞时间没有限制。\n\n范围：1.1 … 5.0",
     "src": "Plane"
   },
   "Q_TKOFF_RPM_MAX": {
@@ -33507,17 +33507,17 @@
   },
   "Q_TAILSIT_VT_P_P": {
     "n": "Tailsitter VTOL control surface pitch gain",
-    "d": "Scale from PID output to control surface, for use where a single axis is actuated by both motors and Tilt/control surface on a copter style tailsitter, increase to favor control surfaces and reduce motor output by reducing gains\n\n范围: 0 … 2",
+    "d": "从 PID 输出到控制表面的比例，用于单轴由电机和直升机式后座上的倾斜/控制表面驱动的情况，增加以有利于控制表面并通过减少增益来减少电机输出\n\n范围：0 … 2",
     "src": "Plane"
   },
   "Q_TAILSIT_VT_R_P": {
     "n": "Tailsitter VTOL control surface roll gain",
-    "d": "Scale from PID output to control surface, for use where a single axis is actuated by both motors and Tilt/control surface on a copter style tailsitter, increase to favor control surfaces and reduce motor output by reducing gains\n\n范围: 0 … 2",
+    "d": "从 PID 输出到控制表面的比例，用于单轴由电机和直升机式后座上的倾斜/控制表面驱动的情况，增加以有利于控制表面并通过减少增益来减少电机输出\n\n范围：0 … 2",
     "src": "Plane"
   },
   "Q_TAILSIT_VT_Y_P": {
     "n": "Tailsitter VTOL control surface yaw gain",
-    "d": "Scale from PID output to control surface, for use where a single axis is actuated by both motors and Tilt/control surface on a copter style tailsitter, increase to favor control surfaces and reduce motor output by reducing gains\n\n范围: 0 … 2",
+    "d": "从 PID 输出到控制表面的比例，用于单轴由电机和直升机式后座上的倾斜/控制表面驱动的情况，增加以有利于控制表面并通过减少增益来减少电机输出\n\n范围：0 … 2",
     "src": "Plane"
   },
   "Q_TILT_ENABLE": {
@@ -34004,7 +34004,7 @@
   },
   "TECS_LAND_SPDWGT": {
     "n": "Weighting applied to speed control during landing.",
-    "d": "Same as SPDWEIGHT parameter, with the exception that this parameter is applied during landing flight stages.  A value closer to 2 will result in the plane ignoring height error during landing and our experience has been that the plane will therefore keep the nose up -- sometimes good for a glider landing (with the side effect that you will likely glide a ways past the landing point).  A value closer to 0 results in the plane ignoring speed error -- use caution when lowering the value below 1 -- ignoring speed could result in a stall. Values between 0 and 2 are valid values for a fixed landing weight. When using -1 the weight will be scaled during the landing. At the start of the landing approach it starts with TECS_SPDWEIGHT and scales down to 0 by the time you reach the land point. Example: Halfway down the landing approach you'll effectively have a weight of TECS_SPDWEIGHT/2.\n\n范围: -1.0 … 2.0",
+    "d": "与 SPDWEIGHT 参数相同，但该参数在着陆飞行阶段应用。  接近 2 的值将导致飞机在着陆过程中忽略高度误差，我们的经验是飞机将因此保持机头向上 - 有时有利于滑翔机着陆（副作用是您可能会滑翔超过着陆点）。  接近 0 的值会导致飞机忽略速度误差——将值降低到 1 以下时要小心——忽略速度可能会导致失速。 0 到 2 之间的值是固定着陆重量的有效值。当使用-1时，重量将在着陆过程中缩放。在着陆进近开始时，它从 TECS_SPDWEIGHT 开始，并在您到达着陆点时缩小到 0。示例：在着陆进场的中途，您的重量实际上为 TECS_SPDWEIGHT/2。\n\n范围：-1.0 … 2.0",
     "src": "Plane"
   },
   "TECS_LAND_SRC": {
@@ -34389,76 +34389,76 @@
     "u": "m/s/s"
   },
   "ATC_SAIL_D": {
-    "n": "Sail Heel control D gain",
-    "d": "Sail Heel control D gain.  Compensates for short-term change in desired heel angle vs actual\n\n范围: 0.000 … 0.100",
+    "n": "帆跟控制 D 增益",
+    "d": "帆跟控制 D 增益。  补偿所需跟角与实际跟角的短期变化\n\n范围：0.000 … 0.100",
     "src": "Rover"
   },
   "ATC_SAIL_D_FF": {
-    "n": "Sail Heel Derivative FeedForward Gain",
+    "n": "帆跟导数前馈增益",
     "d": "FF D 增益，产生与目标变化率成比例的输出\n\n范围：0 … 0.03",
     "src": "Rover"
   },
   "ATC_SAIL_FF": {
-    "n": "Sail Heel control feed forward",
-    "d": "Sail Heel control feed forward\n\n范围: 0.000 … 0.500",
+    "n": "帆跟控制前馈",
+    "d": "帆跟控制前馈\n\n范围：0.000 … 0.500",
     "src": "Rover"
   },
   "ATC_SAIL_FILT": {
-    "n": "Sail Heel control filter frequency",
-    "d": "Sail Heel control input filter.  Lower values reduce noise but add delay.\n\n范围: 0.000 … 100.000",
+    "n": "帆跟控制滤波器频率",
+    "d": "帆跟控制输入滤波器。  较低的值会减少噪音，但会增加延迟。\n\n范围：0.000 … 100.000",
     "src": "Rover",
     "u": "Hz"
   },
   "ATC_SAIL_FLTD": {
-    "n": "Sail Heel Derivative term filter frequency in Hz",
+    "n": "帆跟导数项滤波器频率（以 Hz 为单位）",
     "d": "微分滤波器频率（以 Hz 为单位）\n\n范围：0.000 … 100.000",
     "src": "Rover",
     "u": "Hz"
   },
   "ATC_SAIL_FLTE": {
-    "n": "Sail Heel Error filter frequency in Hz",
+    "n": "帆跟误差滤波器频率（以 Hz 为单位）",
     "d": "误差滤波器频率（以 Hz 为单位）\n\n范围：0.000 … 100.000",
     "src": "Rover",
     "u": "Hz"
   },
   "ATC_SAIL_FLTT": {
-    "n": "Sail Heel Target filter frequency in Hz",
+    "n": "帆跟目标滤波器频率（以 Hz 为单位）",
     "d": "Target filter frequency in Hz\n\n范围: 0.000 … 100.000",
     "src": "Rover",
     "u": "Hz"
   },
   "ATC_SAIL_I": {
-    "n": "Sail Heel control I gain",
-    "d": "Sail Heel control I gain for sailboats.  Corrects long term error between the desired heel angle (in radians) and actual\n\n范围: 0.000 … 2.000",
+    "n": "我获得了帆跟控制",
+    "d": "我为帆船获得了帆跟控制。  纠正所需的跟角（以弧度为单位）与实际之间的长期误差\n\n范围：0.000 … 2.000",
     "src": "Rover"
   },
   "ATC_SAIL_IMAX": {
-    "n": "Sail Heel control I gain maximum",
-    "d": "Sail Heel control I gain maximum.  Constrains the maximum I term contribution to the main sail output (range -1 to +1)\n\n范围: 0.000 … 1.000",
+    "n": "帆跟控制我获得最大",
+    "d": "帆跟控制我获得最大。  限制主帆输出的最大 I 项贡献（范围 -1 至 +1）\n\n范围：0.000 … 1.000",
     "src": "Rover"
   },
   "ATC_SAIL_NEF": {
-    "n": "Sail Heel Error notch filter index",
-    "d": "Sail Heel Error notch filter index\n\n范围: 1 … 8",
+    "n": "帆跟误差陷波滤波器指数",
+    "d": "帆跟误差陷波滤波器指数\n\n范围：1 … 8",
     "src": "Rover"
   },
   "ATC_SAIL_NTF": {
-    "n": "Sail Heel Target notch filter index",
-    "d": "Sail Heel Target notch filter index\n\n范围: 1 … 8",
+    "n": "帆跟目标陷波滤波器指数",
+    "d": "帆跟目标陷波滤波器指数\n\n范围：1 … 8",
     "src": "Rover"
   },
   "ATC_SAIL_P": {
-    "n": "Sail Heel control P gain",
-    "d": "Sail Heel control P gain for sailboats.  Converts the error between the desired heel angle (in radians) and actual heel to a main sail output (in the range -1 to +1)\n\n范围: 0.000 … 2.000",
+    "n": "帆跟控制 P 增益",
+    "d": "帆跟控制帆船的 P 增益。  将所需横倾角（以弧度为单位）与实际横倾角之间的误差转换为主帆输出（范围 -1 至 +1）\n\n范围：0.000 … 2.000",
     "src": "Rover"
   },
   "ATC_SAIL_PDMX": {
-    "n": "Sail Heel control PD sum maximum",
-    "d": "Sail Heel control PD sum maximum.  The maximum/minimum value that the sum of the P and D term can output\n\n范围: 0.000 … 1.000",
+    "n": "帆跟控制 PD 总和最大",
+    "d": "帆跟控制 PD 总和最大。  P和D项之和可以输出的最大/最小值\n\n范围：0.000 … 1.000",
     "src": "Rover"
   },
   "ATC_SAIL_SMAX": {
-    "n": "Sail heel slew rate limit",
+    "n": "帆跟回转速率限制",
     "d": "Sets an upper limit on the slew rate produced by the combined P and D gains. If the amplitude of the control action produced by the rate feedback exceeds this value, then the D+P gain is reduced to respect the limit. This limits the amplitude of high frequency oscillations caused by an excessive gain. The limit should be set to no more than 25% of the actuators maximum slew rate to allow for load effects. Note: The gain will not be reduced to less than 10% of the nominal value. A value of zero will disable this feature.\n\n范围: 0 … 200",
     "src": "Rover"
   },
@@ -34985,19 +34985,19 @@
     "u": "m"
   },
   "SAIL_ANGLE_IDEAL": {
-    "n": "Sail ideal angle",
+    "n": "航行理想角度",
     "d": "帆与视风之间的理想角度\n\n范围：0 … 90",
     "src": "Rover",
     "u": "deg"
   },
   "SAIL_ANGLE_MAX": {
-    "n": "Sail max angle",
+    "n": "帆最大角度",
     "d": "主板松动，中心线与吊杆之间形成角度。对于直接控制旋转桅杆，旋转角度为 SERVOx_MAX/_MIN；对于旋转桅杆，如果连杆可以物理地将桅杆旋转超过该角度，则该值可以超过 90 度。\n\n范围：0 … 90",
     "src": "Rover",
     "u": "deg"
   },
   "SAIL_ANGLE_MIN": {
-    "n": "Sail min angle",
+    "n": "帆最小角度",
     "d": "主板紧，中心线和吊杆之间的角度\n\n范围：0 … 90",
     "src": "Rover",
     "u": "deg"
@@ -35009,7 +35009,7 @@
     "rb": true
   },
   "SAIL_HEEL_MAX": {
-    "n": "Sailing maximum heel angle",
+    "n": "航行最大横倾角",
     "d": "When in auto sail trim modes the heel will be limited to this value using PID control\n\n范围: 0 … 90",
     "src": "Rover",
     "u": "deg"
@@ -35021,25 +35021,25 @@
     "u": "m"
   },
   "SAIL_NO_GO_ANGLE": {
-    "n": "Sailing no go zone angle",
+    "n": "航行禁区角度",
     "d": "The typical closest angle to the wind the vehicle will sail at. the vehicle will sail at this angle when going upwind\n\n范围: 0 … 90",
     "src": "Rover",
     "u": "deg"
   },
   "SAIL_WNDSPD_MIN": {
-    "n": "Sailboat minimum wind speed to sail in",
-    "d": "Sailboat minimum wind speed to continue sail in, at lower wind speeds the sailboat will motor if one is fitted\n\n范围: 0 … 5",
+    "n": "帆船最低航行风速",
+    "d": "帆船继续航行的最低风速，如果安装了帆船，风速较低时帆船将行驶\n\n范围：0 … 5",
     "src": "Rover",
     "u": "m/s"
   },
   "SAIL_XTRACK_MAX": {
-    "n": "Sailing vehicle max cross track error",
+    "n": "帆船最大横向误差",
     "d": "The sail boat will tack when it reaches this cross track error, defines a corridor of 2 times this value wide, 0 disables\n\n范围: 5 … 25",
     "src": "Rover",
     "u": "m"
   },
   "SIM_SAIL_TYPE": {
-    "n": "Sailboat simulation sail type",
+    "n": "帆船仿真帆型",
     "d": "0: 主帆带帆板, 1: 直接驱动翼",
     "src": "Rover"
   },
@@ -35141,13 +35141,13 @@
     "src": "Rover"
   },
   "WENC2_PINA": {
-    "n": "Second Encoder Input Pin A",
-    "d": "Second Encoder Input Pin A\n\n范围: -1 … 127\n取值:\n  -1: Disabled\n  50: AUX1\n  51: AUX2\n  52: AUX3\n  53: AUX4\n  54: AUX5\n  55: AUX6",
+    "n": "第二个编码器输入引脚 A",
+    "d": "第二个编码器输入引脚 A\n\n范围：-1 … 127\n取值：\n  -1：禁用\n  50：辅助1\n  51：辅助2\n  52：辅助3\n  53：辅助4\n  54：辅助5\n  55：辅助6",
     "src": "Rover"
   },
   "WENC2_PINB": {
-    "n": "Second Encoder Input Pin B",
-    "d": "Second Encoder Input Pin B\n\n范围: -1 … 127\n取值:\n  -1: Disabled\n  50: AUX1\n  51: AUX2\n  52: AUX3\n  53: AUX4\n  54: AUX5\n  55: AUX6",
+    "n": "第二个编码器输入引脚 B",
+    "d": "第二个编码器输入引脚 B\n\n范围：-1 … 127\n取值：\n  -1：禁用\n  50：辅助1\n  51：辅助2\n  52：辅助3\n  53：辅助4\n  54：辅助5\n  55：辅助6",
     "src": "Rover"
   },
   "WENC2_POS_X": {
@@ -36084,7 +36084,7 @@
   },
   "JS_THR_GAIN": {
     "n": "Throttle gain scalar",
-    "d": "Scalar for gain on the throttle channel. Gets scaled with the current JS gain\n\n范围: 0.5 … 4.0",
+    "d": "油门通道增益的标量。根据当前 JS 增益进行缩放\n\n范围：0.5 … 4.0",
     "src": "Sub"
   },
   "PILOT_ACCEL_Z": {
@@ -36134,7 +36134,7 @@
     "src": "Sub"
   },
   "SURFTRAK_DEPTH": {
-    "n": "SURFTRAK minimum depth",
+    "n": "SURFTRAK 最小深度",
     "d": "启用 SURFTRAK 模式的最小深度",
     "src": "Sub",
     "u": "cm"

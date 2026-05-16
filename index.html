@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="CSS/components/status-messages.css">
 <link rel="stylesheet" href="CSS/components/sensor-calibration.css">
 <link rel="stylesheet" href="CSS/components/all-params.css">
+<link rel="stylesheet" href="CSS/components/flight-plan.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 </head>
 <body>
@@ -142,9 +143,7 @@
 </div>
 
 <div id="view-flight-plan" class="main-view">
-  <div class="fp-plan-shell" role="status">
-    <p class="fp-plan-msg">飞行计划：航线编辑、任务列表等功能尚未接入，后续版本提供。</p>
-  </div>
+  <div id="flight-plan-app" class="fp-plan-app-host"></div>
 </div>
 
 <div id="view-initial-setup" class="main-view">
@@ -861,18 +860,23 @@
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 <script src="JS/core/globals.js" defer></script>
+<script src="JS/core/map-layers.js" defer></script>
 <script src="JS/core/ardupilot-board-types.js" defer></script>
 <script src="JS/core/ardupilot-devid.js" defer></script>
 <script src="JS/ui/status-messages.js" defer></script>
 <script src="JS/core/mavlink.js" defer></script>
 <script src="JS/core/mavlink-helpers.js" defer></script>
+<script src="JS/core/ardupilot-telemetry.js" defer></script>
 <script src="JS/services/serial.js" defer></script>
 <script src="JS/services/com-bridge.js" defer></script>
 <script src="JS/services/param-loader.js" defer></script>
+<script src="JS/core/ardupilot-sensor-detect.js" defer></script>
 <script src="JS/ui/overview-sensors.js" defer></script>
 <script src="JS/ui/hud-map-tabs.js" defer></script>
+<script src="JS/ui/flight-plan-editor.js" defer></script>
 <script src="JS/ui/quick-grid.js" defer></script>
 <script src="JS/ui/splitter.js" defer></script>
 <script src="JS/ui/rc-setup.js" defer></script>

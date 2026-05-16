@@ -581,6 +581,33 @@ body {
   font-weight: 400;
 }
 
+.ov-sensor-list .ov-sensor-health {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ov-sensor-list .ov-sensor-health.ok {
+  color: #3dd68c;
+}
+
+.ov-sensor-list .ov-sensor-health.danger {
+  color: #ff6b6b;
+}
+
+.ov-sensor-list .ov-sensor-health.warn {
+  color: #f0c040;
+}
+
+.ov-sensor-list .ov-sensor-health.muted {
+  color: #7d89a8;
+}
+
+.ov-sensor-empty {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 4px 0;
+}
+
 .ov-progress {
   height: 8px;
   background: #0f1424;

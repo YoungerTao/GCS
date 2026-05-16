@@ -343,17 +343,22 @@
     }
     clearCellFromModal(){ if(this.editingIndex!=null){this.clearCell(this.editingIndex);this.hideModal()}}
 
-    resolveTelemetryValue(key){
+    resolveTelemetryValue(key, lowerKeyToActual){
       if(!window.telemetry || !key) return undefined;
+      const tel = window.telemetry;
       const candidates = [key];
       const aliasKey = String(key).toLowerCase();
       const aliases = TELEMETRY_ALIASES[aliasKey] || [];
       candidates.push(...aliases);
 
       for(const candidate of candidates){
-        if(candidate in window.telemetry) return window.telemetry[candidate];
-        const found = Object.keys(window.telemetry).find(k => k.toLowerCase() === String(candidate).toLowerCase());
-        if(found) return window.telemetry[found];
+        if(candidate in tel) return tel[candidate];
+        const candLower = String(candidate).toLowerCase();
+        if (lowerKeyToActual && lowerKeyToActual.has(candLower)) {
+          return tel[lowerKeyToActual.get(candLower)];
+        }
+        const found = Object.keys(tel).find(k => k.toLowerCase() === candLower);
+        if(found) return tel[found];
       }
       return undefined;
     }
@@ -399,6 +404,12 @@
     startUpdater(){
       this.refreshTelemetryCells = () => {
         if (!this.container) return;
+        const tel = window.telemetry;
+        let lowerKeyToActual = null;
+        if (tel && typeof tel === 'object') {
+          lowerKeyToActual = new Map();
+          for (const k of Object.keys(tel)) lowerKeyToActual.set(String(k).toLowerCase(), k);
+        }
         const cells = Array.from(this.container.children);
         cells.forEach(cell=>{
           const idx = parseInt(cell.dataset.index,10);
@@ -414,7 +425,7 @@
             return;
           }
           top.textContent = this.getDisplayLabel(key);
-          let v = this.resolveTelemetryValue(key);
+          let v = this.resolveTelemetryValue(key, lowerKeyToActual);
           if(typeof v === 'string' && v.trim() !== '' && !isNaN(parseFloat(v))){
             v = parseFloat(v);
           }

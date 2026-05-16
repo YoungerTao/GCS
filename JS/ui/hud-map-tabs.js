@@ -456,33 +456,17 @@ function initMap() {
     return;
   }
 
-  mapInstance = L.map('map', { zoomControl: true }).setView([23.7, 120.9], 10);
+  const center = typeof window.getMapCenterLatLng === "function" ? window.getMapCenterLatLng() : [29.59256, 106.22742];
+  mapInstance = L.map('map', { zoomControl: true }).setView(center, 11);
   // expose for other modules (e.g. splitter resizing)
   window.mapInstance = mapInstance;
   
-  // 卫星底图 + 道路/城市名称标注（Hybrid）
-  const satelliteLayer = L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    {
-      maxZoom: 19,
-      attribution: 'Tiles © Esri'
-    }
-  );
+  // 卫星 + 道路/地名（均为 WGS84，与飞控 GPS 一致）
+  if (typeof window.addGcsMapBaseLayers === "function") {
+    window.addGcsMapBaseLayers(mapInstance);
+  }
 
-  // 中文道路与地名标注图层（简体中文，适配中国区域）
-  const labelsLayer = L.tileLayer(
-    'https://webst0{s}.is.autonavi.com/appmaptile?style=8&x={x}&y={y}&z={z}',
-    {
-      subdomains: ['1', '2', '3', '4'],
-      maxZoom: 19,
-      attribution: 'Labels/Roads © AutoNavi'
-    }
-  );
-
-  satelliteLayer.addTo(mapInstance);
-  labelsLayer.addTo(mapInstance);
-
-  mapMarker = L.marker([23.7, 120.9]).addTo(mapInstance);
+  mapMarker = L.marker(center).addTo(mapInstance);
 
   // 创建一个自定义控件显示经纬度与海拔（左下角）
   let mapInfoDiv = null;
@@ -562,6 +546,10 @@ function initMainTabs() {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.view === name));
     views.forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
 
+    window.dispatchEvent(new CustomEvent('gcs:main-view-changed', {
+      detail: { name }
+    }));
+
     // 切换回飞行数据页时，刷新地图尺寸避免 Leaflet 拉伸异常
     if (name === 'flight-data' && window.mapInstance) {
       setTimeout(() => window.mapInstance.invalidateSize(), 80);
@@ -588,18 +576,39 @@ window.appendLog = function(msg) {
 };
 
 // ==================== 遥测 → canvas#hud / #quick-grid 调度 ====================
-let _uiDirty = false;
+// MAVLink 高频时若每条消息都 RAF 重绘 800×800 HUD，CPU/GPU 会拉满。这里合并 RAF 并限制最高刷新率。
+const _UI_MAX_HZ = 20;
+const _UI_MIN_INTERVAL_MS = 1000 / _UI_MAX_HZ;
+let _uiRaf = null;
+let _uiLastDrawMs = 0;
+
+function _runHudAndQuickGrid() {
+  if (typeof window.drawHUD === "function") window.drawHUD();
+  if (typeof window.refreshQuickGrid === "function") window.refreshQuickGrid();
+}
+
 window.scheduleUIUpdate = function () {
-  if (_uiDirty) return;
-  _uiDirty = true;
-  requestAnimationFrame(() => {
-    _uiDirty = false;
-    if (typeof window.drawHUD === "function") window.drawHUD();
-    if (typeof window.refreshQuickGrid === "function") window.refreshQuickGrid();
+  if (document.hidden) return;
+  if (_uiRaf != null) return;
+  _uiRaf = requestAnimationFrame(function tick(now) {
+    if (_uiLastDrawMs > 0 && now - _uiLastDrawMs < _UI_MIN_INTERVAL_MS) {
+      _uiRaf = requestAnimationFrame(tick);
+      return;
+    }
+    _uiLastDrawMs = now;
+    _uiRaf = null;
+    _runHudAndQuickGrid();
   });
 };
 
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  _uiLastDrawMs = 0;
+  _runHudAndQuickGrid();
+});
+
+// 未连接或极低流量时仍偶尔刷新（原 250ms 与 schedule 重复且徒增发热）
 setInterval(() => {
-  if (typeof window.drawHUD === "function") window.drawHUD();
-  if (typeof window.refreshQuickGrid === "function") window.refreshQuickGrid();
-}, 250);
+  if (document.hidden) return;
+  _runHudAndQuickGrid();
+}, 2000);

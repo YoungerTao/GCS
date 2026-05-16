@@ -1,8 +1,7 @@
 /**
- * 概览「IMU 与传感器」：按路数列表，型号由 ArduPilot Device ID 解码（ardupilot-devid.js）。
+ * 概览「IMU 与传感器」：仅显示飞控参数中已挂载/已启用的传感器。
  */
 (function initOverviewSensors() {
-  const STREAM_MS = 2500;
   const MASK = {
     MAG: 0x04,
     MAG2: 0x80000,
@@ -12,69 +11,32 @@
     LASER: 0x100,
   };
 
-  /**
-   * ArduPilot RNGFNDx_TYPE → 与 libraries/AP_RangeFinder/AP_RangeFinder.h 中 Type 枚举一致（主分支）。
-   * short：简短英文名；zh：TYPE 数字后面展示的中文说明。
-   */
   const RNGFND_TYPE_INFO = {
     0: { short: "NONE", zh: "未使用" },
     1: { short: "ANALOG", zh: "模拟电压测距" },
     2: { short: "MBI2C", zh: "Maxbotix I2C" },
     3: { short: "PLI2C", zh: "PulsedLight / LidarLite I2C" },
-    5: { short: "PX4_PWM", zh: "PWM 测距接口" },
-    6: { short: "BBB_PRU", zh: "BeagleBone PRU" },
     7: { short: "LWI2C", zh: "LightWare I2C" },
     8: { short: "LWSER", zh: "LightWare 串口" },
-    9: { short: "BEBOP", zh: "Parrot Bebop 内置" },
-    10: { short: "MAVLink", zh: "来自 MAVLink DISTANCE_SENSOR 等" },
     11: { short: "USD1_Serial", zh: "Ainstein USD-D1 串口" },
-    12: { short: "LEDDARONE", zh: "LeddarOne" },
     13: { short: "MBSER", zh: "Maxbotix 串口" },
-    14: { short: "TRI2C", zh: "TeraRanger I2C" },
-    15: { short: "PLI2CV3", zh: "PulsedLight I2C V3" },
-    16: { short: "VL53L0X", zh: "ST VL53L0X ToF" },
-    17: { short: "NMEA", zh: "NMEA 语句测距" },
-    18: { short: "WASP", zh: "WASP 激光测距" },
     19: { short: "BenewakeTF02", zh: "北醒 TF02 串口" },
     20: { short: "BenewakeTFmini", zh: "北醒 TFmini 串口" },
-    21: { short: "PLI2CV3HP", zh: "PulsedLight I2C HP" },
-    22: { short: "PWM", zh: "PWM" },
-    23: { short: "BLPing", zh: "BlueRobotics Ping" },
     24: { short: "UAVCAN", zh: "DroneCAN / UAVCAN 测距" },
-    25: { short: "BenewakeTFminiPlus", zh: "北醒 TFmini Plus" },
-    26: { short: "Lanbao", zh: "蓝宝/岚博等超声" },
     27: { short: "BenewakeTF03", zh: "北醒 TF03 串口" },
-    28: { short: "VL53L1X_Short", zh: "ST VL53L1X 短距" },
-    29: { short: "LeddarVu8_Serial", zh: "LeddarVu8 串口" },
-    30: { short: "HC_SR04", zh: "HC-SR04 超声" },
-    31: { short: "GYUS42v2", zh: "GY-US42 v2" },
-    32: { short: "MSP", zh: "MSP 测距" },
-    33: { short: "USD1_CAN", zh: "Ainstein USD-D1 CAN" },
-    34: { short: "Benewake CAN", zh: "北醒 Benewake CAN 总线测距（如 TF-Luna 等接 CAN 时的类型）" },
     35: { short: "TeraRanger_Serial", zh: "TeraRanger 串口" },
-    36: { short: "Lua", zh: "Lua 脚本驱动" },
-    37: { short: "NoopLoop_P", zh: "NoopLoop" },
-    38: { short: "TOFSenseP_CAN", zh: "TOFSense CAN" },
-    39: { short: "NRA24_CAN", zh: "NRA24 CAN" },
-    40: { short: "TOFSenseF_I2C", zh: "TOFSense I2C" },
+    39: { short: "NRA24_CAN", zh: "NRA24 CAN 雷达" },
     41: { short: "JRE_Serial", zh: "JRE 串口" },
-    42: { short: "Ainstein_LR_D1", zh: "Ainstein LR-D1" },
     43: { short: "RDS02UF", zh: "RDS02UF" },
     44: { short: "HEXSOON_RADAR", zh: "Hexsoon 毫米波雷达" },
-    45: { short: "LightWare_GRF", zh: "LightWare GRF" },
-    46: { short: "BenewakeTFS20L", zh: "北醒 TFS20L" },
-    47: { short: "DTS6012M", zh: "DTS6012M" },
-    100: { short: "SIM", zh: "SITL 仿真" },
+    47: { short: "DTS6012M", zh: "DTS6012M 串口" },
   };
 
   function rngfndTypeRow(t) {
     const n = Math.round(Number(t));
     const row = RNGFND_TYPE_INFO[n];
     if (row) return { short: row.short, zh: row.zh };
-    return {
-      short: `TYPE_${n}`,
-      zh: "固件内未收录此编号，请打开飞控源码 AP_RangeFinder.h 对照 RangeFinder::Type",
-    };
+    return { short: `TYPE_${n}`, zh: `测距类型 ${n}` };
   }
 
   function esc(s) {
@@ -91,88 +53,11 @@
       .replace(/</g, "&lt;");
   }
 
-  function fmtDev(id) {
-    const n = Math.round(Number(id)) >>> 0;
-    if (!n) return "—";
-    return `0x${n.toString(16).toUpperCase().padStart(8, "0")}`;
-  }
-
   function decode(kind, id) {
-    if (typeof window.decodeArduPilotDevId === "function") {
-      return window.decodeArduPilotDevId(kind, id >>> 0);
+    if (!id || typeof window.decodeArduPilotDevId !== "function") {
+      return { model: "—", busDetail: "", hex: "—", rawName: "", portZh: "" };
     }
-    return {
-      model: "—",
-      busDetail: "",
-      hex: fmtDev(id),
-      rawName: "",
-    };
-  }
-
-  function getp(name) {
-    const p = window.params;
-    if (!(p instanceof Map) || !p.has(name)) return null;
-    const v = Number(p.get(name));
-    return Number.isFinite(v) ? v : null;
-  }
-
-  function imuInstances() {
-    const pairs = [
-      ["INS_ACC_ID", "INS_USE", "IMU1"],
-      ["INS_ACC2_ID", "INS_USE2", "IMU2"],
-      ["INS_ACC3_ID", "INS_USE3", "IMU3"],
-    ];
-    const out = [];
-    for (const [idKey, useKey, label] of pairs) {
-      const rawId = getp(idKey);
-      if (rawId == null || Math.round(rawId) === 0) continue;
-      let use = getp(useKey);
-      if (use == null) use = 1;
-      if (Math.round(use) === 0) continue;
-      out.push({ idKey, label, id: Math.round(rawId) >>> 0 });
-    }
-    return out;
-  }
-
-  function compassInstances() {
-    const pairs = [
-      ["COMPASS_DEV_ID", "COMPASS_USE", "主罗盘"],
-      ["COMPASS_DEV_ID2", "COMPASS_USE2", "路 2"],
-      ["COMPASS_DEV_ID3", "COMPASS_USE3", "路 3"],
-    ];
-    const out = [];
-    for (const [idKey, useKey, label] of pairs) {
-      const rawId = getp(idKey);
-      if (rawId == null || Math.round(rawId) === 0) continue;
-      let use = getp(useKey);
-      if (use == null) use = 1;
-      if (Math.round(use) === 0) continue;
-      out.push({ idKey, label, id: Math.round(rawId) >>> 0 });
-    }
-    return out;
-  }
-
-  function baroInstances() {
-    const out = [];
-    for (let i = 1; i <= 3; i += 1) {
-      const key = `BARO${i}_DEVID`;
-      const v = getp(key);
-      if (v != null && Math.round(v) !== 0) out.push({ i, label: `气压 ${i}`, id: Math.round(v) >>> 0 });
-    }
-    return out;
-  }
-
-  function rangefinderSlots() {
-    const out = [];
-    for (let i = 1; i <= 10; i += 1) {
-      const v = getp(`RNGFND${i}_TYPE`);
-      if (v != null && Math.round(v) > 0) {
-        const t = Math.round(v);
-        const row = rngfndTypeRow(t);
-        out.push({ slot: i, type: t, short: row.short, zh: row.zh });
-      }
-    }
-    return out;
+    return window.decodeArduPilotDevId(kind, id >>> 0);
   }
 
   function sysFresh() {
@@ -220,20 +105,23 @@
     return { ok: !!(s.health & MASK.LASER) };
   }
 
-  function streamHint() {
-    const m = window._imuStreamMs || {};
-    const now = Date.now();
-    const tags = [];
-    if (m[110] && now - m[110] < STREAM_MS) tags.push("SCALED_IMU");
-    if (m[116] && now - m[116] < STREAM_MS) tags.push("SCALED_IMU2");
-    if (m[129] && now - m[129] < STREAM_MS) tags.push("SCALED_IMU3");
-    if (m.highres && now - m.highres < STREAM_MS) tags.push("HIGHRES_IMU");
-    return tags.length ? `近期遥测：${tags.join("、")}` : "近期无 IMU 加速度外报";
+  /** 行末健康状态（不显示 SYS_STATUS 字样） */
+  function healthSuffix(ok, fresh) {
+    if (!fresh || ok === null) {
+      return '<span class="ov-sensor-health muted">待确认</span>';
+    }
+    if (ok) return '<span class="ov-sensor-health ok">健康状态</span>';
+    return '<span class="ov-sensor-health danger">异常状态</span>';
   }
 
-  function headClass(ok, fresh) {
-    if (!fresh || ok === null) return "muted";
-    return ok ? "ok" : "danger pulse";
+  function countNote(n, unit) {
+    return `${n} ${unit}`;
+  }
+
+  function battInstanceIndex(key) {
+    if (key === "BATT_MONITOR") return 0;
+    const m = String(key).match(/^BATT(\d+)_MONITOR$/);
+    return m ? parseInt(m[1], 10) - 1 : 0;
   }
 
   function sensorBlock(title, headNote, cls, listHtml) {
@@ -246,123 +134,233 @@
     </div>`;
   }
 
-  function emptyBlock(title, body, cls) {
-    return sensorBlock(title, "—", cls, `<ul class="ov-sensor-list"><li>${esc(body)}</li></ul>`);
-  }
-
   function render() {
     const root = document.getElementById("ov-sensor-overview-rows");
     if (!root) return;
 
     const connected = window._gcsConnState === "connected";
     if (!connected) {
-      root.innerHTML = emptyBlock("状态", "未连接飞控", "muted");
+      root.innerHTML = '<div class="ov-sensor-empty muted">未连接飞控</div>';
       return;
     }
 
     const p = window.params;
     if (!(p instanceof Map) || p.size === 0) {
-      root.innerHTML = emptyBlock("传感器", "已连接，等待参数列表…", "warn");
+      root.innerHTML = '<div class="ov-sensor-empty warn">已连接，等待参数列表…</div>';
+      return;
+    }
+
+    const mounted =
+      typeof window.collectArduPilotMountedSensors === "function"
+        ? window.collectArduPilotMountedSensors(p)
+        : null;
+    if (!mounted) {
+      root.innerHTML = '<div class="ov-sensor-empty muted">传感器检测模块未加载</div>';
       return;
     }
 
     const s = window._sysStatusSensors;
     const fresh = sysFresh();
-    const imus = imuInstances();
-    const comps = compassInstances();
-    const baros = baroInstances();
-    const rfSlots = rangefinderSlots();
-
     let html = "";
 
-    /* 指南针 */
-    if (comps.length === 0) {
-      const mh = fresh && s ? magHealthFromSys(s) : { ok: null, anyPresent: false };
-      let body = "0 路启用（COMPASS_DEV_ID* 为 0 或 COMPASS_USE*=0）";
-      if (mh.anyPresent) body += " · SYS_STATUS 仍报告磁力计位，可与参数交叉核对";
-      html += emptyBlock("指南针", body, "muted");
-    } else {
+    if (!window.hasArduPilotMountedSensors(mounted)) {
+      root.innerHTML =
+        '<div class="ov-sensor-empty muted">未检测到已启用的外设传感器<br><span class="ov-sensor-meta">请确认已加载参数，且 RNGFND/PRX/ARSPD 等 TYPE≠0</span></div>';
+      return;
+    }
+
+    if (mounted.compasses.length) {
       const mh = fresh && s ? magHealthFromSys(s) : { ok: null };
-      let note = `${comps.length} 路`;
-      if (fresh && mh.ok === true) note += " · SYS_STATUS 磁力计健康";
-      if (fresh && mh.ok === false) note += " · SYS_STATUS 磁力计异常";
-      const lis = comps
+      const lis = mounted.compasses
         .map((c) => {
           const d = decode("compass", c.id);
           const tip = `${d.busDetail} | ${d.rawName || "UNKNOWN"} | ${d.hex}`;
-          const short = `${d.hex}`;
-          return `<li title="${escAttr(tip)}"><strong>${esc(c.label)}</strong> — <span class="ov-sensor-model">${esc(d.model)}</span> <span class="ov-sensor-meta">${esc(short)}</span></li>`;
+          const body = `${esc(d.model)} ${esc(d.portZh || d.busLabel)} · ${esc(d.hex)}`;
+          return `<li title="${escAttr(tip)}"><strong>${esc(c.label)}</strong> — ${body} ${healthSuffix(mh.ok, fresh)}</li>`;
         })
         .join("");
-      html += sensorBlock("指南针", note, headClass(mh.ok, fresh), `<ul class="ov-sensor-list">${lis}</ul>`);
+      html += sensorBlock(
+        "指南针",
+        countNote(mounted.compasses.length, "路"),
+        "muted",
+        `<ul class="ov-sensor-list">${lis}</ul>`
+      );
     }
 
-    /* IMU */
-    if (imus.length === 0) {
-      html += emptyBlock("加速度计 / IMU", "0 颗启用（INS_ACC*_ID / INS_USE*）", "muted");
-    } else {
+    if (mounted.imus.length) {
       const ah = fresh && s ? accelHealthFromSys(s) : { ok: null };
-      let note = `${imus.length} 颗 · ${streamHint()}`;
-      if (fresh && ah.ok === true) note += " · SYS_STATUS 加速度计健康";
-      if (fresh && ah.ok === false) note += " · SYS_STATUS 加速度计异常";
-      const lis = imus
+      const note = countNote(mounted.imus.length, "颗");
+      const lis = mounted.imus
         .map((u) => {
-          const d = decode("imu", u.id);
-          const tip = `${d.busDetail} | ${d.rawName || "UNKNOWN"} | ${d.hex}`;
-          const short = `${d.hex}`;
-          return `<li title="${escAttr(tip)}"><strong>${esc(u.label)}</strong> — <span class="ov-sensor-model">${esc(d.model)}</span> <span class="ov-sensor-meta">${esc(short)}</span></li>`;
+          const da = u.accId ? decode("imu", u.accId) : null;
+          const dg = u.gyrId ? decode("imu", u.gyrId) : null;
+          const port = da ? da.portZh || da.busLabel : dg ? dg.portZh || dg.busLabel : "—";
+          const model = da ? da.model : dg ? dg.model : "—";
+          const hex = da ? da.hex : dg ? dg.hex : "—";
+          const gyrNote =
+            dg && da && dg.hex !== da.hex ? ` · 陀螺 ${esc(dg.model)}` : "";
+          const tip = [da && da.busDetail, dg && dg.busDetail].filter(Boolean).join(" | ");
+          const body = `${esc(model)} ${esc(port)} · ${esc(hex)}${gyrNote}`;
+          return `<li title="${escAttr(tip)}"><strong>${esc(u.label)}</strong> — ${body} ${healthSuffix(ah.ok, fresh)}</li>`;
         })
         .join("");
-      html += sensorBlock("加速度计 / IMU", note, headClass(ah.ok, fresh), `<ul class="ov-sensor-list">${lis}</ul>`);
+      html += sensorBlock("IMU（加速度计 / 陀螺仪）", note, "muted", `<ul class="ov-sensor-list">${lis}</ul>`);
     }
 
-    /* 气压计 */
-    if (baros.length === 0) {
-      html += emptyBlock("气压计", "0 路（BARO1..3_DEVID 均为 0）", "muted");
-    } else {
+    if (mounted.baros.length) {
       const bh = fresh && s ? baroHealthFromSys(s) : { ok: null };
-      let note = `${baros.length} 路`;
-      if (fresh && bh.ok === true) note += " · SYS_STATUS 气压计健康";
-      if (fresh && bh.ok === false) note += " · SYS_STATUS 气压计异常";
-      const lis = baros
+      const lis = mounted.baros
         .map((b) => {
           const d = decode("baro", b.id);
           const tip = `${d.busDetail} | ${d.rawName || "UNKNOWN"} | ${d.hex}`;
-          const short = `${d.hex}`;
-          return `<li title="${escAttr(tip)}"><strong>${esc(b.label)}</strong> — <span class="ov-sensor-model">${esc(d.model)}</span> <span class="ov-sensor-meta">${esc(short)}</span></li>`;
+          const body = `${esc(d.model)} ${esc(d.portZh || d.busLabel)} · ${esc(d.hex)}`;
+          return `<li title="${escAttr(tip)}"><strong>${esc(b.label)}</strong> — ${body} ${healthSuffix(bh.ok, fresh)}</li>`;
         })
         .join("");
-      html += sensorBlock("气压计", note, headClass(bh.ok, fresh), `<ul class="ov-sensor-list">${lis}</ul>`);
+      html += sensorBlock(
+        "气压计",
+        countNote(mounted.baros.length, "路"),
+        "muted",
+        `<ul class="ov-sensor-list">${lis}</ul>`
+      );
     }
 
-    /* 测距仪 */
-    if (rfSlots.length === 0) {
-      html += emptyBlock("测距仪", "未配置（RNGFND1..10_TYPE 均为 0）", "muted");
-    } else {
+    if (mounted.batteries.length) {
+      const lis = mounted.batteries
+        .map((b) => {
+          const inst = window.powerInstances instanceof Map
+            ? window.powerInstances.get(battInstanceIndex(b.key))
+            : null;
+          let volt = null;
+          if (inst && Number.isFinite(inst.voltage) && inst.voltage > 0) {
+            volt = inst.voltage;
+          } else if (b.key === "BATT_MONITOR" && typeof window.battery_voltage === "number" && window.battery_voltage > 0) {
+            volt = window.battery_voltage;
+          }
+          const proto = esc(b.protocol || b.short || "BATT");
+          const bus = b.busHint ? esc(b.busHint) : "";
+          const mid = bus ? `${proto} ${bus}` : proto;
+          const voltStr = volt != null ? ` · ${volt.toFixed(2)} V` : "";
+          const body = `${mid}${voltStr}`;
+          const hasTelem = volt != null;
+          const status = healthSuffix(hasTelem ? volt > 0 : null, hasTelem);
+          const tip = `${b.key}=${b.type} · ${b.zh || ""}`;
+          return `<li title="${escAttr(tip)}"><strong>${esc(b.prefix)}</strong> — ${body} ${status}</li>`;
+        })
+        .join("");
+      html += sensorBlock(
+        "电池",
+        countNote(mounted.batteries.length, "路"),
+        "muted",
+        `<ul class="ov-sensor-list">${lis}</ul>`
+      );
+    }
+
+    if (mounted.gnss.length) {
+      const fix = window.gps_fix_type;
+      const lis = mounted.gnss
+        .map((g) => {
+          const body = `${esc(g.short)} ${esc(g.bus || "—")} · ${esc(g.zh)}`;
+          let status;
+          if (typeof fix === "number" && fix >= 3) {
+            status = '<span class="ov-sensor-health ok">定位正常</span>';
+          } else if (typeof fix === "number" && fix >= 2) {
+            status = '<span class="ov-sensor-health warn">定位中</span>';
+          } else {
+            status = '<span class="ov-sensor-health muted">待定位</span>';
+          }
+          return `<li title="${escAttr(g.key)}"><strong>${esc(g.label)}</strong> — ${body} ${status}</li>`;
+        })
+        .join("");
+      html += sensorBlock(
+        "GNSS / GPS",
+        countNote(mounted.gnss.length, "路"),
+        "muted",
+        `<ul class="ov-sensor-list">${lis}</ul>`
+      );
+    }
+
+    if (mounted.airspeeds.length) {
+      const lis = mounted.airspeeds
+        .map((a) => {
+          const body = `${esc(a.short)} ${esc(a.bus || "—")} · ${esc(a.zh)}`;
+          let status = '<span class="ov-sensor-health muted">待确认</span>';
+          if (typeof window.airspeed === "number") {
+            status =
+              window.airspeed >= 0
+                ? `<span class="ov-sensor-health ok">${window.airspeed.toFixed(1)} m/s</span>`
+                : '<span class="ov-sensor-health muted">无数据</span>';
+          }
+          return `<li><strong>空速 ${a.slot}</strong> — ${body} ${status}</li>`;
+        })
+        .join("");
+      html += sensorBlock(
+        "空速计",
+        countNote(mounted.airspeeds.length, "路"),
+        "muted",
+        `<ul class="ov-sensor-list">${lis}</ul>`
+      );
+    }
+
+    if (mounted.opticalFlow) {
+      const f = mounted.opticalFlow;
+      const body = `${esc(f.short)} ${esc(f.bus || "—")} · ${esc(f.zh)}`;
+      html += sensorBlock(
+        "光流",
+        "1 路",
+        "muted",
+        `<ul class="ov-sensor-list"><li>${body} <span class="ov-sensor-health ok">已配置</span></li></ul>`
+      );
+    }
+
+    if (mounted.beacon) {
+      const b = mounted.beacon;
+      const body = `${esc(b.short)} ${esc(b.bus || "—")} · ${esc(b.zh)}`;
+      html += sensorBlock(
+        "UWB / 信标定位",
+        "1 路",
+        "muted",
+        `<ul class="ov-sensor-list"><li>${body} <span class="ov-sensor-health ok">已配置</span></li></ul>`
+      );
+    }
+
+    if (mounted.rangefinders.length) {
       const rt = window._rangefinderTelemetry;
-      let dist = "尚无 DISTANCE_SENSOR 遥测";
-      if (rt && Date.now() - rt.t < 3000) dist = `当前距离约 ${(rt.currentCm / 100).toFixed(2)} m（最近一帧）`;
       const lh = fresh && s ? laserHealthFromSys(s) : { ok: null };
-      let note = `${rfSlots.length} 个槽位已配置 · ${dist}`;
-      if (fresh && lh.ok === true) note += " · SYS_STATUS 激光测距健康";
-      if (fresh && lh.ok === false) note += " · SYS_STATUS 激光测距异常";
-      const lis = rfSlots
+      const lis = mounted.rangefinders
         .map((r) => {
-          const tip = `RNGFND${r.slot}_TYPE=${r.type} · ${r.short} · ${r.zh}`;
-          const meta = `TYPE ${r.type} — ${r.zh}`;
-          return `<li title="${escAttr(tip)}"><strong>槽位 ${r.slot}</strong> — <span class="ov-sensor-model">${esc(r.short)}</span> <span class="ov-sensor-meta">${esc(meta)}</span></li>`;
+          const row = rngfndTypeRow(r.type);
+          const tip = `RNGFND${r.slot}_TYPE=${r.type} · ${row.short} · ${row.zh}`;
+          const body = `${esc(row.short)} ${esc(r.busHint || row.zh)} · TYPE ${r.type}`;
+          let status = healthSuffix(lh.ok, fresh);
+          if (rt && Date.now() - rt.t < 3000) {
+            status += ` <span class="ov-sensor-meta">${(rt.currentCm / 100).toFixed(2)} m</span>`;
+          }
+          return `<li title="${escAttr(tip)}"><strong>测距 ${r.slot}</strong> — ${body} ${status}</li>`;
         })
         .join("");
-      let cls = headClass(lh.ok, fresh);
-      if (cls === "muted" && rfSlots.length) cls = "warn";
-      html += sensorBlock("测距仪", note, cls, `<ul class="ov-sensor-list">${lis}</ul>`);
+      html += sensorBlock(
+        "测距仪 / 串口雷达",
+        countNote(mounted.rangefinders.length, "路"),
+        "muted",
+        `<ul class="ov-sensor-list">${lis}</ul>`
+      );
     }
 
-    html += emptyBlock(
-      "说明",
-      "型号由飞控参数中的 Device ID 按 ArduPilot decode_devid 规则解析；与 Mission Planner 设备列表同源逻辑。",
-      "muted"
-    );
+    if (mounted.proximity.length) {
+      const lis = mounted.proximity
+        .map((r) => {
+          const body = `${esc(r.short)} ${esc(r.bus || "—")} · ${esc(r.zh)}`;
+          return `<li title="${escAttr(`PRX${r.slot}_TYPE=${r.type}`)}"><strong>避障 ${r.slot}</strong> — ${body} <span class="ov-sensor-health ok">已配置</span></li>`;
+        })
+        .join("");
+      html += sensorBlock(
+        "避障 / 毫米波雷达",
+        countNote(mounted.proximity.length, "路"),
+        "muted",
+        `<ul class="ov-sensor-list">${lis}</ul>`
+      );
+    }
 
     root.innerHTML = html;
   }
@@ -387,4 +385,4 @@
   }
 
   mount();
-}());
+})();

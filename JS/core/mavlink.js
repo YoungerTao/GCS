@@ -437,6 +437,17 @@ function parseAutopilotVersion(payload) {
       uidHex: uidText,
       updatedAt: Date.now(),
     };
+    if (typeof window.parseArdupilotFirmwareVersion === "function") {
+      window._telemetryFirmwareVersion = window.parseArdupilotFirmwareVersion(flight_sw_version);
+      if (typeof window.detectArdupilotTelemetryProfile === "function") {
+        window._telemetryProfile = window.detectArdupilotTelemetryProfile(window._telemetryFirmwareVersion);
+      }
+    }
+    try {
+      document.dispatchEvent(new CustomEvent("gcs:autopilot-version", {
+        detail: window.autopilotVersionInfo,
+      }));
+    } catch (_) { /* ignore */ }
 
     const fwEl = document.getElementById("ov-fw-version");
     const hwEl = document.getElementById("ov-board-hardware");
@@ -557,7 +568,10 @@ function parseParam(p){ /* 保持不变 */
     u.startsWith("INS_ACC") || u.startsWith("INS_GYR") || u.startsWith("INS_USE") ||
     u.startsWith("COMPASS_DEV_ID") || u.startsWith("COMPASS_USE") ||
     u === "COMPASS_EXTERNAL" || u === "COMPASS_EXTERN2" || u === "COMPASS_EXTERN3" ||
-    /^BARO\d+_DEVID$/.test(u) || /^RNGFND\d+_TYPE$/.test(u)
+    /^BARO\d+_DEVID$/.test(u) || /^RNGFND\d+_TYPE$/.test(u) ||
+    /^PRX\d+_TYPE$/.test(u) || /^ARSPD\d*_TYPE$/.test(u) || u === "FLOW_TYPE" ||
+    /^BATT\d*_MONITOR$/.test(u) || /^GPS\d*_TYPE$/.test(u) || u === "GPS_TYPE" ||
+    u === "BCN_TYPE" || /^SERIAL\d+_PROTOCOL$/.test(u)
   ) {
     try {
       document.dispatchEvent(new CustomEvent("gcs-sensor-overview-changed", { detail: { name: u } }));

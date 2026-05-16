@@ -142,8 +142,14 @@ async function refreshPorts(opts = {}) {
   }
 
   if (ports.length === 0) {
-    setComPlaceholder(comSelect, "-- 暂无已授权串口 --");
-    if (typeof log === "function") log("⚠️ 暂无已授权串口，请点击「连接串口」并在弹窗选择设备");
+    setComPlaceholder(comSelect, "-- 尚未授权，请选下方或点「连接串口」--");
+    const addOptEmpty = document.createElement("option");
+    addOptEmpty.value = "__add__";
+    addOptEmpty.text = "＋ 选择串口设备（首次连接）…";
+    comSelect.appendChild(addOptEmpty);
+    if (typeof log === "function") {
+      log("⚠️ 尚未授权串口：点「连接串口」或在下拉选「选择串口设备」，在浏览器弹窗中选飞控 USB 口");
+    }
     return;
   }
 
