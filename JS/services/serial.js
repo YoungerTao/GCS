@@ -656,10 +656,13 @@ const MAV_CMD_REQUEST_MESSAGE = 512;
 const MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES = 520;
 
 function fwOverviewStillPlaceholder() {
-  const el = document.getElementById("ov-fw-version");
-  if (!el) return false;
-  const t = String(el.textContent || "");
-  return t.includes("等待飞控上报");
+  const ids = ["ov-fw-version", "ov-board-hardware", "ov-device-id"];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (String(el.textContent || "").includes("等待飞控上报")) return true;
+  }
+  return false;
 }
 
 async function requestAutopilotVersionAndEkfOnce() {
@@ -688,6 +691,8 @@ async function requestAutopilotVersionAndEkfOnce() {
     } catch (_) { /* ignore */ }
   }
 }
+
+window.requestAutopilotVersionFromVehicle = requestAutopilotVersionAndEkfOnce;
 
 function schedulePostConnectMavlinkInfoRequests() {
   if (window._postConnectInfoTimer) {

@@ -409,21 +409,23 @@ function humanizeBoardIdName(raw) {
     .replace(/_/g, " ");
 }
 
-/** MAVLink2 线序与 pymavlink 一致：QQ + IIII + HH + 三组 8B custom + uid2[18]（capabilities、uid 在前） */
+/** MAVLink common AUTOPILOT_VERSION（#148）线序：capabilities(8) + 四段 sw + board + 三组 custom[8] + vendor/product + uid(8) + uid2[18] */
 function parseAutopilotVersion(payload) {
-  if (!payload || payload.length < 32) return;
+  if (!payload || payload.length < 24) return;
   try {
     const u8 = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
     const dv = mavlinkPayloadView(payload);
-    const flight_sw_version = dv.getUint32(16, true);
-    const middleware_sw_version = dv.getUint32(20, true);
-    const os_sw_version = dv.getUint32(24, true);
-    const board_version = dv.getUint32(28, true);
+
+    const flight_sw_version = dv.getUint32(8, true);
+    const middleware_sw_version = dv.getUint32(12, true);
+    const os_sw_version = dv.getUint32(16, true);
+    const board_version = dv.getUint32(20, true);
+
     let vendor_id = 0;
     let product_id = 0;
-    if (payload.length >= 36) {
-      vendor_id = dv.getUint16(32, true);
-      product_id = dv.getUint16(34, true);
+    if (payload.length >= 52) {
+      vendor_id = dv.getUint16(48, true);
+      product_id = dv.getUint16(50, true);
     }
 
     const boardType = (board_version >>> 16) & 0xffff;
@@ -437,7 +439,7 @@ function parseAutopilotVersion(payload) {
       hardwareText += ` · vendor ${vendor_id} / product ${product_id}`;
     }
 
-    const git = u8.length >= 44 ? bytesToHexTrim(u8, 36, 8) : "";
+    const git = u8.length >= 32 ? bytesToHexTrim(u8, 24, 8) : "";
     let firmwareText = decodeFlightSwVersion(flight_sw_version);
     if (git) firmwareText += ` · ${git.slice(0, 12)}${git.length > 12 ? "…" : ""}`;
 
@@ -445,8 +447,8 @@ function parseAutopilotVersion(payload) {
     if (u8.length >= 78) {
       uidText = bytesToHexTrim(u8, 60, 18);
     }
-    if (!uidText) {
-      uidText = formatUidWordPair(dv, 8);
+    if (!uidText && u8.length >= 60) {
+      uidText = formatUidWordPair(dv, 52);
     }
     if (uidText && !uidText.startsWith("0x")) uidText = `0x${uidText}`;
 
@@ -478,7 +480,7 @@ function parseAutopilotVersion(payload) {
     }
     if (idEl) {
       idEl.textContent = uidText || "—";
-      idEl.className = uidText ? "muted" : "muted";
+      idEl.className = uidText ? "ok" : "muted";
       idEl.title = uidText ? "uid2 优先，否则 64-bit uid" : "飞控未提供 UID";
     }
   } catch (e) {
@@ -565,6 +567,13 @@ function parseParam(p){ /* 保持不变 */
       typeof window.endParamLoadingUI === "function"
     ) {
       window.endParamLoadingUI(true, "complete");
+      setTimeout(() => {
+        try {
+          if (typeof window.requestAutopilotVersionFromVehicle === "function") {
+            window.requestAutopilotVersionFromVehicle();
+          }
+        } catch (_) { /* ignore */ }
+      }, 250);
     }
   } else {
     scheduleParamTableRender();

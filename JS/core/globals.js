@@ -18,8 +18,32 @@ window.params = new Map();
 window.roll = 0;
 window.pitch = 0;
 window.yaw = 0;
-window.lat = 23.7;
-window.lon = 120.9;
+// 重庆市璧山区 近似中心（WGS84）；未收到有效 GPS 前地图默认中心与此一致
+window.DEFAULT_MAP_LAT = 29.59256;
+window.DEFAULT_MAP_LON = 106.22742;
+
+/** 有 GPS 定位（fix≥2）时用飞控经纬度，否则用默认璧山中心 */
+window.getMapCenterLatLng = function getMapCenterLatLng() {
+  const fix = Number(window.gps_fix_type);
+  const lat = window.lat;
+  const lon = window.lon;
+  if (
+    Number.isFinite(fix) &&
+    fix >= 2 &&
+    typeof lat === "number" &&
+    typeof lon === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lon) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lon) <= 180
+  ) {
+    return [lat, lon];
+  }
+  return [window.DEFAULT_MAP_LAT, window.DEFAULT_MAP_LON];
+};
+
+window.lat = window.DEFAULT_MAP_LAT;
+window.lon = window.DEFAULT_MAP_LON;
 window.airspeed = 0;
 window.groundspeed = 0;
 window.altitude = 0;
@@ -70,6 +94,6 @@ function log(s, key = null) {
   }
 }
 
-// 遥测→界面：mavlink handle 末尾调用 window.scheduleUIUpdate()；hud-map-tabs.js 内 RAF + 250ms 刷新 canvas#hud 与 window.refreshQuickGrid（#quick-grid）
+// 遥测→界面：mavlink handle 末尾调用 window.scheduleUIUpdate()；hud-map-tabs.js 内 RAF 节流刷新 canvas#hud 与 window.refreshQuickGrid（#quick-grid）
 
 console.log("✅ main.js 全局变量已正确挂载到 window");

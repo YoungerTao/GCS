@@ -317,6 +317,80 @@
     updateStatusBar();
   }
 
+  /**
+   * 概览「载机与固件」：部分固件/连接下不会及时发 AUTOPILOT_VERSION，但启动横幅会通过 STATUSTEXT
+   * 到达（与消息栏一致）。在此用同一文本回填固件版本 / 板型 / 设备号，避免长期停在「等待飞控上报」。
+   * AUTOPILOT_VERSION 到达后仍由 mavlink.js parseAutopilotVersion 覆盖为更精确内容。
+   */
+  function tryPopulateOverviewFromStatustext(raw) {
+    const line = String(raw || "").trim();
+    if (!line) return;
+
+    const fwEl = document.getElementById("ov-fw-version");
+    const hwEl = document.getElementById("ov-board-hardware");
+    const idEl = document.getElementById("ov-device-id");
+    if (!fwEl && !hwEl && !idEl) return;
+
+    const stillWaiting = (el) =>
+      el && String(el.textContent || "").includes("等待飞控上报");
+
+    // ArduCopter V4.6.3 ( 92b0cd78 ) 等
+    const fwM = line.match(
+      /^\s*(Ardu(?:Copter|Plane|Rover|Sub)|AntennaTracker)\s+V[\d.]+\s*(?:\([^)]*\))?\s*$/i,
+    );
+    if (fwM && fwEl) {
+      let show = line;
+      const ch = window._statustextChibiosHash;
+      if (ch && !show.includes(ch)) {
+        show = `${show.trim()} · ChibiOS ${ch}`;
+      }
+      fwEl.textContent = show;
+      fwEl.className = "ok";
+      fwEl.title = "来自飞控 STATUSTEXT 启动横幅（与消息栏一致）";
+      return;
+    }
+
+    // ChibiOS : 88b84600 — 合并到固件行（若已有 Ardu 行则追加）
+    const chibM = line.match(/^\s*ChibiOS\s*:\s*([0-9a-fA-F]+)\s*$/i);
+    if (chibM && fwEl) {
+      window._statustextChibiosHash = chibM[1];
+      const tail = `ChibiOS ${chibM[1]}`;
+      const cur = String(fwEl.textContent || "");
+      if (stillWaiting(fwEl) || cur.includes("等待飞控上报")) {
+        fwEl.textContent = tail;
+      } else if (/Ardu(?:Copter|Plane|Rover|Sub)|AntennaTracker/i.test(cur)) {
+        if (!cur.includes(chibM[1])) {
+          fwEl.textContent = `${cur.replace(/\s*·\s*ChibiOS.*$/i, "").trim()} · ${tail}`;
+        }
+      } else if (!cur.includes(chibM[1])) {
+        fwEl.textContent = `${cur.replace(/\s*·\s*ChibiOS.*$/i, "").trim()} · ${tail}`;
+      }
+      fwEl.className = "ok";
+      fwEl.title = (fwEl.title || "") + (fwEl.title ? "；" : "") + "STATUSTEXT OS 信息";
+      return;
+    }
+
+    // 板型 + 十进制 UID 段：如 CUAV-X7 00440049 35325105 31373432
+    const brdM = line.match(
+      /^([A-Za-z][A-Za-z0-9_+\-/]{1,40})\s+((?:\d{4,}\s*)+)\s*$/,
+    );
+    if (
+      brdM &&
+      hwEl &&
+      idEl &&
+      !/^Ardu/i.test(brdM[1]) &&
+      !/^ChibiOS/i.test(brdM[1]) &&
+      !/^frame$/i.test(brdM[1])
+    ) {
+      hwEl.textContent = brdM[1];
+      hwEl.className = "ok";
+      hwEl.title = "来自飞控 STATUSTEXT（板载标识）";
+      idEl.textContent = brdM[2].trim().replace(/\s+/g, " ");
+      idEl.className = "ok";
+      idEl.title = "来自飞控 STATUSTEXT（与消息栏设备号段一致）";
+    }
+  }
+
   function ingestStatustext(severity, text) {
     const entry = {
       severity: Number(severity),
@@ -328,6 +402,9 @@
     appendRow(entry);
     onNewAlertSeverity(entry.severity);
     updateStatusBar();
+    try {
+      tryPopulateOverviewFromStatustext(entry.textEn);
+    } catch (e) { /* ignore */ }
     if (/frame:\s*\S/i.test(entry.textEn)) {
       try {
         document.dispatchEvent(new CustomEvent("gcs-frame-statustext", { detail: { text: entry.textEn } }));
@@ -357,6 +434,10 @@
 
   function onConnection() {
     updateStatusBar();
+    try {
+      const st = (window._gcsConnState || "").toLowerCase();
+      if (st === "disconnected" || st === "error") window._statustextChibiosHash = "";
+    } catch (_) { /* ignore */ }
   }
 
   window.ingestStatustext = ingestStatustext;
