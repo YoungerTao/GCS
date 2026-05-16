@@ -96,6 +96,8 @@
   min-height: 0;
   overflow: auto;
   padding: 14px;
+  display: flex;
+  flex-direction: column;
 }
 
 .fp-card {
@@ -288,6 +290,13 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+  width: 100%;
+}
+
+.fp-inline-stats > .fp-stat {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .fp-stat {
@@ -295,6 +304,7 @@
   border-radius: 8px;
   background: rgba(10, 16, 23, 0.55);
   padding: 10px;
+  box-sizing: border-box;
 }
 
 .fp-stat-label {
@@ -315,6 +325,78 @@
   font-size: 13px;
   line-height: 1.35;
   font-weight: 600;
+}
+
+.fp-stat--control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.fp-stat--control .fp-stat-label {
+  display: block;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.fp-stat-label-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fp-stat-hint {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--fp-accent-2);
+  line-height: 1.25;
+  white-space: normal;
+  word-break: break-all;
+}
+
+/* 覆盖 layout.css 全局 select（min-width:150px 会导致网格内下拉撑破并连成一条） */
+.fp-shell select.fp-stat-select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 6px 24px 6px 8px;
+  border: 1px solid #3a4d61;
+  border-radius: 6px;
+  background: #0f1720;
+  color: #f1f5f9;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  text-shadow: none;
+  box-shadow: none;
+  box-sizing: border-box;
+  cursor: pointer;
+  appearance: auto;
+}
+
+.fp-shell select.fp-stat-select:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.fp-shell select.fp-stat-select:focus {
+  outline: none;
+  border-color: var(--fp-accent-2);
+  box-shadow: 0 0 0 2px rgba(79, 195, 247, 0.2);
+}
+
+.fp-shell select.fp-stat-select option {
+  background: #1d2733;
+  color: #f1f5f9;
 }
 
 .fp-camera-specs {
@@ -538,11 +620,17 @@
   user-select: none;
 }
 
+.fp-waypoint-marker-body {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+}
+
 .fp-waypoint-marker-dot {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -553,6 +641,39 @@
   line-height: 1;
   border: 2px solid #0b1620;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.fp-waypoint-marker-role-label {
+  position: absolute;
+  min-width: 12px;
+  text-align: center;
+  color: #eef6ff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+}
+
+.fp-waypoint-marker-role-label--ne {
+  left: calc(50% + 8px);
+  top: calc(50% - 12px);
+}
+
+.fp-waypoint-marker-role-label--nw {
+  right: calc(50% + 8px);
+  top: calc(50% - 12px);
+}
+
+.fp-waypoint-marker-role-label--se {
+  left: calc(50% + 8px);
+  bottom: calc(50% - 12px);
+}
+
+.fp-waypoint-marker-role-label--sw {
+  right: calc(50% + 8px);
+  bottom: calc(50% - 12px);
 }
 
 .fp-waypoint-marker-alt-tag {
@@ -691,6 +812,133 @@
 .mapboxgl-popup-tip,
 .maplibregl-popup-tip {
   border-top-color: #10161d !important;
+}
+
+.fp-hidden-file {
+  display: none;
+}
+
+.fp-button-row-wrap {
+  flex-wrap: wrap;
+}
+
+.fp-card-mission-io {
+  margin-top: auto;
+  border-top: 1px solid var(--fp-border-soft);
+}
+
+.fp-mission-io-note {
+  color: var(--fp-accent-2);
+}
+
+.fp-mission-io-note--sub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--fp-muted);
+}
+
+.fp-mission-io-progress {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #304152;
+  border-radius: 8px;
+  background: rgba(8, 12, 18, 0.65);
+}
+
+.fp-mission-io-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.fp-mission-io-progress-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fp-text);
+}
+
+.fp-mission-io-progress-text {
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--fp-accent-2);
+  white-space: nowrap;
+}
+
+.fp-mission-io-progress-bar-wrap {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.fp-mission-io-progress-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #3d9ee6 0%, #4fc3f7 55%, #66d7a6 100%);
+  transition: width 0.18s ease;
+}
+
+.fp-mission-io-progress-bar-fill.is-indeterminate {
+  width: 38% !important;
+  animation: fp-mission-io-progress-sweep 1.05s ease-in-out infinite;
+}
+
+@keyframes fp-mission-io-progress-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.fp-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fp-muted);
+  cursor: pointer;
+}
+
+.fp-check-row input {
+  accent-color: var(--fp-accent);
+}
+
+.fp-field-hint {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fp-muted);
+}
+
+.fp-field select:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+  color: var(--fp-text);
+}
+
+.fp-segment-label {
+  background: transparent;
+  border: none;
+}
+
+.fp-segment-label-text {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(16, 22, 29, 0.85);
+  color: #f0c24f;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.fp-survey-wp-row--preview td,
+.fp-survey-wp-row--preview th {
+  color: var(--fp-muted);
+  font-style: italic;
 }
 
 @media (max-width: 1100px) {

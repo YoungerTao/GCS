@@ -748,6 +748,7 @@ async function sendAccelcalVehiclePos(position) {
   return true;
 }
 
+window.sendMavlinkV2 = send_v2;
 window.sendCommandLong = sendCommandLong;
 window.sendAccelcalVehiclePos = sendAccelcalVehiclePos;
 

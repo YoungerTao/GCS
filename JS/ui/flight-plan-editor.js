@@ -944,19 +944,33 @@
     ).addTo(map);
   }
 
-  function createWaypointMarkerIcon(waypointIndex, altitude) {
+  const WAYPOINT_LABEL_QUADRANTS = ["ne", "nw", "se", "sw"];
+
+  function createWaypointMarkerIcon(waypointIndex, altitude, roleLabel, labelQuadrant) {
     const altText =
       typeof altitude === "number" && isFinite(altitude) ? Math.round(altitude) + " m" : "--";
+    const title = roleLabel
+      ? roleLabel + " · " + altText
+      : "航点 " + waypointIndex + " · " + altText;
+    const quad = labelQuadrant || "ne";
+    const roleHtml = roleLabel
+      ? '<span class="fp-waypoint-marker-role-label fp-waypoint-marker-role-label--' +
+        quad +
+        '">' +
+        roleLabel +
+        "</span>"
+      : "";
     return window.L.divIcon({
       className: "fp-waypoint-marker",
       html:
-        '<span class="fp-waypoint-marker-wrap" title="航点 ' +
-        waypointIndex +
-        " · " +
-        altText +
+        '<span class="fp-waypoint-marker-wrap" title="' +
+        title +
         '">' +
+        '<span class="fp-waypoint-marker-body">' +
         '<span class="fp-waypoint-marker-dot">' +
         waypointIndex +
+        "</span>" +
+        roleHtml +
         "</span>" +
         '<span class="fp-waypoint-marker-alt-tag">' +
         altText +
@@ -1017,11 +1031,17 @@
     surveyArea,
     surveyPath,
     onWaypointMoved,
-    onSurveyVertexMoved
+    onSurveyVertexMoved,
+    layerOptions
   ) {
     if (!layers || !window.L) {
       return;
     }
+
+    const opts = layerOptions || {};
+    const VT = window.VehicleTemplates;
+    const MM = window.MissionModel;
+    const surveyPathPreview = Boolean(opts.surveyPathPreview);
 
     const mapForClose =
       layers.waypointGroup && layers.waypointGroup._map
@@ -1037,25 +1057,35 @@
 
     waypoints.forEach(function (waypoint, index) {
       const waypointNumber = index + 1;
+      const roleLabel = MM ? MM.getMapRoleLabel(waypoint) : waypoint.label || "";
+      const popupTitle = MM ? MM.getDisplayTitle(waypoint, index) : roleLabel || "航点 " + waypointNumber;
+      const labelQuadrant = WAYPOINT_LABEL_QUADRANTS[index % WAYPOINT_LABEL_QUADRANTS.length];
+      const canDrag = Boolean(onWaypointMoved) && !waypoint.locked;
       const marker = window.L.marker([waypoint.lat, waypoint.lng], {
-        icon: createWaypointMarkerIcon(waypointNumber, waypoint.alt),
-        draggable: Boolean(onWaypointMoved)
+        icon: createWaypointMarkerIcon(
+          waypointNumber,
+          waypoint.alt,
+          roleLabel,
+          labelQuadrant
+        ),
+        draggable: canDrag
       });
 
       marker.bindPopup(
-        "<strong>航点 " +
-          waypointNumber +
+        "<strong>" +
+          popupTitle +
           "</strong><div style='margin-top:4px;font-size:11px;color:#9fb0c1'>" +
           round(waypoint.lng, 6).toFixed(6) +
           ", " +
           round(waypoint.lat, 6).toFixed(6) +
           (typeof waypoint.alt === "number" ? "<br>高度 " + waypoint.alt + " m" : "") +
+          (waypoint.locked ? "<br>已锁定（飞控位置）" : "") +
           "</div>"
       );
 
       marker.on("click", window.L.DomEvent.stopPropagation);
 
-      if (onWaypointMoved) {
+      if (canDrag) {
         marker.on("dragstart", window.L.DomEvent.stopPropagation);
         marker.on("dragend", function () {
           const latLng = marker.getLatLng();
@@ -1064,15 +1094,50 @@
       }
 
       layers.waypointGroup.addLayer(marker);
+
+      if (
+        MM &&
+        waypoint.command === MM.MAV_CMD.NAV_LOITER_TO_ALT &&
+        Number(waypoint.param3)
+      ) {
+        window.L.circle([waypoint.lat, waypoint.lng], {
+          radius: Math.abs(Number(waypoint.param3)),
+          color: "#ffb74d",
+          weight: 1.5,
+          fillOpacity: 0.06
+        }).addTo(layers.waypointGroup);
+      }
     });
 
     if (waypoints.length >= 2) {
-      window.L.polyline(
-        waypoints.map(function (point) {
-          return [point.lat, point.lng];
-        }),
-        { color: "#4fc3f7", weight: 3 }
-      ).addTo(layers.waypointGroup);
+      for (let i = 1; i < waypoints.length; i++) {
+        const a = waypoints[i - 1];
+        const b = waypoints[i];
+        let color = "#4fc3f7";
+        if (VT && VT.gradeSegmentColor && a.source === "template" && b.source === "template") {
+          color = VT.gradeSegmentColor(a, b);
+        }
+        window.L.polyline(
+          [
+            [a.lat, a.lng],
+            [b.lat, b.lng]
+          ],
+          { color: color, weight: 3 }
+        ).addTo(layers.waypointGroup);
+        if (VT && VT.horizontalDistanceM && b.label === "起飞引导") {
+          const dist = round(VT.horizontalDistanceM(a, b), 0);
+          const mid = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+          window.L.marker([mid.lat, mid.lng], {
+            icon: window.L.divIcon({
+              className: "fp-segment-label",
+              html: '<span class="fp-segment-label-text">' + dist + " m</span>",
+              iconSize: [48, 16],
+              iconAnchor: [24, 8]
+            }),
+            interactive: false
+          }).addTo(layers.waypointGroup);
+        }
+      }
     }
 
     surveyArea.forEach(function (point, index) {
@@ -1133,8 +1198,9 @@
         }),
         {
           color: "#66d7a6",
-          weight: 1.5,
-          opacity: 0.95
+          weight: surveyPathPreview ? 1.5 : 1.5,
+          opacity: surveyPathPreview ? 0.55 : 0.95,
+          dashArray: surveyPathPreview ? "8 6" : null
         }
       ).addTo(layers.pathGroup);
 
@@ -1217,6 +1283,26 @@
     return rect.width > 8 && rect.height > 8;
   }
 
+  function loadInitialFlightPlanDraft() {
+    if (!window.FlightPlanDraft || typeof window.FlightPlanDraft.load !== "function") {
+      return null;
+    }
+    const draft = window.FlightPlanDraft.load();
+    if (!draft) {
+      return null;
+    }
+    return {
+      activeTab: draft.activeTab || "waypoint",
+      settings: draft.settings ? normalizeMissionSettings(draft.settings) : null,
+      missionWaypoints: Array.isArray(draft.missionWaypoints) ? draft.missionWaypoints : [],
+      platformOverride: typeof draft.platformOverride === "string" ? draft.platformOverride : "",
+      surveyArea: Array.isArray(draft.surveyArea) ? draft.surveyArea : [],
+      surveyCommitted: Boolean(draft.surveyCommitted),
+      appendRtl: Boolean(draft.appendRtl),
+      surveyAltitudeCustomized: Boolean(draft.surveyAltitudeCustomized)
+    };
+  }
+
   function FlightPlanEditor() {
     const ReactApi = window.React;
     const useCallback = ReactApi.useCallback;
@@ -1225,24 +1311,60 @@
     const useRef = ReactApi.useRef;
     const useState = ReactApi.useState;
 
+    const initialDraft = useMemo(loadInitialFlightPlanDraft, []);
+
     const mapContainerRef = useRef(null);
     const mapRef = useRef(null);
     const layersRef = useRef(null);
     const activeTabRef = useRef("waypoint");
     const settingsRef = useRef(normalizeMissionSettings());
-    const surveyAltitudeCustomizedRef = useRef(false);
+    const surveyAltitudeCustomizedRef = useRef(
+      initialDraft ? initialDraft.surveyAltitudeCustomized : false
+    );
+    const missionBootstrappedRef = useRef(
+      Boolean(
+        initialDraft &&
+          (initialDraft.missionWaypoints.length ||
+            initialDraft.surveyArea.length ||
+            initialDraft.surveyCommitted)
+      )
+    );
     const waypointCountRef = useRef(0);
     const surveyAreaCountRef = useRef(0);
     const latestWaypointsRef = useRef([]);
     const latestSurveyAreaRef = useRef([]);
     const latestSurveyPathRef = useRef([]);
+    const surveyCommittedRef = useRef(initialDraft ? initialDraft.surveyCommitted : false);
+    const fileInputRef = useRef(null);
 
-    const [activeTab, setActiveTab] = useState("waypoint");
-    const [settings, setSettings] = useState(normalizeMissionSettings());
+    const [activeTab, setActiveTab] = useState(
+      initialDraft && initialDraft.activeTab ? initialDraft.activeTab : "waypoint"
+    );
+    const [settings, setSettings] = useState(
+      initialDraft && initialDraft.settings
+        ? initialDraft.settings
+        : normalizeMissionSettings()
+    );
     const [overlapEditKey, setOverlapEditKey] = useState(null);
     const [overlapEditText, setOverlapEditText] = useState("");
-    const [waypoints, setWaypoints] = useState([]);
-    const [surveyArea, setSurveyArea] = useState([]);
+    const [missionWaypoints, setMissionWaypoints] = useState(
+      initialDraft ? initialDraft.missionWaypoints : []
+    );
+    const [platformOverride, setPlatformOverride] = useState(
+      initialDraft ? initialDraft.platformOverride : ""
+    );
+    const [surveyArea, setSurveyArea] = useState(initialDraft ? initialDraft.surveyArea : []);
+    const [surveyCommitted, setSurveyCommitted] = useState(
+      initialDraft ? initialDraft.surveyCommitted : false
+    );
+    const [appendRtl, setAppendRtl] = useState(initialDraft ? initialDraft.appendRtl : false);
+    const [connected, setConnected] = useState(
+      window._gcsConnState === "connected"
+    );
+    const [missionIoBusy, setMissionIoBusy] = useState(false);
+    const [missionIoNote, setMissionIoNote] = useState("");
+    const [missionIoProgress, setMissionIoProgress] = useState(null);
+    const [fcParamRevision, setFcParamRevision] = useState(0);
     const surveyPath = useMemo(function () {
       if (surveyArea.length < 3) {
         return [];
@@ -1269,33 +1391,67 @@
       settings.surveyEntryCorner
     ]);
 
-    const surveyRouteWaypoints = useMemo(
+    const surveyPreviewPoints = useMemo(
       function () {
+        if (surveyCommitted || surveyPath.length < 1) {
+          return [];
+        }
         return extractSurveyRouteWaypoints(surveyPath).map(function (point, index) {
           return {
-            seq: index + 1,
+            seq: missionWaypoints.length + index + 1,
             lat: point.lat,
             lng: point.lng,
             alt: settings.surveyAltitude
           };
         });
       },
-      [surveyPath, settings.surveyAltitude]
+      [surveyPath, settings.surveyAltitude, surveyCommitted, missionWaypoints.length]
     );
+
+    const resolvedPlatform = useMemo(
+      function () {
+        const VT = window.VehicleTemplates;
+        const detect = VT && VT.detectVehiclePlatform ? VT.detectVehiclePlatform() : "multirotor";
+        if (connected) {
+          return detect;
+        }
+        return platformOverride || detect;
+      },
+      [platformOverride, connected, fcParamRevision]
+    );
+
+    useEffect(function () {
+      function onAirframeParams() {
+        if (!connected) {
+          return;
+        }
+        setFcParamRevision(function (n) {
+          return n + 1;
+        });
+      }
+      document.addEventListener("gcs-airframe-params-changed", onAirframeParams);
+      return function () {
+        document.removeEventListener("gcs-airframe-params-changed", onAirframeParams);
+      };
+    }, [connected]);
 
     const onWaypointMovedRef = useRef(null);
     const onSurveyVertexMovedRef = useRef(null);
 
     const handleWaypointMoved = useCallback(function (index, lng, lat) {
-      setWaypoints(function (previous) {
+      setMissionWaypoints(function (previous) {
         if (index < 0 || index >= previous.length) {
           return previous;
         }
         const next = previous.slice();
         next[index] = Object.assign({}, next[index], { lng: lng, lat: lat });
+        const VT = window.VehicleTemplates;
+        if (VT && VT.refreshLoiterForMission) {
+          return VT.refreshLoiterForMission(next, resolvedPlatform);
+        }
         return next;
       });
-    }, []);
+    }, [resolvedPlatform]);
 
     const handleSurveyVertexMoved = useCallback(function (index, lng, lat) {
       setSurveyArea(function (previous) {
@@ -1305,6 +1461,98 @@
         const next = previous.slice();
         next[index] = { lng: lng, lat: lat };
         return next;
+      });
+      setSurveyCommitted(false);
+    }, []);
+
+    const bootstrapMissionForSurvey = useCallback(function () {
+      const MM = window.MissionModel;
+      const VT = window.VehicleTemplates;
+      if (!MM || !VT) {
+        return;
+      }
+      const origin = MM.getTakeoffLatLng();
+      const list = VT.buildBootstrapWaypoints(
+        resolvedPlatform,
+        origin,
+        MM.isVehicleConnected()
+      );
+      setMissionWaypoints(list);
+      missionBootstrappedRef.current = true;
+    }, [resolvedPlatform]);
+
+    const mergeSurveyPathIntoMission = useCallback(
+      function (baseWaypoints) {
+        const MM = window.MissionModel;
+        if (!MM || !surveyCommitted || surveyArea.length < 3) {
+          return baseWaypoints;
+        }
+        const points = extractSurveyRouteWaypoints(surveyPath);
+        if (!points.length) {
+          return baseWaypoints;
+        }
+        return MM.mergeSurveyIntoMission(
+          baseWaypoints,
+          points,
+          settings.surveyAltitude,
+          appendRtl
+        );
+      },
+      [
+        surveyCommitted,
+        surveyArea.length,
+        surveyPath,
+        settings.surveyAltitude,
+        appendRtl
+      ]
+    );
+
+    const handlePlatformChange = useCallback(
+      function (val) {
+        if (connected) {
+          return;
+        }
+        setPlatformOverride(val);
+        const MM = window.MissionModel;
+        const VT = window.VehicleTemplates;
+        if (MM && VT) {
+          const boot = VT.buildBootstrapWaypoints(val, MM.getTakeoffLatLng(), false);
+          setMissionWaypoints(mergeSurveyPathIntoMission(boot));
+          missionBootstrappedRef.current = true;
+        }
+      },
+      [connected, mergeSurveyPathIntoMission]
+    );
+
+    const handleConfirmSurveyGenerate = useCallback(function () {
+      const MM = window.MissionModel;
+      if (!MM || surveyArea.length < 3 || !surveyPath.length) {
+        return;
+      }
+      const points = extractSurveyRouteWaypoints(surveyPath);
+      setMissionWaypoints(function (previous) {
+        return MM.appendSurveyIntoMission(
+          previous,
+          points,
+          settings.surveyAltitude,
+          appendRtl
+        );
+      });
+      setSurveyArea([]);
+      setSurveyCommitted(false);
+    }, [surveyArea.length, surveyPath, settings.surveyAltitude, appendRtl]);
+
+    const handleAppendRtlChange = useCallback(function (checked) {
+      setAppendRtl(checked);
+      const MM = window.MissionModel;
+      if (!MM) {
+        return;
+      }
+      setMissionWaypoints(function (previous) {
+        if (checked) {
+          return MM.appendRtlWaypoint(previous);
+        }
+        return MM.stripRtlWaypoints(previous);
       });
     }, []);
 
@@ -1316,7 +1564,7 @@
       onSurveyVertexMovedRef.current = handleSurveyVertexMoved;
     }, [handleSurveyVertexMoved]);
 
-    const syncMapLayers = useCallback(function (nextWaypoints, nextSurveyArea, nextSurveyPath) {
+    const syncMapLayers = useCallback(function (nextWaypoints, nextSurveyArea, nextSurveyPath, committed) {
       if (!mapRef.current || !layersRef.current) {
         return;
       }
@@ -1334,6 +1582,9 @@
           if (onSurveyVertexMovedRef.current) {
             onSurveyVertexMovedRef.current(index, lng, lat);
           }
+        },
+        {
+          surveyPathPreview: !committed
         }
       );
     }, []);
@@ -1341,15 +1592,95 @@
     useEffect(function () {
       activeTabRef.current = activeTab;
       settingsRef.current = settings;
-      waypointCountRef.current = waypoints.length;
+      waypointCountRef.current = missionWaypoints.length;
       surveyAreaCountRef.current = surveyArea.length;
-    }, [activeTab, settings, waypoints.length, surveyArea.length]);
+      surveyCommittedRef.current = surveyCommitted;
+    }, [activeTab, settings, missionWaypoints.length, surveyArea.length, surveyCommitted]);
 
     useEffect(function () {
-      latestWaypointsRef.current = waypoints;
+      latestWaypointsRef.current = missionWaypoints;
       latestSurveyAreaRef.current = surveyArea;
       latestSurveyPathRef.current = surveyPath;
-    }, [waypoints, surveyArea, surveyPath]);
+    }, [missionWaypoints, surveyArea, surveyPath]);
+
+    useEffect(function () {
+      if (!window.FlightPlanDraft || typeof window.FlightPlanDraft.save !== "function") {
+        return;
+      }
+      window.FlightPlanDraft.save({
+        activeTab: activeTab,
+        settings: settings,
+        missionWaypoints: missionWaypoints,
+        platformOverride: platformOverride,
+        surveyArea: surveyArea,
+        surveyCommitted: surveyCommitted,
+        appendRtl: appendRtl,
+        surveyAltitudeCustomized: surveyAltitudeCustomizedRef.current
+      });
+    }, [
+      activeTab,
+      settings,
+      missionWaypoints,
+      platformOverride,
+      surveyArea,
+      surveyCommitted,
+      appendRtl
+    ]);
+
+    useEffect(function () {
+      if (activeTab !== "survey") {
+        return;
+      }
+      if (surveyArea.length || surveyCommitted || missionWaypoints.length) {
+        missionBootstrappedRef.current = true;
+        return;
+      }
+      if (!missionBootstrappedRef.current) {
+        bootstrapMissionForSurvey();
+      }
+    }, [
+      activeTab,
+      bootstrapMissionForSurvey,
+      missionWaypoints.length,
+      surveyArea.length,
+      surveyCommitted
+    ]);
+
+    useEffect(function () {
+      function onConn(event) {
+        const next = event && event.detail && event.detail.state === "connected";
+        setConnected(next);
+        const VT = window.VehicleTemplates;
+        const MM = window.MissionModel;
+        if (next) {
+          setPlatformOverride("");
+          if (MM && VT) {
+            setMissionWaypoints(function (prev) {
+              return VT.syncTakeoffFromVehicle(prev, true);
+            });
+          }
+        } else if (VT) {
+          setPlatformOverride(VT.detectVehiclePlatform ? VT.detectVehiclePlatform() : "multirotor");
+        }
+      }
+      document.addEventListener("gcs-connection", onConn);
+      return function () {
+        document.removeEventListener("gcs-connection", onConn);
+      };
+    }, []);
+
+    useEffect(function () {
+      if (!connected || !missionWaypoints.length) {
+        return;
+      }
+      const VT = window.VehicleTemplates;
+      if (!VT) {
+        return;
+      }
+      setMissionWaypoints(function (prev) {
+        return VT.syncTakeoffFromVehicle(prev, true);
+      });
+    }, [connected]);
 
     useEffect(function () {
       let disposed = false;
@@ -1399,13 +1730,24 @@
             setSurveyArea(function (previous) {
               return previous.concat(clicked);
             });
+            setSurveyCommitted(false);
           } else {
-            setWaypoints(function (previous) {
-              return previous.concat({
-                lng: clicked.lng,
-                lat: clicked.lat,
-                alt: Number(settingsRef.current.altitude)
-              });
+            const MM = window.MissionModel;
+            setMissionWaypoints(function (previous) {
+              const wp = MM
+                ? MM.createWaypoint({
+                    lng: clicked.lng,
+                    lat: clicked.lat,
+                    alt: Number(settingsRef.current.altitude),
+                    source: "manual"
+                  })
+                : {
+                    lng: clicked.lng,
+                    lat: clicked.lat,
+                    alt: Number(settingsRef.current.altitude)
+                  };
+              const next = MM ? MM.renumberWaypoints(previous.concat([wp])) : previous.concat([wp]);
+              return next;
             });
           }
         });
@@ -1427,7 +1769,8 @@
             if (onSurveyVertexMovedRef.current) {
               onSurveyVertexMovedRef.current(index, lng, lat);
             }
-          }
+          },
+          { surveyPathPreview: !surveyCommittedRef.current }
         );
 
         window.requestAnimationFrame(function () {
@@ -1475,6 +1818,25 @@
             return;
           }
           mapRef.current.invalidateSize();
+          if (layersRef.current) {
+            syncLeafletMissionLayers(
+              layersRef.current,
+              latestWaypointsRef.current,
+              latestSurveyAreaRef.current,
+              latestSurveyPathRef.current,
+              function (index, lng, lat) {
+                if (onWaypointMovedRef.current) {
+                  onWaypointMovedRef.current(index, lng, lat);
+                }
+              },
+              function (index, lng, lat) {
+                if (onSurveyVertexMovedRef.current) {
+                  onSurveyVertexMovedRef.current(index, lng, lat);
+                }
+              },
+              { surveyPathPreview: !surveyCommittedRef.current }
+            );
+          }
           fitMissionBounds(
             mapRef.current,
             latestWaypointsRef.current,
@@ -1498,8 +1860,15 @@
     }, []);
 
     useEffect(function () {
-      syncMapLayers(waypoints, surveyArea, surveyPath);
-    }, [surveyArea, surveyPath, syncMapLayers, waypoints]);
+      syncMapLayers(missionWaypoints, surveyArea, surveyPath, surveyCommitted);
+    }, [surveyArea, surveyPath, syncMapLayers, missionWaypoints, surveyCommitted]);
+
+    useEffect(function () {
+      if (!mapRef.current || !layersRef.current) {
+        return;
+      }
+      syncMapLayers(missionWaypoints, surveyArea, surveyPath, surveyCommitted);
+    }, [activeTab, syncMapLayers, missionWaypoints, surveyArea, surveyPath, surveyCommitted]);
 
     const handleSettingChange = useCallback(function (key, value, finalize, options) {
       options = options || {};
@@ -1599,19 +1968,129 @@
     }, [handleFocalLengthSelect]);
 
     const handleClearWaypoints = useCallback(function () {
-      setWaypoints([]);
+      setMissionWaypoints([]);
+      missionBootstrappedRef.current = false;
     }, []);
 
     const handleClearSurvey = useCallback(function () {
       setSurveyArea([]);
+      setSurveyCommitted(false);
     }, []);
 
     const handleFitMission = useCallback(function () {
       if (mapRef.current) {
         mapRef.current.invalidateSize();
-        fitMissionBounds(mapRef.current, waypoints, surveyArea, surveyPath);
+        fitMissionBounds(mapRef.current, missionWaypoints, surveyArea, surveyPath);
       }
-    }, [waypoints, surveyArea, surveyPath]);
+    }, [missionWaypoints, surveyArea, surveyPath]);
+
+    const handleSaveMissionFile = useCallback(function () {
+      if (!window.WaypointFile) {
+        return;
+      }
+      window.WaypointFile.downloadWaypointFile(missionWaypoints, "mission.waypoints");
+    }, [missionWaypoints]);
+
+    const handleImportMissionFile = useCallback(function (event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file || !window.WaypointFile) {
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function () {
+        try {
+          const list = window.WaypointFile.parseWaypointFile(reader.result);
+          setMissionWaypoints(list);
+          missionBootstrappedRef.current = true;
+          setMissionIoNote("已导入 " + list.length + " 个航点");
+        } catch (err) {
+          setMissionIoNote(err.message || "导入失败");
+        }
+        event.target.value = "";
+      };
+      reader.readAsText(file, "utf-8");
+    }, []);
+
+    const handleUploadMission = useCallback(async function () {
+      if (!window.MavlinkMission) {
+        return;
+      }
+      const total = missionWaypoints.length;
+      setMissionIoBusy(true);
+      setMissionIoProgress({
+        mode: "upload",
+        current: 0,
+        total: total,
+        indeterminate: total <= 0,
+        label: "正在写入飞控…"
+      });
+      setMissionIoNote("正在写入飞控…");
+      try {
+        await window.MavlinkMission.uploadMission(missionWaypoints, function (cur, tot) {
+          setMissionIoProgress({
+            mode: "upload",
+            current: cur,
+            total: tot,
+            indeterminate: false,
+            label: "写入航点 " + cur + " / " + tot
+          });
+          setMissionIoNote("写入航点 " + cur + " / " + tot);
+        });
+        setMissionIoNote("任务已写入飞控");
+        if (typeof log === "function") {
+          log("✅ 航线已写入飞控");
+        }
+      } catch (err) {
+        setMissionIoNote(err.message || "写入失败");
+        if (typeof log === "function") {
+          log("❌ 写入航线失败: " + (err.message || err));
+        }
+      } finally {
+        setMissionIoBusy(false);
+        setMissionIoProgress(null);
+      }
+    }, [missionWaypoints]);
+
+    const handleDownloadMission = useCallback(async function () {
+      if (!window.MavlinkMission) {
+        return;
+      }
+      setMissionIoBusy(true);
+      setMissionIoProgress({
+        mode: "download",
+        current: 0,
+        total: 0,
+        indeterminate: true,
+        label: "正在连接飞控任务…"
+      });
+      setMissionIoNote("正在读取飞控任务…");
+      try {
+        const list = await window.MavlinkMission.downloadMission(function (cur, tot) {
+          setMissionIoProgress({
+            mode: "download",
+            current: cur,
+            total: tot,
+            indeterminate: false,
+            label: "读取航点 " + cur + " / " + tot
+          });
+          setMissionIoNote("读取航点 " + cur + " / " + tot);
+        });
+        setMissionWaypoints(list);
+        missionBootstrappedRef.current = true;
+        setMissionIoNote("已读取 " + list.length + " 个航点");
+        if (typeof log === "function") {
+          log("✅ 已从飞控读取 " + list.length + " 个航点");
+        }
+      } catch (err) {
+        setMissionIoNote(err.message || "读取失败");
+        if (typeof log === "function") {
+          log("❌ 读取航线失败: " + (err.message || err));
+        }
+      } finally {
+        setMissionIoBusy(false);
+        setMissionIoProgress(null);
+      }
+    }, []);
 
     const lineSpacing = round(
       computeLineSpacingMeters(settings.sideOverlap, settings.footprintWidthMeters),
@@ -1779,15 +2258,20 @@
           "section",
           { className: "fp-card" },
           e("h3", { className: "fp-card-title" }, "航点列表"),
-          waypoints.length
+          missionWaypoints.length
             ? e(
                 "ul",
                 { className: "fp-waypoint-list" },
-                waypoints.map(function (waypoint, index) {
+                missionWaypoints.map(function (waypoint, index) {
+                  const title =
+                    waypoint.label ||
+                    (window.MissionModel
+                      ? window.MissionModel.getDisplayTitle(waypoint, index)
+                      : "WP" + (index + 1));
                   return e(
                     "li",
                     { key: "wp-" + index, className: "fp-waypoint-item" },
-                    e("strong", null, "WP" + (index + 1)),
+                    e("strong", null, title),
                     e("div", { className: "fp-waypoint-meta" }, formatCoordinate(waypoint, waypoint.alt))
                   );
                 })
@@ -1797,7 +2281,154 @@
       );
     }
 
+    function renderMissionIoProgressBar() {
+      if (!missionIoProgress) {
+        return null;
+      }
+      const current = Number(missionIoProgress.current) || 0;
+      const total = Number(missionIoProgress.total) || 0;
+      const percent =
+        missionIoProgress.indeterminate || total <= 0
+          ? 0
+          : Math.min(100, Math.round((current / total) * 100));
+      const progressText = missionIoProgress.indeterminate
+        ? "获取任务数量…"
+        : current + " / " + total;
+
+      return e(
+        "div",
+        {
+          className: "fp-mission-io-progress",
+          role: "progressbar",
+          "aria-valuemin": 0,
+          "aria-valuemax": missionIoProgress.indeterminate ? 100 : total,
+          "aria-valuenow": missionIoProgress.indeterminate ? undefined : current,
+          "aria-label": missionIoProgress.label || "航线传输进度"
+        },
+        e(
+          "div",
+          { className: "fp-mission-io-progress-head" },
+          e("span", { className: "fp-mission-io-progress-label" }, missionIoProgress.label),
+          e("span", { className: "fp-mission-io-progress-text" }, progressText)
+        ),
+        e(
+          "div",
+          { className: "fp-mission-io-progress-bar-wrap" },
+          e("div", {
+            className:
+              "fp-mission-io-progress-bar-fill" +
+              (missionIoProgress.indeterminate ? " is-indeterminate" : ""),
+            style: missionIoProgress.indeterminate ? undefined : { width: percent + "%" }
+          })
+        )
+      );
+    }
+
+    function renderMissionIoCard() {
+      return e(
+        "section",
+        { className: "fp-card fp-card-mission-io" },
+        e("h3", { className: "fp-card-title" }, "航线文件与飞控"),
+        renderMissionIoProgressBar(),
+        missionIoNote && !missionIoProgress
+          ? e("p", { className: "fp-card-note fp-mission-io-note" }, missionIoNote)
+          : null,
+        missionIoNote && missionIoProgress
+          ? e("p", { className: "fp-card-note fp-mission-io-note fp-mission-io-note--sub" }, missionIoNote)
+          : null,
+        e("input", {
+          ref: fileInputRef,
+          type: "file",
+          accept: ".waypoints,.txt",
+          className: "fp-hidden-file",
+          onChange: handleImportMissionFile
+        }),
+        e(
+          "div",
+          { className: "fp-button-row fp-button-row-wrap" },
+          e(
+            "button",
+            {
+              type: "button",
+              className: "fp-btn",
+              disabled: !missionWaypoints.length || missionIoBusy,
+              onClick: handleSaveMissionFile
+            },
+            "保存航线"
+          ),
+          e(
+            "button",
+            {
+              type: "button",
+              className: "fp-btn",
+              disabled: missionIoBusy,
+              onClick: function () {
+                if (fileInputRef.current) {
+                  fileInputRef.current.click();
+                }
+              }
+            },
+            "导入航线"
+          ),
+          e(
+            "button",
+            {
+              type: "button",
+              className: "fp-btn primary",
+              disabled: !connected || !missionWaypoints.length || missionIoBusy,
+              onClick: handleUploadMission
+            },
+            "写入飞控"
+          ),
+          e(
+            "button",
+            {
+              type: "button",
+              className: "fp-btn",
+              disabled: !connected || missionIoBusy,
+              onClick: handleDownloadMission
+            },
+            "读取飞控"
+          )
+        )
+      );
+    }
+
     function renderSurveyTab() {
+      const VT = window.VehicleTemplates;
+      const platformOptions = VT ? VT.PLATFORM_OPTIONS : [];
+      const tableRows = missionWaypoints
+        .map(function (wp, index) {
+          return {
+            key: "mwp-" + index,
+            seq: index + 1,
+            label:
+              wp.label ||
+              (window.MissionModel
+                ? window.MissionModel.getDisplayTitle(wp, index)
+                : "航点 " + (index + 1)),
+            lng: wp.lng,
+            lat: wp.lat,
+            alt: wp.alt,
+            preview: false
+          };
+        })
+        .concat(
+          surveyCommitted
+            ? []
+            : surveyPreviewPoints.map(function (wp) {
+                return {
+                  key: "prev-" + wp.seq,
+                  seq: wp.seq,
+                  label: "测绘 " + wp.seq,
+                  lng: wp.lng,
+                  lat: wp.lat,
+                  alt: wp.alt,
+                  preview: true
+                };
+              })
+        );
+
       return e(
         window.React.Fragment,
         null,
@@ -1822,26 +2453,67 @@
             e(
               "div",
               { className: "fp-stat" },
-              e("div", { className: "fp-stat-label" }, "航点数"),
-              e("div", { className: "fp-stat-value" }, String(surveyRouteWaypoints.length))
-            )
-          ),
-          e(
-            "div",
-            { className: "fp-field", style: { marginTop: "12px" } },
-            e("label", { htmlFor: "fp-survey-entry" }, "起始方向"),
+              e("div", { className: "fp-stat-label" }, "任务航点"),
+              e("div", { className: "fp-stat-value" }, String(missionWaypoints.length))
+            ),
             e(
-              "select",
-              {
-                id: "fp-survey-entry",
-                value: settings.surveyEntryCorner,
-                onChange: function (event) {
-                  handleSettingChange("surveyEntryCorner", event.target.value, true);
-                }
-              },
-              SURVEY_ENTRY_CORNER_OPTIONS.map(function (option) {
-                return e("option", { key: option.id, value: option.id }, option.label);
-              })
+              "div",
+              { className: "fp-stat" },
+              e("div", { className: "fp-stat-label" }, "测绘预览"),
+              e("div", { className: "fp-stat-value" }, String(surveyPreviewPoints.length))
+            ),
+            e(
+              "div",
+              { className: "fp-stat fp-stat--control" },
+              e(
+                "div",
+                { className: "fp-stat-label-wrap" },
+                e("label", { className: "fp-stat-label", htmlFor: "fp-platform" }, "机型"),
+                connected
+                  ? e("span", { className: "fp-stat-hint" }, "已连飞控自动判定")
+                  : null
+              ),
+              e(
+                "select",
+                {
+                  id: "fp-platform",
+                  className: "fp-stat-select",
+                  value: resolvedPlatform,
+                  disabled: connected,
+                  title: connected
+                    ? "已连接飞控，机型由飞控参数自动判定"
+                    : "未连接飞控时可手动选择机型",
+                  onChange: function (event) {
+                    handlePlatformChange(event.target.value);
+                  }
+                },
+                platformOptions.map(function (opt) {
+                  return e("option", { key: opt.id, value: opt.id }, opt.label);
+                })
+              )
+            ),
+            e(
+              "div",
+              { className: "fp-stat fp-stat--control" },
+              e(
+                "div",
+                { className: "fp-stat-label-wrap" },
+                e("label", { className: "fp-stat-label", htmlFor: "fp-survey-entry" }, "起始方向")
+              ),
+              e(
+                "select",
+                {
+                  id: "fp-survey-entry",
+                  className: "fp-stat-select",
+                  value: settings.surveyEntryCorner,
+                  onChange: function (event) {
+                    handleSettingChange("surveyEntryCorner", event.target.value, true);
+                  }
+                },
+                SURVEY_ENTRY_CORNER_OPTIONS.map(function (option) {
+                  return e("option", { key: option.id, value: option.id }, option.label);
+                })
+              )
             )
           ),
           e(
@@ -1860,19 +2532,41 @@
               "button",
               {
                 type: "button",
+                className: "fp-btn primary",
+                disabled: surveyArea.length < 3 || surveyCommitted,
+                onClick: handleConfirmSurveyGenerate
+              },
+              surveyCommitted ? "已生成测绘航线" : "确认生成测绘航线"
+            ),
+            e(
+              "button",
+              {
+                type: "button",
                 className: "fp-btn",
                 disabled: !surveyArea.length,
                 onClick: handleClearSurvey
               },
               "清空区域"
             )
+          ),
+          e(
+            "label",
+            { className: "fp-check-row", style: { marginTop: "10px" } },
+            e("input", {
+              type: "checkbox",
+              checked: appendRtl,
+              onChange: function (event) {
+                handleAppendRtlChange(event.target.checked);
+              }
+            }),
+            e("span", null, "规划完成后追加 RTL 返航")
           )
         ),
         e(
           "section",
           { className: "fp-card" },
           e("h3", { className: "fp-card-title" }, "航点预览"),
-          surveyRouteWaypoints.length
+          tableRows.length
             ? e(
                 "div",
                 { className: "fp-survey-wp-table-wrap" },
@@ -1894,11 +2588,14 @@
                   e(
                     "tbody",
                     null,
-                    surveyRouteWaypoints.map(function (waypoint) {
+                    tableRows.map(function (waypoint) {
                       return e(
                         "tr",
-                        { key: "srwp-" + waypoint.seq },
-                        e("th", { scope: "row" }, "航点 " + waypoint.seq),
+                        {
+                          key: waypoint.key,
+                          className: waypoint.preview ? "fp-survey-wp-row--preview" : ""
+                        },
+                        e("th", { scope: "row" }, waypoint.label),
                         e("td", { className: "fp-survey-wp-num" }, round(waypoint.lng, 6).toFixed(6)),
                         e("td", { className: "fp-survey-wp-num" }, round(waypoint.lat, 6).toFixed(6)),
                         e(
@@ -2202,7 +2899,8 @@
             ? renderWaypointTab()
             : activeTab === "survey"
               ? renderSurveyTab()
-              : renderSettingsTab()
+              : renderSettingsTab(),
+          renderMissionIoCard()
         )
       ),
       e(
@@ -2223,7 +2921,7 @@
               "span",
               { className: "fp-chip" },
               "航点 ",
-              e("strong", null, String(waypoints.length))
+              e("strong", null, String(missionWaypoints.length))
             ),
             e(
               "span",
