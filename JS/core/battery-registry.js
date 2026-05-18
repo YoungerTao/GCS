@@ -7,6 +7,40 @@
     "BATT6_MONITOR", "BATT7_MONITOR", "BATT8_MONITOR", "BATT9_MONITOR",
   ];
 
+  const BATT_MONITOR_TYPES = {
+    0: "Disabled",
+    3: "Analog Voltage Only",
+    4: "Analog Voltage and Current",
+    5: "Solo",
+    6: "Bebop",
+    7: "SMBus-Generic",
+    8: "DroneCAN-BatteryInfo",
+    9: "ESC",
+    10: "Sum Of Selected Monitors",
+    11: "FuelFlow",
+    12: "FuelLevelPWM",
+    13: "SMBUS-SUI3",
+    14: "SMBUS-SUI6",
+    15: "NeoDesign",
+    16: "SMBus-Maxell",
+    17: "Generator-Elec",
+    18: "Generator-Fuel",
+    19: "Rotoye",
+    20: "MPPT",
+    21: "INA2XX (INA226 INA228 INA238 INA231 INA260)",
+    22: "LTC2946",
+    23: "Torqeedo",
+    24: "FuelLevelAnalog",
+    25: "Synthetic Current and Analog Voltage",
+    26: "INA239_SPI",
+    27: "EFI",
+    28: "AD7091R5",
+    29: "Scripting",
+    30: "INA3221",
+    31: "Analog Current Only",
+    32: "TIBQ76952-I2C (Periph only)",
+  };
+
   const MONITOR_UI = {
     0: { short: "Disabled", ui: "disabled" },
     3: { short: "AnalogVolt", ui: "analog" },
@@ -214,4 +248,5 @@
   window.batteryUiType = batteryUiType;
   window.assessBatteryTelemetryConnected = assessBatteryTelemetryConnected;
   window.battFailsafeControlSuffix = failsafeControlSuffix;
+  window.BATT_MONITOR_TYPES = BATT_MONITOR_TYPES;
 })();

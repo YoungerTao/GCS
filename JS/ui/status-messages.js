@@ -425,6 +425,14 @@
     try {
       tryPopulateOverviewFromStatustext(entry.textEn);
     } catch (e) { /* ignore */ }
+    try {
+      if (typeof window.gcsOnPrearmStatustext === "function") {
+        window.gcsOnPrearmStatustext(entry.textEn);
+      }
+      if (/prearm:/i.test(entry.textEn)) {
+        document.dispatchEvent(new CustomEvent("gcs-prearm-hint"));
+      }
+    } catch (e) { /* ignore */ }
     if (/frame:\s*\S/i.test(entry.textEn)) {
       try {
         document.dispatchEvent(new CustomEvent("gcs-frame-statustext", { detail: { text: entry.textEn } }));

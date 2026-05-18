@@ -8,71 +8,51 @@
     return Number.isFinite(v) ? v : null;
   }
 
-  function fsSuffix(slotIndex) {
-    if (typeof window.battFailsafeControlSuffix === "function") {
-      return window.battFailsafeControlSuffix(slotIndex);
-    }
-    return slotIndex === 0 ? "" : `-${slotIndex + 1}`;
-  }
-
-  function fsIds(slotIndex) {
-    const s = fsSuffix(slotIndex);
-    return {
-      cells: `power-cells-input${s}`,
-      warn: `power-warn-slider${s}`,
-      crit: `power-crit-slider${s}`,
-      warnText: `power-warn-text${s}`,
-      critText: `power-crit-text${s}`,
-      fs: `power-fs-low-act${s}`,
-    };
-  }
-
   function getInstances() {
     if (typeof window.buildBatteryMonitorView === "function") {
-      return window.buildBatteryMonitorView(window.params);
+      const view = window.buildBatteryMonitorView(window.params);
+      if (view.length) return view;
     }
     const map = window.powerInstances instanceof Map ? window.powerInstances : new Map();
-    return Array.from(map.values()).sort((a, b) => a.id - b.id);
-  }
-
-  function syncSlidersFromParamsOnce() {
-    if (window._powerParamsHydrated) return;
-    const params = window.params;
-    if (!(params instanceof Map)) return;
+    const fromTelem = Array.from(map.values()).sort((a, b) => a.id - b.id);
+    if (fromTelem.length) return fromTelem;
 
     const slots = typeof window.listEnabledBatterySlots === "function"
-      ? window.listEnabledBatterySlots(params)
-      : [{ slotIndex: 0, prefix: "BATT" }];
-
-    let any = false;
-    slots.forEach((slot) => {
-      const ids = fsIds(slot.slotIndex);
-      const low = getParamNum(`${slot.prefix}_LOW_VOLT`);
-      const crt = getParamNum(`${slot.prefix}_CRT_VOLT`);
-      const fs = getParamNum(`${slot.prefix}_FS_LOW_ACT`);
-      if (low != null) {
-        const w = document.getElementById(ids.warn);
-        if (w) w.value = String(low);
-        any = true;
-      }
-      if (crt != null) {
-        const c = document.getElementById(ids.crit);
-        if (c) c.value = String(crt);
-        any = true;
-      }
-      if (fs != null) {
-        const sel = document.getElementById(ids.fs);
-        if (sel) sel.value = String(Math.round(fs));
-        any = true;
-      }
-    });
-
-    if (any) {
-      window._powerParamsHydrated = true;
-      slots.forEach((slot) => {
-        document.getElementById(fsIds(slot.slotIndex).cells)?.dispatchEvent(new Event("input"));
-      });
+      ? window.listEnabledBatterySlots(window.params)
+      : [];
+    if (slots.length) {
+      return slots.map((slot) => ({
+        ...slot,
+        id: slot.slotIndex,
+        name: `Battery ${slot.slotIndex + 1}`,
+        connected: false,
+        type: slot.typeUi,
+        voltage: 0,
+        current: 0,
+        cells: 0,
+        cellVoltages: [],
+      }));
     }
+
+    const mon = getParamNum("BATT_MONITOR");
+    if (mon === 0 || mon == null) {
+      return [{
+        id: 0,
+        slotIndex: 0,
+        name: "Battery 1",
+        prefix: "BATT",
+        monitorKey: "BATT_MONITOR",
+        monitorType: mon ?? 0,
+        typeShort: "Disabled",
+        typeUi: "disabled",
+        connected: false,
+        voltage: 0,
+        current: 0,
+        cells: 0,
+        cellVoltages: [],
+      }];
+    }
+    return [];
   }
 
   function statusOf(inst) {
@@ -136,6 +116,7 @@
   function renderCards(instances) {
     const root = document.getElementById("power-cards");
     const countEl = document.getElementById("power-instance-count");
+    const emptyEl = document.getElementById("power-cards-empty");
     if (!root || !countEl) return;
 
     const online = instances.filter((i) => i.connected).length;
@@ -143,8 +124,12 @@
       ? `${online} 路在线 / ${instances.length} 路已启用`
       : `${instances.length} 路电源`;
 
+    const showEmpty = !instances.length;
+    if (emptyEl) emptyEl.classList.toggle("hidden", !showEmpty);
+    root.classList.toggle("hidden", showEmpty);
     root.classList.toggle("two-cols", instances.length > 1);
     root.innerHTML = "";
+    if (showEmpty) return;
 
     instances.forEach((inst) => {
       const st = statusOf(inst);
@@ -165,7 +150,10 @@
         }).join("")}</div>`;
       } else if (!inst.connected) {
         const sn = inst.serialNum != null ? ` · CAN ID=${inst.serialNum}` : "";
-        cellBars = `<div class="muted">等待 BMS 遥测（${prefix}_MONITOR=8${sn}）</div>`;
+        const monHint = inst.monitorType === 0 || inst.monitorType == null
+          ? `请设置 ${prefix}_MONITOR 为非 0（如 4=模拟电压电流）`
+          : `等待 BMS 遥测（${prefix}_MONITOR=${inst.monitorType}${sn}）`;
+        cellBars = `<div class="muted">${monHint}</div>`;
       } else if (inst.type === "dronecan_bms") {
         cellBars = `<div class="muted">等待 DroneCAN BMS 单体数据…</div>`;
       } else {
@@ -190,185 +178,389 @@
     });
   }
 
-  function bindFailsafeGroup(cellsInput, warnSlider, critSlider, warnText, critText) {
-    if (!cellsInput || !warnSlider || !critSlider || !warnText || !critText) return;
+  const CELLS_S_MIN = 3;
+  const CELLS_S_MAX = 30;
 
-    function recalcRange() {
-      const s = Math.max(3, Math.min(16, Number(cellsInput.value) || 12));
-      cellsInput.value = String(s);
+  const CAP_MAH_MIN = 500;
+  const CAP_MAH_MAX = 50000;
+  const CAP_MAH_STEP = 100;
+  const FS_ACT_MAX = 7;
+  const FS_ACT_LABELS = [
+    "仅警告",
+    "Land 降落",
+    "RTL 返航",
+    "SmartRTL/RTL",
+    "SmartRTL/Land",
+    "Terminate",
+    "Auto 返航",
+    "Brake/Land",
+  ];
+
+  function battParamKeys(prefix) {
+    return {
+      lowVolt: `${prefix}_LOW_VOLT`,
+      crtVolt: `${prefix}_CRT_VOLT`,
+      fsLowAct: `${prefix}_FS_LOW_ACT`,
+      fsCrtAct: `${prefix}_FS_CRT_ACT`,
+      capacity: `${prefix}_CAPACITY`,
+      lowMah: `${prefix}_LOW_MAH`,
+      crtMah: `${prefix}_CRT_MAH`,
+    };
+  }
+
+  function fsActLabel(v) {
+    const i = Math.round(Number(v) || 0);
+    return `${i} — ${FS_ACT_LABELS[i] || `动作${i}`}`;
+  }
+
+  const BATT_CONFIG_COPY_FIELDS = [
+    "cells", "lowVolt", "crtVolt", "fsLowAct", "fsCrtAct",
+    "capacity", "lowMah", "crtMah",
+  ];
+
+  function fieldRow(label, paramHint, field, extraAttrs, valueText) {
+    return `
+        <div class="power-fs-field" data-field-wrap="${field}">
+          <label class="power-fs-label-row">
+            <span class="power-fs-label-text">${label}</span>
+            <span class="power-fs-value" data-value-for="${field}">${valueText}</span>
+            <span class="power-fs-param">${paramHint}</span>
+          </label>
+          <input type="range" data-field="${field}" ${extraAttrs}>
+        </div>`;
+  }
+
+  function buildBattConfigCardHtml(slot) {
+    const p = slot.prefix;
+    const keys = battParamKeys(p);
+    return `
+    <article class="power-batt-config-card" data-slot-index="${slot.slotIndex}" data-prefix="${p}">
+      <header class="power-batt-config-head">
+        <h4>第 ${slot.slotIndex + 1} 路 · ${p}</h4>
+        <span class="power-batt-config-type muted">${slot.typeShort || "Monitor"}</span>
+      </header>
+      <div class="power-batt-config-body">
+        ${fieldRow("电池串数 (S)", "（电压滑条范围）", "cells", `min="${CELLS_S_MIN}" max="${CELLS_S_MAX}" step="1" value="12"`, "12S")}
+        ${fieldRow("一级电压 · 低压警报", keys.lowVolt, "lowVolt", 'min="30" max="60" step="0.1" value="44.4"', "44.4V")}
+        ${fieldRow("二级电压 · 紧急电压", keys.crtVolt, "crtVolt", 'min="30" max="60" step="0.1" value="42.0"', "42.0V")}
+        ${fieldRow("低压保护动作", keys.fsLowAct, "fsLowAct", `min="0" max="${FS_ACT_MAX}" step="1" value="2"`, "2 — RTL 返航")}
+        ${fieldRow("紧急电压动作", keys.fsCrtAct, "fsCrtAct", `min="0" max="${FS_ACT_MAX}" step="1" value="2"`, "2 — RTL 返航")}
+        ${fieldRow("满电容量 (mAh)", keys.capacity, "capacity", `min="${CAP_MAH_MIN}" max="${CAP_MAH_MAX}" step="${CAP_MAH_STEP}" value="10000"`, "10000 mAh")}
+        ${fieldRow("低容量 (mAh)", keys.lowMah, "lowMah", `min="${CAP_MAH_MIN}" max="${CAP_MAH_MAX}" step="${CAP_MAH_STEP}" value="2000"`, "2000 mAh")}
+        ${fieldRow("紧急容量 (mAh)", keys.crtMah, "crtMah", `min="${CAP_MAH_MIN}" max="${CAP_MAH_MAX}" step="${CAP_MAH_STEP}" value="1000"`, "1000 mAh")}
+        ${fieldRow("低容量动作", keys.fsLowAct, "fsLowMahAct", `min="0" max="${FS_ACT_MAX}" step="1" value="2"`, "2 — RTL 返航")}
+        ${fieldRow("紧急容量动作", keys.fsCrtAct, "fsCrtMahAct", `min="0" max="${FS_ACT_MAX}" step="1" value="2"`, "2 — RTL 返航")}
+        <p class="power-fs-note muted">低/紧急容量动作与电压动作共用飞控参数（ArduPilot）。</p>
+      </div>
+    </article>`;
+  }
+
+  function qField(card, field) {
+    return card.querySelector(`[data-field="${field}"]`);
+  }
+
+  function setFieldValue(card, field, value) {
+    const el = qField(card, field);
+    if (el) el.value = String(value);
+  }
+
+  function setFieldLabel(card, field, text) {
+    const el = card.querySelector(`[data-value-for="${field}"]`);
+    if (el) el.textContent = text;
+  }
+
+  function bindBattConfigCard(card, slot) {
+    if (card.dataset.bound === "1") return;
+    card.dataset.bound = "1";
+    const prefix = slot.prefix;
+
+    const cells = qField(card, "cells");
+    const lowVolt = qField(card, "lowVolt");
+    const crtVolt = qField(card, "crtVolt");
+    const fsLowAct = qField(card, "fsLowAct");
+    const fsCrtAct = qField(card, "fsCrtAct");
+    const capacity = qField(card, "capacity");
+    const lowMah = qField(card, "lowMah");
+    const crtMah = qField(card, "crtMah");
+    const fsLowMahAct = qField(card, "fsLowMahAct");
+    const fsCrtMahAct = qField(card, "fsCrtMahAct");
+
+    function syncFsLow(v) {
+      const n = String(Math.round(Number(v) || 0));
+      if (fsLowAct) fsLowAct.value = n;
+      if (fsLowMahAct) fsLowMahAct.value = n;
+      const t = fsActLabel(n);
+      setFieldLabel(card, "fsLowAct", t);
+      setFieldLabel(card, "fsLowMahAct", t);
+    }
+
+    function syncFsCrt(v) {
+      const n = String(Math.round(Number(v) || 0));
+      if (fsCrtAct) fsCrtAct.value = n;
+      if (fsCrtMahAct) fsCrtMahAct.value = n;
+      const t = fsActLabel(n);
+      setFieldLabel(card, "fsCrtAct", t);
+      setFieldLabel(card, "fsCrtMahAct", t);
+    }
+
+    function recalcVoltageRange() {
+      const s = Math.max(CELLS_S_MIN, Math.min(CELLS_S_MAX, Number(cells?.value) || 12));
+      if (cells) cells.value = String(s);
+      setFieldLabel(card, "cells", `${s}S`);
       const min = +(s * 3.4).toFixed(1);
       const max = +(s * 3.9).toFixed(1);
-      warnSlider.min = String(min);
-      warnSlider.max = String(max);
-      critSlider.min = String(min);
-      critSlider.max = String(max);
-      if (+warnSlider.value < min || +warnSlider.value > max) warnSlider.value = String((s * 3.7).toFixed(1));
-      if (+critSlider.value < min || +critSlider.value > max) critSlider.value = String((s * 3.5).toFixed(1));
-      if (+critSlider.value > +warnSlider.value) critSlider.value = warnSlider.value;
-      warnText.textContent = `${Number(warnSlider.value).toFixed(1)}V`;
-      critText.textContent = `${Number(critSlider.value).toFixed(1)}V`;
+      if (lowVolt) {
+        lowVolt.min = String(min);
+        lowVolt.max = String(max);
+        if (+lowVolt.value < min || +lowVolt.value > max) lowVolt.value = String((s * 3.7).toFixed(1));
+      }
+      if (crtVolt) {
+        crtVolt.min = String(min);
+        crtVolt.max = String(max);
+        if (+crtVolt.value < min || +crtVolt.value > max) crtVolt.value = String((s * 3.5).toFixed(1));
+      }
+      if (lowVolt && crtVolt && +crtVolt.value > +lowVolt.value) crtVolt.value = lowVolt.value;
+      setFieldLabel(card, "lowVolt", `${Number(lowVolt?.value || 0).toFixed(1)}V`);
+      setFieldLabel(card, "crtVolt", `${Number(crtVolt?.value || 0).toFixed(1)}V`);
     }
 
-    cellsInput.addEventListener("input", recalcRange);
-    warnSlider.addEventListener("input", () => {
-      if (+warnSlider.value < +critSlider.value) warnSlider.value = critSlider.value;
-      recalcRange();
+    function recalcCapacityChain() {
+      let cap = Math.round(Number(capacity?.value) || CAP_MAH_MIN);
+      cap = Math.max(CAP_MAH_MIN, Math.min(CAP_MAH_MAX, cap));
+      if (capacity) capacity.value = String(cap);
+      setFieldLabel(card, "capacity", `${cap} mAh`);
+
+      let low = Math.round(Number(lowMah?.value) || 0);
+      low = Math.max(CAP_MAH_MIN, Math.min(cap, low));
+      if (lowMah) {
+        lowMah.max = String(cap);
+        lowMah.value = String(low);
+      }
+      setFieldLabel(card, "lowMah", `${low} mAh`);
+
+      let crt = Math.round(Number(crtMah?.value) || 0);
+      crt = Math.max(CAP_MAH_MIN, Math.min(low, crt));
+      if (crtMah) {
+        crtMah.max = String(low);
+        crtMah.value = String(crt);
+      }
+      setFieldLabel(card, "crtMah", `${crt} mAh`);
+    }
+
+    cells?.addEventListener("input", recalcVoltageRange);
+    lowVolt?.addEventListener("input", () => {
+      if (crtVolt && +crtVolt.value > +lowVolt.value) crtVolt.value = lowVolt.value;
+      recalcVoltageRange();
     });
-    critSlider.addEventListener("input", () => {
-      if (+critSlider.value > +warnSlider.value) critSlider.value = warnSlider.value;
-      recalcRange();
+    crtVolt?.addEventListener("input", () => {
+      if (lowVolt && +crtVolt.value > +lowVolt.value) crtVolt.value = lowVolt.value;
+      recalcVoltageRange();
     });
-    recalcRange();
+
+    fsLowAct?.addEventListener("input", () => syncFsLow(fsLowAct.value));
+    fsLowMahAct?.addEventListener("input", () => syncFsLow(fsLowMahAct.value));
+    fsCrtAct?.addEventListener("input", () => syncFsCrt(fsCrtAct.value));
+    fsCrtMahAct?.addEventListener("input", () => syncFsCrt(fsCrtMahAct.value));
+
+    capacity?.addEventListener("input", recalcCapacityChain);
+    lowMah?.addEventListener("input", recalcCapacityChain);
+    crtMah?.addEventListener("input", recalcCapacityChain);
+
+    recalcVoltageRange();
+    recalcCapacityChain();
+    syncFsLow(fsLowAct?.value ?? 2);
+    syncFsCrt(fsCrtAct?.value ?? 2);
   }
 
-  function ensureDynamicFailsafePanels(slots) {
-    const host = document.getElementById("power-failsafe-dynamic")
-      || document.querySelector("#setup-panel-power .power-right");
+  function hydrateBattConfigCard(card, slot) {
+    const keys = battParamKeys(slot.prefix);
+    const low = getParamNum(keys.lowVolt);
+    const crt = getParamNum(keys.crtVolt);
+    const fsL = getParamNum(keys.fsLowAct);
+    const fsC = getParamNum(keys.fsCrtAct);
+    const cap = getParamNum(keys.capacity);
+    const lowM = getParamNum(keys.lowMah);
+    const crtM = getParamNum(keys.crtMah);
+
+    if (low != null) setFieldValue(card, "lowVolt", low);
+    if (crt != null) setFieldValue(card, "crtVolt", crt);
+    if (fsL != null) setFieldValue(card, "fsLowAct", Math.round(fsL));
+    if (fsC != null) setFieldValue(card, "fsCrtAct", Math.round(fsC));
+    if (cap != null) setFieldValue(card, "capacity", Math.round(cap));
+    if (lowM != null) setFieldValue(card, "lowMah", Math.round(lowM));
+    if (crtM != null) setFieldValue(card, "crtMah", Math.round(crtM));
+
+    qField(card, "cells")?.dispatchEvent(new Event("input"));
+    qField(card, "capacity")?.dispatchEvent(new Event("input"));
+    qField(card, "fsLowAct")?.dispatchEvent(new Event("input"));
+    qField(card, "fsCrtAct")?.dispatchEvent(new Event("input"));
+  }
+
+  function renderFailsafeSlots(slots) {
+    const host = document.getElementById("power-failsafe-slots");
     if (!host) return;
 
-    let dyn = document.getElementById("power-failsafe-dynamic");
-    if (!dyn) {
-      dyn = document.createElement("div");
-      dyn.id = "power-failsafe-dynamic";
-      dyn.className = "power-failsafe-dynamic";
-      const writeBlock = document.querySelector("#setup-panel-power .power-write-actions");
-      if (writeBlock && writeBlock.parentNode) {
-        writeBlock.parentNode.insertBefore(dyn, writeBlock);
-      } else {
-        host.appendChild(dyn);
-      }
-    }
+    const list = slots.length ? slots : [{ slotIndex: 0, prefix: "BATT", typeShort: "BATT" }];
+    const sig = list.map((s) => `${s.slotIndex}:${s.prefix}`).join("|");
+    if (host.dataset.sig === sig && host.childElementCount === list.length) return;
 
-    const needDynamic = slots.filter((s) => s.slotIndex >= 3);
-    const sig = needDynamic.map((s) => s.prefix).join("|");
-    if (dyn.dataset.sig === sig) return;
-    dyn.dataset.sig = sig;
-    dyn.innerHTML = "";
-
-    needDynamic.forEach((slot) => {
-      const ids = fsIds(slot.slotIndex);
-      const panel = document.createElement("div");
-      panel.className = "power-batt2-panel";
-      panel.innerHTML = `
-        <h4 class="power-subhead">第 ${slot.slotIndex + 1} 路 ${slot.prefix}（${slot.typeShort}）</h4>
-        <div class="power-failsafe-block">
-          <label for="${ids.cells}">电池串数 (S)</label>
-          <input id="${ids.cells}" type="number" value="12" min="3" max="16" step="1">
-        </div>
-        <div class="power-failsafe-block">
-          <label for="${ids.warn}">一级低压阈值 (V)</label>
-          <input id="${ids.warn}" type="range" min="30" max="60" value="44.4" step="0.1">
-          <div id="${ids.warnText}" class="muted">44.4V</div>
-        </div>
-        <div class="power-failsafe-block">
-          <label for="${ids.crit}">二级低压阈值 (V)</label>
-          <input id="${ids.crit}" type="range" min="30" max="60" value="42.0" step="0.1">
-          <div id="${ids.critText}" class="muted">42.0V</div>
-        </div>
-        <div class="power-failsafe-block">
-          <label for="${ids.fs}">低压保护 ${slot.prefix}_FS_LOW_ACT</label>
-          <select id="${ids.fs}">
-            <option value="0">0 — 仅警告</option>
-            <option value="1">1 — Land</option>
-            <option value="2" selected>2 — RTL</option>
-            <option value="3">3 — SmartRTL / RTL</option>
-            <option value="4">4 — Terminate</option>
-          </select>
-        </div>
-      `;
-      dyn.appendChild(panel);
-      bindFailsafeGroup(
-        document.getElementById(ids.cells),
-        document.getElementById(ids.warn),
-        document.getElementById(ids.crit),
-        document.getElementById(ids.warnText),
-        document.getElementById(ids.critText)
-      );
+    host.dataset.sig = sig;
+    host.innerHTML = list.map((s) => buildBattConfigCardHtml(s)).join("");
+    host.querySelectorAll(".power-batt-config-card").forEach((card) => {
+      const slotIndex = Number(card.dataset.slotIndex);
+      const slot = list.find((s) => s.slotIndex === slotIndex) || list[0];
+      bindBattConfigCard(card, slot);
+      hydrateBattConfigCard(card, slot);
     });
   }
 
-  function updateMultiBatteryPanels(slots) {
-    const p2 = document.getElementById("power-batt2-panel");
-    const p3 = document.getElementById("power-batt3-panel");
-    const has2 = slots.some((s) => s.slotIndex === 1);
-    const has3 = slots.some((s) => s.slotIndex === 2);
-    if (p2) p2.classList.toggle("hidden", !has2);
-    if (p3) p3.classList.toggle("hidden", !has3);
-    ensureDynamicFailsafePanels(slots);
+  function syncSlidersFromParamsOnce() {
+    if (window._powerParamsHydrated) return;
+    const params = window.params;
+    if (!(params instanceof Map)) return;
+
+    const slots = typeof window.listEnabledBatterySlots === "function"
+      ? window.listEnabledBatterySlots(params)
+      : [{ slotIndex: 0, prefix: "BATT" }];
+
+    let any = false;
+    const host = document.getElementById("power-failsafe-slots");
+    slots.forEach((slot) => {
+      const card = host?.querySelector(`[data-slot-index="${slot.slotIndex}"]`);
+      if (!card) return;
+      const keys = battParamKeys(slot.prefix);
+      if (getParamNum(keys.lowVolt) != null
+        || getParamNum(keys.capacity) != null
+        || getParamNum(keys.fsLowAct) != null) {
+        any = true;
+      }
+      hydrateBattConfigCard(card, slot);
+    });
+
+    if (any) window._powerParamsHydrated = true;
+  }
+
+  function readBattConfigFromCard(card, prefix) {
+    return {
+      prefix,
+      cells: Number(qField(card, "cells")?.value),
+      lowVolt: Number(qField(card, "lowVolt")?.value),
+      crtVolt: Number(qField(card, "crtVolt")?.value),
+      fsLowAct: Number(qField(card, "fsLowAct")?.value),
+      fsCrtAct: Number(qField(card, "fsCrtAct")?.value),
+      capacity: Number(qField(card, "capacity")?.value),
+      lowMah: Number(qField(card, "lowMah")?.value),
+      crtMah: Number(qField(card, "crtMah")?.value),
+    };
+  }
+
+
+  function applyBattConfigToCard(card, values) {
+    BATT_CONFIG_COPY_FIELDS.forEach((field) => {
+      if (values[field] == null) return;
+      setFieldValue(card, field, values[field]);
+    });
+    qField(card, "cells")?.dispatchEvent(new Event("input"));
+    qField(card, "capacity")?.dispatchEvent(new Event("input"));
+    qField(card, "fsLowAct")?.dispatchEvent(new Event("input"));
+    qField(card, "fsCrtAct")?.dispatchEvent(new Event("input"));
+  }
+
+  function copyBatt1ConfigToAll() {
+    const statusEl = document.getElementById("power-write-status");
+    const host = document.getElementById("power-failsafe-slots");
+    if (!host) return;
+
+    const cards = Array.from(host.querySelectorAll(".power-batt-config-card"));
+    const source = host.querySelector('[data-slot-index="0"]')
+      || host.querySelector('[data-prefix="BATT"]')
+      || cards[0];
+
+    if (!source) {
+      if (statusEl) statusEl.textContent = "未找到电池 1 配置卡片。";
+      return;
+    }
+
+    const srcValues = readBattConfigFromCard(source, source.dataset.prefix);
+    let copied = 0;
+
+    cards.forEach((card) => {
+      if (card === source) return;
+      applyBattConfigToCard(card, srcValues);
+      copied += 1;
+    });
+
+    const msg = copied === 0
+      ? "仅检测到 1 路电池，无需同步。"
+      : `已将电池 1（${source.dataset.prefix}）参数复制到其余 ${copied} 路（未写入飞控，请点「一键写入飞控」）。`;
+
+    if (statusEl) statusEl.textContent = msg;
+    if (typeof log === "function") {
+      log(copied > 0 ? `📋 ${msg}` : msg, "power-param-write");
+    }
   }
 
   async function writePowerParamsToFc() {
     const statusEl = document.getElementById("power-write-status");
-    const logicEl = document.getElementById("power-logic-select");
 
     if (typeof window.sendParamSet !== "function") {
       if (statusEl) statusEl.textContent = "写入失败：内部未注册 sendParamSet。";
       return;
     }
 
-    const slots = typeof window.listEnabledBatterySlots === "function"
-      ? window.listEnabledBatterySlots(window.params)
-      : [{ slotIndex: 0, prefix: "BATT" }];
-
-    const chains = slots.map((slot) => {
-      const ids = fsIds(slot.slotIndex);
-      return {
-        prefix: slot.prefix,
-        low: Number(document.getElementById(ids.warn)?.value),
-        crit: Number(document.getElementById(ids.crit)?.value),
-        fs: Number(document.getElementById(ids.fs)?.value),
-      };
-    });
+    const host = document.getElementById("power-failsafe-slots");
+    const cards = host ? Array.from(host.querySelectorAll(".power-batt-config-card")) : [];
+    if (!cards.length) {
+      if (statusEl) statusEl.textContent = "无已启用的电池监测槽。";
+      return;
+    }
 
     let sent = 0;
     const lines = [];
 
     /* eslint-disable no-await-in-loop */
-    for (const c of chains) {
-      const lowKey = `${c.prefix}_LOW_VOLT`;
-      const crtKey = `${c.prefix}_CRT_VOLT`;
-      const fsKey = `${c.prefix}_FS_LOW_ACT`;
-      if (!Number.isFinite(c.low) || !Number.isFinite(c.crit) || !Number.isFinite(c.fs)) continue;
-      if (await window.sendParamSet(lowKey, c.low)) sent += 1;
-      await sleep(45);
-      if (await window.sendParamSet(crtKey, c.crit)) sent += 1;
-      await sleep(45);
-      if (await window.sendParamSet(fsKey, c.fs)) sent += 1;
-      await sleep(45);
-      lines.push(`${c.prefix}: LOW=${c.low}V CRT=${c.crit}V FS=${c.fs}`);
+    for (const card of cards) {
+      const prefix = card.dataset.prefix;
+      const c = readBattConfigFromCard(card, prefix);
+      const keys = battParamKeys(prefix);
+      const pairs = [
+        [keys.lowVolt, c.lowVolt],
+        [keys.crtVolt, c.crtVolt],
+        [keys.fsLowAct, Math.round(c.fsLowAct)],
+        [keys.fsCrtAct, Math.round(c.fsCrtAct)],
+        [keys.capacity, Math.round(c.capacity)],
+        [keys.lowMah, Math.round(c.lowMah)],
+        [keys.crtMah, Math.round(c.crtMah)],
+      ];
+      for (const [key, val] of pairs) {
+        if (!Number.isFinite(val)) continue;
+        if (await window.sendParamSet(key, val)) sent += 1;
+        await sleep(45);
+      }
+      lines.push(
+        `${prefix}: ${c.lowVolt}V/${c.crtVolt}V · ${Math.round(c.capacity)}mAh · FS ${Math.round(c.fsLowAct)}/${Math.round(c.fsCrtAct)}`
+      );
     }
     /* eslint-enable no-await-in-loop */
 
     if (sent === 0) {
-      if (typeof log === "function") {
-        log("❌ 电源参数写入失败：请确认串口已连接。", "power-param-write");
-      }
+      if (typeof log === "function") log("❌ 电源参数写入失败：请确认串口已连接。", "power-param-write");
       if (statusEl) statusEl.textContent = "写入失败：未连接飞控或发送被拒绝。";
       return;
     }
 
-    const logic = logicEl ? logicEl.value : "";
-    let logicNote = "";
-    if (logic === "any") {
-      logicNote = "界面已选「任意一路低压」逻辑；ArduPilot 默认为各路独立 BATTx_FS_*。";
-    } else if (logic === "all") {
-      logicNote = "界面已选「双路同时低压」逻辑：标准固件无单一参数等价。";
-    }
-
-    const msg = `电源参数写入已发送 ${sent} 条（${chains.length} 路监测槽）；${logicNote}`;
+    const msg = `电源参数写入已发送 ${sent} 条（${cards.length} 路）`;
     if (typeof log === "function") log(`🔋 ${msg} | ${lines.join(" · ")}`, "power-param-write");
-    if (statusEl) {
-      statusEl.textContent = `已发送 ${sent} 条（${lines.join("；")}）。`;
-    }
+    if (statusEl) statusEl.textContent = `已发送 ${sent} 条（${lines.join("；")}）。`;
   }
 
   function tick() {
-    syncSlidersFromParamsOnce();
     const slots = typeof window.listEnabledBatterySlots === "function"
       ? window.listEnabledBatterySlots(window.params)
       : [];
+    renderFailsafeSlots(slots.length ? slots : [{ slotIndex: 0, prefix: "BATT", typeShort: "BATT" }]);
+    syncSlidersFromParamsOnce();
     const instances = getInstances();
-    updateMultiBatteryPanels(slots.length ? slots : [{ slotIndex: 0, prefix: "BATT" }]);
     renderTopology(instances);
     renderCards(instances);
   }
@@ -376,30 +568,12 @@
   function mount() {
     if (!document.getElementById("setup-panel-power")) return;
 
-    bindFailsafeGroup(
-      document.getElementById("power-cells-input"),
-      document.getElementById("power-warn-slider"),
-      document.getElementById("power-crit-slider"),
-      document.getElementById("power-warn-text"),
-      document.getElementById("power-crit-text")
-    );
-    bindFailsafeGroup(
-      document.getElementById("power-cells-input-2"),
-      document.getElementById("power-warn-slider-2"),
-      document.getElementById("power-crit-slider-2"),
-      document.getElementById("power-warn-text-2"),
-      document.getElementById("power-crit-text-2")
-    );
-    bindFailsafeGroup(
-      document.getElementById("power-cells-input-3"),
-      document.getElementById("power-warn-slider-3"),
-      document.getElementById("power-crit-slider-3"),
-      document.getElementById("power-warn-text-3"),
-      document.getElementById("power-crit-text-3")
-    );
-
     document.getElementById("power-write-params-btn")?.addEventListener("click", () => {
       writePowerParamsToFc();
+    });
+
+    document.getElementById("power-copy-batt1-btn")?.addEventListener("click", () => {
+      copyBatt1ConfigToAll();
     });
 
     document.addEventListener("gcs-connection", () => {

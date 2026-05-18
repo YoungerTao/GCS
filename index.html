@@ -150,12 +150,12 @@
 <div id="view-initial-setup" class="main-view">
   <div class="ov-page">
     <div class="ov-top-alert">
-      <div class="ov-link-status">
-        <span class="ov-dot ok"></span>
-        串口已连接 / 115200 8N1（USB 常见）
+      <div class="ov-link-status" id="ov-link-status">
+        <span class="ov-dot"></span>
+        <span class="ov-link-text">串口未连接</span>
       </div>
-      <div class="ov-global-warning danger pulse">
-        部分传感器未校准，机体未定义，禁止起飞
+      <div class="ov-global-warning muted" id="ov-global-warning">
+        未连接飞控，无法预检
       </div>
     </div>
 
@@ -559,106 +559,40 @@
         <div class="power-page">
           <div class="power-grid">
             <section class="power-left card-dark">
-              <div class="rc-card-head">
-                <h3>动态电源监控</h3>
-                <span id="power-instance-count" class="muted">0 路电源</span>
-              </div>
+              <header class="power-section-head">
+                <div class="power-section-title">
+                  <span class="power-section-icon" aria-hidden="true">⚡</span>
+                  <div>
+                    <h3>动态电源监控</h3>
+                    <p class="power-section-desc">实时拓扑 · 多路 BMS · 监测类型可配置</p>
+                  </div>
+                </div>
+                <span id="power-instance-count" class="power-count-badge">0 路电源</span>
+              </header>
               <div class="power-topology-wrap">
-                <svg id="power-topology-svg" viewBox="0 0 720 150" aria-label="动力汇流拓扑"></svg>
+                <div class="power-topology-inner">
+                  <svg id="power-topology-svg" viewBox="0 0 720 168" aria-label="动力汇流拓扑"></svg>
+                </div>
+                <div class="power-topology-legend" aria-hidden="true">
+                  <span><i class="power-legend-dot power-legend-dot--live"></i>在线供电</span>
+                  <span><i class="power-legend-dot power-legend-dot--idle"></i>已配置离线</span>
+                </div>
                 <div id="power-risk-banner" class="power-risk-banner hidden">单路供电风险 ⚠️</div>
+              </div>
+              <div id="power-cards-empty" class="power-cards-empty hidden">
+                <span class="power-empty-icon" aria-hidden="true">🔌</span>
+                <p>暂无已启用的电池监测槽</p>
+                <p class="muted">请在飞控参数中设置 <code>BATT_MONITOR</code> 等非 0 值，或连接后刷新参数</p>
               </div>
               <div id="power-cards" class="power-cards"></div>
             </section>
 
             <section class="power-right card-dark">
-              <div class="rc-card-head">
+              <div class="rc-card-head power-fs-toolbar">
                 <h3>自适应报警阈值设置</h3>
+                <button type="button" id="power-copy-batt1-btn" class="power-copy-batt1-btn" title="将第 1 路（BATT）参数复制到其余所有电池">一键同步电池1</button>
               </div>
-              <div class="power-failsafe-block">
-                <label for="power-logic-select">双路低压逻辑</label>
-                <select id="power-logic-select">
-                  <option value="any">逻辑A：任意一路低压触发保护</option>
-                  <option value="all">逻辑B：双路同时低压才触发</option>
-                </select>
-              </div>
-              <div class="power-failsafe-block">
-                <label for="power-cells-input">电池串数 (S)</label>
-                <input id="power-cells-input" type="number" value="12" min="3" max="16" step="1">
-              </div>
-              <div class="power-failsafe-block">
-                <label for="power-warn-slider">一级低压阈值 (V)</label>
-                <input id="power-warn-slider" type="range" min="30" max="60" value="44.4" step="0.1">
-                <div id="power-warn-text" class="muted">44.4V</div>
-              </div>
-              <div class="power-failsafe-block">
-                <label for="power-crit-slider">二级低压阈值 (V)</label>
-                <input id="power-crit-slider" type="range" min="30" max="60" value="42.0" step="0.1">
-                <div id="power-crit-text" class="muted">42.0V</div>
-              </div>
-              <div class="power-failsafe-block">
-                <label for="power-fs-low-act">低压保护动作 BATT_FS_LOW_ACT</label>
-                <select id="power-fs-low-act">
-                  <option value="0">0 — 仅警告</option>
-                  <option value="1">1 — Land 降落</option>
-                  <option value="2" selected>2 — RTL 返航</option>
-                  <option value="3">3 — SmartRTL / RTL</option>
-                  <option value="4">4 — Terminate（终止）</option>
-                </select>
-              </div>
-              <div id="power-batt2-panel" class="power-batt2-panel hidden">
-                <h4 class="power-subhead">第二路 BATT2（需 BATT2_MONITOR 已启用）</h4>
-                <div class="power-failsafe-block">
-                  <label for="power-cells-input-2">电池串数 (S)</label>
-                  <input id="power-cells-input-2" type="number" value="12" min="3" max="16" step="1">
-                </div>
-                <div class="power-failsafe-block">
-                  <label for="power-warn-slider-2">一级低压阈值 (V)</label>
-                  <input id="power-warn-slider-2" type="range" min="30" max="60" value="44.4" step="0.1">
-                  <div id="power-warn-text-2" class="muted">44.4V</div>
-                </div>
-                <div class="power-failsafe-block">
-                  <label for="power-crit-slider-2">二级低压阈值 (V)</label>
-                  <input id="power-crit-slider-2" type="range" min="30" max="60" value="42.0" step="0.1">
-                  <div id="power-crit-text-2" class="muted">42.0V</div>
-                </div>
-                <div class="power-failsafe-block">
-                  <label for="power-fs-low-act-2">低压保护 BATT2_FS_LOW_ACT</label>
-                  <select id="power-fs-low-act-2">
-                    <option value="0">0 — 仅警告</option>
-                    <option value="1">1 — Land</option>
-                    <option value="2" selected>2 — RTL</option>
-                    <option value="3">3 — SmartRTL / RTL</option>
-                    <option value="4">4 — Terminate</option>
-                  </select>
-                </div>
-              </div>
-              <div id="power-batt3-panel" class="power-batt2-panel hidden">
-                <h4 class="power-subhead">第三路 BATT3</h4>
-                <div class="power-failsafe-block">
-                  <label for="power-cells-input-3">电池串数 (S)</label>
-                  <input id="power-cells-input-3" type="number" value="12" min="3" max="16" step="1">
-                </div>
-                <div class="power-failsafe-block">
-                  <label for="power-warn-slider-3">一级低压阈值 (V)</label>
-                  <input id="power-warn-slider-3" type="range" min="30" max="60" value="44.4" step="0.1">
-                  <div id="power-warn-text-3" class="muted">44.4V</div>
-                </div>
-                <div class="power-failsafe-block">
-                  <label for="power-crit-slider-3">二级低压阈值 (V)</label>
-                  <input id="power-crit-slider-3" type="range" min="30" max="60" value="42.0" step="0.1">
-                  <div id="power-crit-text-3" class="muted">42.0V</div>
-                </div>
-                <div class="power-failsafe-block">
-                  <label for="power-fs-low-act-3">低压保护 BATT3_FS_LOW_ACT</label>
-                  <select id="power-fs-low-act-3">
-                    <option value="0">0 — 仅警告</option>
-                    <option value="1">1 — Land</option>
-                    <option value="2" selected>2 — RTL</option>
-                    <option value="3">3 — SmartRTL / RTL</option>
-                    <option value="4">4 — Terminate</option>
-                  </select>
-                </div>
-              </div>
+              <div id="power-failsafe-slots" class="power-failsafe-slots"></div>
               <div class="power-failsafe-block power-write-actions">
                 <button id="power-write-params-btn" type="button">一键写入飞控</button>
                 <p id="power-write-status" class="muted power-write-status"></p>
@@ -874,6 +808,7 @@
 <script src="JS/services/param-loader.js" defer></script>
 <script src="JS/core/ardupilot-sensor-detect.js" defer></script>
 <script src="JS/ui/overview-sensors.js" defer></script>
+<script src="JS/ui/overview-preflight.js" defer></script>
 <script src="JS/ui/hud-map-tabs.js" defer></script>
 <script src="JS/mission/mission-model.js" defer></script>
 <script src="JS/mission/ardupilot-mission-compat.js" defer></script>
