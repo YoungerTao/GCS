@@ -10,7 +10,7 @@
    * - `MAV_CMD_PREFLIGHT_CALIBRATION`（241）：地面站发 COMMAND_LONG 时 **param5** 经 `convert_COMMAND_LONG_to_COMMAND_INT`
    *   写入 COMMAND_INT 的 **x**，与 `packet.x == PREFLIGHT_CALIBRATION_ACCELEROMETER_FULL`（值为 1）匹配时进入完整加速度六面。
    * - 该分支内 **先同步** `AP::ins().calibrate_gyros()`，再 `acal_init()` + `AP_AccelCal::start()`；`handle_command_long` 在整段处理完后才发 **COMMAND_ACK**。
-   *   Mission Planner 对 `PREFLIGHT_CALIBRATION`+param5=1 **不等待 ACK**（`MAVLinkInterface.doCommand` 发送后即 `return true`），避免串口侧阻塞；红蓝灯多出现在陀螺仪阶段。
+   *   Mission Planner 对 `PREFLIGHT_CALIBRATION`+param5=1 **不等待 ACK**（`MAVLinkInterface.doCommand` 发送后即 `return true`），避免串口侧阻塞；点击后若板载红蓝灯开始闪烁，通常说明飞控已进入该预校准流程（其前置静止阶段常包含陀螺仪零偏校准）。
    * - 后续六面由 `AP_AccelCal::update()` 驱动；地面站用 `MAV_CMD_ACCELCAL_VEHICLE_POS`（42429）param1 回传姿态（非旧 msg 167）。
    *
    * 【动画与 IMU 刻意解耦】画布上 attitudeRoot 的四元数链（accelSimTick）只服务 Three.js
@@ -817,8 +817,10 @@
   let accelThreeApi = null;
   let accelThreeResizeObs = null;
   let accelThreeMissingWarned = false;
+  let accelPanelActive = false;
 
   function ensureAccelThree() {
+    if (!accelPanelActive) return;
     if (accelThreeApi) return;
     if (typeof window.THREE === "undefined" || !window.AccelCalibThree) {
       if (!accelThreeMissingWarned) {
@@ -838,6 +840,21 @@
         accelThreeApi.resize();
       });
       accelThreeResizeObs.observe(obsHost);
+    }
+  }
+
+  function disposeAccelThree() {
+    if (accelThreeResizeObs) {
+      try {
+        accelThreeResizeObs.disconnect();
+      } catch (_) { /* ignore */ }
+      accelThreeResizeObs = null;
+    }
+    if (accelThreeApi) {
+      try {
+        accelThreeApi.dispose();
+      } catch (_) { /* ignore */ }
+      accelThreeApi = null;
     }
   }
 
@@ -1111,6 +1128,10 @@
   }
 
   function accelSimTick() {
+    if (!accelPanelActive) {
+      accel.raf = 0;
+      return;
+    }
     const now = performance.now();
     const dt = accel.lastSimT ? Math.min(0.05, (now - accel.lastSimT) / 1000) : 1 / 60;
     accel.lastSimT = now;
@@ -1193,8 +1214,29 @@
   }
 
   function startAccelSim() {
+    if (!accelPanelActive) return;
     cancelAnimationFrame(accel.raf);
     accel.raf = requestAnimationFrame(accelSimTick);
+  }
+
+  function stopAccelSim() {
+    cancelAnimationFrame(accel.raf);
+    accel.raf = 0;
+    accel.lastSimT = 0;
+  }
+
+  function setAccelPanelActive(active) {
+    const next = !!active;
+    if (accelPanelActive === next) return;
+    accelPanelActive = next;
+    if (next) {
+      ensureAccelThree();
+      startAccelSim();
+      updateAccelLiveLabel();
+      return;
+    }
+    stopAccelSim();
+    disposeAccelThree();
   }
 
   function resetAccelUi() {
@@ -1229,7 +1271,7 @@
         : 1;
     /**
      * Mission Planner：`MAVLinkInterface.doCommand` 在 PREFLIGHT_CALIBRATION 且 p5==1 时
-     * 发送 COMMAND_LONG 后 **不等待 COMMAND_ACK**（陀螺仪阶段可能数秒且 ACK 在整段处理完后才发）。
+     * 发送 COMMAND_LONG 后 **不等待 COMMAND_ACK**（飞控前置静止阶段可能持续数秒，ACK 常在整段处理完后才发）。
      * 这里：先发指令，再在短窗口内只处理「明确拒绝」；超时则继续进入引导（与 MP 一致）。
      */
     const mpStyleWaitMs = 800;
@@ -1303,7 +1345,7 @@
       }
     } else {
       slog(
-        `与 Mission Planner 一致：${mpStyleWaitMs}ms 内未等到 ACK（飞控常在陀螺仪标定完成后才回复）。已继续进入六面引导；此数秒内请注视板载灯并保持机体静止。`,
+        `与 Mission Planner 一致：${mpStyleWaitMs}ms 内未等到 ACK（飞控常在预校准流程处理完成后才回复）。已继续进入六面引导；若此时板载红蓝灯闪烁，通常说明飞控已开始该流程，请保持机体静止。`,
       );
     }
     await sleep(80);
@@ -1319,8 +1361,6 @@
   function bindAccel() {
     renderFaceList();
     resetAccelUi();
-    ensureAccelThree();
-    startAccelSim();
 
     $("sc-ahrs-apply")?.addEventListener("click", async () => {
       const sel = $("sc-orient-select");
@@ -1348,8 +1388,8 @@
       }
       try {
         accelHint(
-          "正在请求飞控启动加速度计校准…与 Mission Planner 相同：发送后数秒内飞控先做陀螺仪标定，此间请保持机体静止、勿碰触；" +
-            "板载灯（如 Pixhawk 系）常出现红蓝闪烁；本地面站不长时间阻塞等待 ACK，以便与 MP 行为一致。",
+          "正在请求飞控启动加速度计校准…与 Mission Planner 相同：发送后飞控会先进入预校准静止阶段，此间请保持机体静止、勿碰触；" +
+            "板载灯（如 Pixhawk 系）若开始红蓝闪烁，通常说明该流程已经启动；本地面站不长时间阻塞等待 ACK，以便与 MP 行为一致。",
           false,
         );
         slog("加速度计启动：已按 Mission Planner 策略发送 PREFLIGHT_CALIBRATION(param5=1)；短窗内仅处理明确拒绝。");
@@ -1381,7 +1421,7 @@
       speak(face.speak);
       accelHint(
         `提示：${face.label} — ${face.speak}。每面摆好后点「保存」下发 MAV_CMD_ACCELCAL_VEHICLE_POS。` +
-          "若刚才等 ACK 时已看到灯闪，多为陀螺仪阶段（与 MP 一致）。CUAV X7/Nora 板载灯较淡时，请以日志中 “Place vehicle …” 为准。",
+          "若刚才点击开始后已看到板载红蓝灯闪烁，可按已进入预校准/加计校准流程理解；CUAV X7/Nora 板载灯较淡时，请以日志中 “Place vehicle …” 为准。",
         false,
       );
       $("sc-accel-start").disabled = true;
@@ -1508,6 +1548,7 @@
     bindAccel();
     updateAccelLiveLabel();
     window.sensorCalibAccelUpdateLive = updateAccelLiveLabel;
+    window.setAccelCalibrationPanelActive = setAccelPanelActive;
     window.project3DAccel = project3D;
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

@@ -30,6 +30,34 @@ function getSafe(val, def = 0) {
   return (typeof val !== 'undefined' && !isNaN(val)) ? val : def;
 }
 
+/** 速度/高度条高亮区：数字+单位居中，超出条宽时自动缩小字号 */
+function drawTapeValuePair(numStr, unitStr, gap) {
+  const maxW = 70;
+  let fontSize = 34;
+  let numW = 0;
+  let unitW = 0;
+  let totalW = 0;
+  do {
+    ctx.font = `bold ${fontSize}px monospace`;
+    numW = ctx.measureText(numStr).width;
+    unitW = ctx.measureText(unitStr).width;
+    totalW = numW + gap + unitW;
+    if (totalW <= maxW || fontSize <= 22) break;
+    fontSize -= 2;
+  } while (true);
+
+  ctx.fillStyle = HUD_COLORS.WARNING;
+  let blockLeft = -totalW / 2;
+  const edge = 35;
+  if (blockLeft < -edge) blockLeft = -edge;
+  if (blockLeft + totalW > edge) blockLeft = edge - totalW;
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(numStr, blockLeft, 12);
+  ctx.fillText(unitStr, blockLeft + numW + gap, 12);
+}
+
 function strokeText(text, x, y, font, color, strokeColor = "#000000", strokeWidth = 2) {
   ctx.font = font;
   ctx.fillStyle = color;
@@ -251,10 +279,7 @@ function drawAirspeedTape() {
   ctx.fillStyle = "rgba(0, 255, 159, 0.3)";
   ctx.fillRect(-38, -14, 76, 28);
 
-  ctx.fillStyle = HUD_COLORS.WARNING;
-  ctx.font = "bold 34px monospace";
-  ctx.textAlign = "right";
-  ctx.fillText(speed.toFixed(0), 30, 12);
+  drawTapeValuePair(speed.toFixed(0), "m/s", 8);
 
   ctx.restore();   // ← 必须有这行！防止污染其他绘制
 }
@@ -289,43 +314,40 @@ ctx.textAlign = "left";
 
 function drawAltitudeTape() {
   ctx.save();
-  ctx.translate(740, 400);
-  let alt = smoothed_altitude;
+  // 与左侧空速条对称：宽 76、高 500，距画布边缘 45px
+  ctx.translate(755, 400);
+
+  const alt = smoothed_altitude;
+
   ctx.fillStyle = HUD_COLORS.BACKGROUND;
-  ctx.fillRect(0, -250, 70, 500);
-  ctx.strokeStyle = "rgba(0, 255, 159, 0.5)";
-  ctx.strokeRect(0, -250, 70, 500);
+  ctx.fillRect(-38, -250, 76, 500);
+  ctx.strokeStyle = "rgba(0, 255, 159, 0.4)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-38, -250, 76, 500);
+
+  ctx.strokeStyle = HUD_COLORS.NORMAL;
+  ctx.lineWidth = 2;
+  ctx.font = "26px monospace";
+  ctx.fillStyle = HUD_COLORS.NORMAL;
   ctx.textAlign = "left";
-  ctx.font = "22px Consolas";
-  for (let a = Math.floor(alt / 5) * 5 - 20; a <= Math.floor(alt / 5) * 5 + 20; a += 5) {
-    let y = (alt - a) * 20;
-    if (y < -240 || y > 240) continue;
-    ctx.strokeStyle = HUD_COLORS.NORMAL;
+
+  for (let a = Math.floor(alt / 10) * 10 - 50; a <= Math.floor(alt / 10) * 10 + 50; a += 10) {
+    const y = (alt - a) * 8;
+    if (Math.abs(y) > 245) continue;
+
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(15, y);
+    ctx.lineTo(-30, y);
     ctx.stroke();
-    if (a % 10 === 0) {
-      ctx.fillStyle = HUD_COLORS.NORMAL;
-      ctx.fillText(a.toString(), 20, y + 8);
-    }
+
+    ctx.fillText(a.toString(), 6, y + 8);
   }
-  ctx.fillStyle = "#000000";
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(75, -25);
-  ctx.lineTo(75, 25);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = HUD_COLORS.NORMAL;
-  ctx.stroke();
-  ctx.fillStyle = "#FFFFFF";
-  ctx.font = "bold 24px Consolas";
-  ctx.textAlign = "center";
-  ctx.fillText(alt.toFixed(0), 38, 10);
-  ctx.fillStyle = HUD_COLORS.NORMAL;
-  ctx.font = "25px Consolas";
-  ctx.fillText("m", 35, 275);
+
+  ctx.fillStyle = "rgba(0, 255, 159, 0.3)";
+  ctx.fillRect(-38, -14, 76, 28);
+
+  drawTapeValuePair(alt.toFixed(0), "m", 8);
+
   ctx.restore();
 }
 
@@ -377,6 +399,7 @@ function drawFlightStatusOverlay() {
 
   const batV = getSafe(window.battery_voltage, 0);
   const gpsType = getSafe(window.gps_fix_type, 0);
+  const gpsSats = getSafe(window.gps_satellites_visible, 0);
  const mode = (typeof window.flight_mode === 'string' && window.flight_mode) 
              ? window.flight_mode 
              : "UNKNOWN";
@@ -398,15 +421,25 @@ function drawFlightStatusOverlay() {
   glowText(`EKF`, itemWidth * 1.6, 0, bottomFont, HUD_COLORS.NORMAL);
   glowText(`Vibe`, itemWidth * 2.1, 0, bottomFont, HUD_COLORS.NORMAL);
 
-  let gpsText = gpsType >= 3 ? `GPS: ${gpsType}` : "GPS: 无";
-  let gpsColor = gpsType >= 3 ? HUD_COLORS.NORMAL : HUD_COLORS.DANGER;
-  glowText(gpsText, itemWidth * 2.8, 0, bottomFont, gpsColor);
+  const hudRightX = 770;
+  let gpsText = typeof window.formatGpsFixHudLabel === "function"
+    ? window.formatGpsFixHudLabel()
+    : (gpsType >= 2 ? `GPS: ${gpsType}` : (gpsType === 1 ? "GPS: 未定位" : "GPS: 无"));
+  const gpsSeverity = typeof window.getGpsFixHudSeverity === "function"
+    ? window.getGpsFixHudSeverity()
+    : (gpsType >= 3 ? "normal" : gpsType >= 1 ? "warning" : "danger");
+  let gpsColor = gpsSeverity === "normal" ? HUD_COLORS.NORMAL
+    : gpsSeverity === "warning" ? HUD_COLORS.WARNING
+    : HUD_COLORS.DANGER;
 
-  ctx.translate(itemWidth * 2.8, -40);
   const dist = getSafe(window.dist_to_wp, 0);
   const wpNext = (typeof window.wp_current === 'number') ? `WP${window.wp_current + 1}` : 'WP0';
-  glowText(`${dist}m > ${wpNext}`, 0, 0, "20px Consolas", HUD_COLORS.NORMAL);
-  glowText(mode, 0, -35, "bold 26px Consolas", HUD_COLORS.NORMAL);
+  const alignBeforeGps = ctx.textAlign;
+  ctx.textAlign = "right";
+  glowText(gpsText, hudRightX, 0, bottomFont, gpsColor);
+  glowText(`${dist}m > ${wpNext}`, hudRightX, -40, "20px Consolas", HUD_COLORS.NORMAL);
+  glowText(mode, hudRightX, -75, "bold 26px Consolas", HUD_COLORS.NORMAL);
+  ctx.textAlign = alignBeforeGps;
   ctx.restore();
 }
 
@@ -447,17 +480,28 @@ console.log("✅ HUD 绘制已导出为 window.renderHudToCanvas / window.drawHU
 
 // ==================== 地图初始化（新增） ====================
 let mapInstance, mapMarker;
+let mapInfoDiv = null;
+let mapBootstrapped = false;
+let mapInitScheduled = false;
 
 function initMap() {
+  if (mapBootstrapped && mapInstance) {
+    return mapInstance;
+  }
   const mapEl = document.getElementById('map');
+  if (!mapEl) return null;
   if (typeof L === 'undefined') {
     console.error("❌ Leaflet 未加载");
     mapEl.innerHTML = '<div style="color:#f66;padding:40px;text-align:center;font-size:18px;">地图加载失败<br>请检查网络或关闭代理</div>';
-    return;
+    return null;
+  }
+  if (mapInstance) {
+    return mapInstance;
   }
 
   const center = typeof window.getMapCenterLatLng === "function" ? window.getMapCenterLatLng() : [29.59256, 106.22742];
   mapInstance = L.map('map', { zoomControl: true }).setView(center, 11);
+  mapBootstrapped = true;
   // expose for other modules (e.g. splitter resizing)
   window.mapInstance = mapInstance;
   
@@ -469,7 +513,6 @@ function initMap() {
   mapMarker = L.marker(center).addTo(mapInstance);
 
   // 创建一个自定义控件显示经纬度与海拔（左下角）
-  let mapInfoDiv = null;
   const MapInfoControl = L.Control.extend({
     onAdd: function(map) {
       mapInfoDiv = L.DomUtil.create('div', 'map-info');
@@ -494,15 +537,43 @@ function initMap() {
   };
 
   console.log("✅ 地图初始化成功");
+  return mapInstance;
 }
 
-// 启动地图
-initMap();
+function ensureMainMapReady() {
+  if (mapInstance) {
+    return mapInstance;
+  }
+  if (mapInitScheduled) {
+    return null;
+  }
+  mapInitScheduled = true;
+  requestAnimationFrame(() => {
+    mapInitScheduled = false;
+    const inst = initMap();
+    if (inst) {
+      setTimeout(() => {
+        try {
+          inst.invalidateSize();
+          if (typeof window.lat === "number" && typeof window.lon === "number" && window.updateMap) {
+            window.updateMap(window.lat, window.lon);
+          }
+        } catch (_) { /* ignore */ }
+      }, 80);
+    }
+  });
+  return null;
+}
+
+window.ensureMainMapReady = ensureMainMapReady;
 
 // 页面完全加载后强制刷新地图尺寸
 window.addEventListener('load', () => {
   setTimeout(() => {
-    if (mapInstance) mapInstance.invalidateSize();
+    if (window._currentMainView === 'flight-data') {
+      const inst = ensureMainMapReady();
+      if (inst) inst.invalidateSize();
+    }
   }, 800);
 });
 
@@ -543,6 +614,7 @@ function initMainTabs() {
   if (!tabs.length || !views.length) return;
 
   function setMainView(name) {
+    window._currentMainView = name;
     tabs.forEach(t => t.classList.toggle('active', t.dataset.view === name));
     views.forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
 
@@ -551,8 +623,11 @@ function initMainTabs() {
     }));
 
     // 切换回飞行数据页时，刷新地图尺寸避免 Leaflet 拉伸异常
-    if (name === 'flight-data' && window.mapInstance) {
-      setTimeout(() => window.mapInstance.invalidateSize(), 80);
+    if (name === 'flight-data') {
+      const inst = ensureMainMapReady();
+      if (inst) {
+        setTimeout(() => inst.invalidateSize(), 80);
+      }
     }
   }
 

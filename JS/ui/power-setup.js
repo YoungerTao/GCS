@@ -8,88 +8,78 @@
     return Number.isFinite(v) ? v : null;
   }
 
+  function fsSuffix(slotIndex) {
+    if (typeof window.battFailsafeControlSuffix === "function") {
+      return window.battFailsafeControlSuffix(slotIndex);
+    }
+    return slotIndex === 0 ? "" : `-${slotIndex + 1}`;
+  }
+
+  function fsIds(slotIndex) {
+    const s = fsSuffix(slotIndex);
+    return {
+      cells: `power-cells-input${s}`,
+      warn: `power-warn-slider${s}`,
+      crit: `power-crit-slider${s}`,
+      warnText: `power-warn-text${s}`,
+      critText: `power-crit-text${s}`,
+      fs: `power-fs-low-act${s}`,
+    };
+  }
+
+  function getInstances() {
+    if (typeof window.buildBatteryMonitorView === "function") {
+      return window.buildBatteryMonitorView(window.params);
+    }
+    const map = window.powerInstances instanceof Map ? window.powerInstances : new Map();
+    return Array.from(map.values()).sort((a, b) => a.id - b.id);
+  }
+
   function syncSlidersFromParamsOnce() {
     if (window._powerParamsHydrated) return;
     const params = window.params;
     if (!(params instanceof Map)) return;
 
-    const v1 = getParamNum("BATT_LOW_VOLT");
-    const c1 = getParamNum("BATT_CRT_VOLT");
-    const fs1 = getParamNum("BATT_FS_LOW_ACT");
-    if (v1 != null) {
-      const w = document.getElementById("power-warn-slider");
-      if (w) w.value = String(v1);
-    }
-    if (c1 != null) {
-      const c = document.getElementById("power-crit-slider");
-      if (c) c.value = String(c1);
-    }
-    if (fs1 != null) {
-      const sel = document.getElementById("power-fs-low-act");
-      if (sel) sel.value = String(Math.round(fs1));
-    }
+    const slots = typeof window.listEnabledBatterySlots === "function"
+      ? window.listEnabledBatterySlots(params)
+      : [{ slotIndex: 0, prefix: "BATT" }];
 
-    const v2 = getParamNum("BATT2_LOW_VOLT");
-    const c2 = getParamNum("BATT2_CRT_VOLT");
-    const fs2 = getParamNum("BATT2_FS_LOW_ACT");
-    if (v2 != null) {
-      const w = document.getElementById("power-warn-slider-2");
-      if (w) w.value = String(v2);
-    }
-    if (c2 != null) {
-      const c = document.getElementById("power-crit-slider-2");
-      if (c) c.value = String(c2);
-    }
-    if (fs2 != null) {
-      const sel = document.getElementById("power-fs-low-act-2");
-      if (sel) sel.value = String(Math.round(fs2));
-    }
+    let any = false;
+    slots.forEach((slot) => {
+      const ids = fsIds(slot.slotIndex);
+      const low = getParamNum(`${slot.prefix}_LOW_VOLT`);
+      const crt = getParamNum(`${slot.prefix}_CRT_VOLT`);
+      const fs = getParamNum(`${slot.prefix}_FS_LOW_ACT`);
+      if (low != null) {
+        const w = document.getElementById(ids.warn);
+        if (w) w.value = String(low);
+        any = true;
+      }
+      if (crt != null) {
+        const c = document.getElementById(ids.crit);
+        if (c) c.value = String(crt);
+        any = true;
+      }
+      if (fs != null) {
+        const sel = document.getElementById(ids.fs);
+        if (sel) sel.value = String(Math.round(fs));
+        any = true;
+      }
+    });
 
-    const v3 = getParamNum("BATT3_LOW_VOLT");
-    const c3 = getParamNum("BATT3_CRT_VOLT");
-    const fs3 = getParamNum("BATT3_FS_LOW_ACT");
-    if (v3 != null) {
-      const w = document.getElementById("power-warn-slider-3");
-      if (w) w.value = String(v3);
-    }
-    if (c3 != null) {
-      const c = document.getElementById("power-crit-slider-3");
-      if (c) c.value = String(c3);
-    }
-    if (fs3 != null) {
-      const sel = document.getElementById("power-fs-low-act-3");
-      if (sel) sel.value = String(Math.round(fs3));
-    }
-
-    if (v1 != null || v2 != null || v3 != null) {
+    if (any) {
       window._powerParamsHydrated = true;
-      document.getElementById("power-cells-input")?.dispatchEvent(new Event("input"));
-      document.getElementById("power-cells-input-2")?.dispatchEvent(new Event("input"));
-      document.getElementById("power-cells-input-3")?.dispatchEvent(new Event("input"));
+      slots.forEach((slot) => {
+        document.getElementById(fsIds(slot.slotIndex).cells)?.dispatchEvent(new Event("input"));
+      });
     }
-  }
-
-  function getInstances() {
-    const map = window.powerInstances instanceof Map ? window.powerInstances : new Map();
-    let list = Array.from(map.values()).sort((a, b) => a.id - b.id);
-    if (!list.length && typeof window.battery_voltage === "number" && window.battery_voltage > 0) {
-      list = [{
-        id: 0,
-        name: "Battery 1",
-        type: "analog",
-        cells: Math.max(1, Math.round(window.battery_voltage / 3.7)),
-        voltage: window.battery_voltage,
-        current: 0,
-        cellVoltages: [],
-      }];
-    }
-    return list;
   }
 
   function statusOf(inst) {
+    if (inst.connected === false) return { label: "未连接", cls: "muted" };
     if (inst.voltage <= 0.1) return { label: "掉电", cls: "danger" };
     const perCell = inst.cells > 0 ? inst.voltage / inst.cells : 0;
-    if (perCell < 3.45) return { label: "低压", cls: "warn" };
+    if (perCell > 0 && perCell < 3.45) return { label: "低压", cls: "warn" };
     if (inst.current > 120) return { label: "过流", cls: "danger" };
     return { label: "正常", cls: "" };
   }
@@ -112,18 +102,34 @@
     svg.appendChild(pdb);
     svg.appendChild(pdbText);
 
-    const isSingleRisk = instances.length === 2 && instances.some((i) => i.voltage < 1);
+    const online = instances.filter((i) => i.connected);
+    const isSingleRisk = online.length === 1 && instances.length > 1;
     risk.classList.toggle("hidden", !isSingleRisk);
+    if (!risk.classList.contains("hidden")) {
+      risk.textContent = `单路供电风险 ⚠️（${instances.length - online.length} 路已配置但未检测到 BMS）`;
+    }
+
+    const rowH = Math.min(36, Math.max(24, 120 / Math.max(instances.length, 1)));
+    const startY = pdbY - ((instances.length - 1) * rowH) / 2;
 
     instances.forEach((inst, idx) => {
-      const y = instances.length === 1 ? pdbY : (idx === 0 ? 42 : 98);
+      const y = instances.length === 1 ? pdbY : startY + idx * rowH;
       const bx = 70;
-      const b = mk("rect", { x: bx, y: y - 20, width: 140, height: 40, rx: 10, fill: "#1b243c", stroke: "#4e6199" });
-      const t = mk("text", { x: bx + 70, y: y + 5, "text-anchor": "middle", fill: "#ecf1ff", "font-size": 13 });
-      t.textContent = `${inst.name} ${inst.type === "tethered" ? "(系留)" : ""}`;
-      const alive = inst.voltage > 1;
-      const line = mk("line", { x1: bx + 140, y1: y, x2: pdbX, y2: pdbY, stroke: alive ? "#4ade80" : "#64748b", "stroke-width": 4 });
-      svg.appendChild(b); svg.appendChild(t); svg.appendChild(line);
+      const fill = inst.connected ? "#1b243c" : "#151a28";
+      const stroke = inst.connected ? "#4e6199" : "#3a4158";
+      const b = mk("rect", { x: bx, y: y - 16, width: 140, height: 32, rx: 8, fill, stroke });
+      const t = mk("text", { x: bx + 70, y: y + 4, "text-anchor": "middle", fill: inst.connected ? "#ecf1ff" : "#8b95b0", "font-size": 12 });
+      t.textContent = inst.name;
+      const alive = inst.connected && inst.voltage > 1;
+      const line = mk("line", {
+        x1: bx + 140, y1: y, x2: pdbX, y2: pdbY,
+        stroke: alive ? "#4ade80" : "#64748b",
+        "stroke-width": alive ? 4 : 2,
+        "stroke-dasharray": inst.connected ? "" : "6 4",
+      });
+      svg.appendChild(b);
+      svg.appendChild(t);
+      svg.appendChild(line);
     });
   }
 
@@ -131,35 +137,54 @@
     const root = document.getElementById("power-cards");
     const countEl = document.getElementById("power-instance-count");
     if (!root || !countEl) return;
-    countEl.textContent = `${instances.length} 路电源`;
+
+    const online = instances.filter((i) => i.connected).length;
+    countEl.textContent = online < instances.length
+      ? `${online} 路在线 / ${instances.length} 路已启用`
+      : `${instances.length} 路电源`;
+
     root.classList.toggle("two-cols", instances.length > 1);
     root.innerHTML = "";
 
-    instances.forEach((inst, idx) => {
+    instances.forEach((inst) => {
       const st = statusOf(inst);
       const card = document.createElement("article");
-      card.className = `power-card ${inst.type === "tethered" ? "tethered" : ""}`;
-      const cellBars = inst.cellVoltages && inst.cellVoltages.length
-        ? `<div class="power-cell-grid">${inst.cellVoltages.map((v, i, arr) => {
-            const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-            const bad = Math.abs(v - avg) > 0.1;
-            return `<div class="power-cell-bar ${bad ? "bad" : ""}" title="Cell${i + 1}: ${v.toFixed(3)}V"></div>`;
-          }).join("")}</div>`
-        : `<div class="muted">无单体数据（模拟传感器）</div>`;
-      const battKey = idx === 0 ? "BATT" : `BATT${idx + 1}`;
+      card.className = `power-card ${inst.connected ? "" : "power-card-offline"} ${inst.type === "tethered" ? "tethered" : ""}`;
+      const prefix = inst.prefix || (inst.id === 0 ? "BATT" : `BATT${inst.id + 1}`);
+      const typeLabel = inst.typeShort || inst.type;
+      const voltStr = inst.connected ? `${inst.voltage.toFixed(2)}V` : "—";
+      const currStr = inst.connected ? `${inst.current.toFixed(2)}A` : "—";
+      const cellsStr = inst.connected && inst.cells > 0 ? `${inst.cells}S` : "—";
+
+      let cellBars = "";
+      if (inst.connected && inst.cellVoltages && inst.cellVoltages.length) {
+        cellBars = `<div class="power-cell-grid">${inst.cellVoltages.map((v, i, arr) => {
+          const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+          const bad = Math.abs(v - avg) > 0.1;
+          return `<div class="power-cell-bar ${bad ? "bad" : ""}" title="Cell${i + 1}: ${v.toFixed(3)}V"></div>`;
+        }).join("")}</div>`;
+      } else if (!inst.connected) {
+        const sn = inst.serialNum != null ? ` · CAN ID=${inst.serialNum}` : "";
+        cellBars = `<div class="muted">等待 BMS 遥测（${prefix}_MONITOR=8${sn}）</div>`;
+      } else if (inst.type === "dronecan_bms") {
+        cellBars = `<div class="muted">等待 DroneCAN BMS 单体数据…</div>`;
+      } else {
+        cellBars = `<div class="muted">无单体数据</div>`;
+      }
+
       card.innerHTML = `
         <div class="power-card-head">
-          <strong>🔋${idx + 1} ${inst.name}</strong>
+          <strong>🔋 ${inst.name}</strong>
           <span class="power-chip ${st.cls}">${st.label}</span>
         </div>
-        <div class="power-kv"><span>参数前缀</span><span>${battKey}_*</span></div>
-        <div class="power-kv"><span>类型</span><span>${inst.type}</span></div>
-        <div class="power-kv"><span>总电压 / 电流</span><span>${inst.voltage.toFixed(2)}V / ${inst.current.toFixed(2)}A</span></div>
-        <div class="power-kv"><span>串数</span><span>${inst.cells}S</span></div>
-        ${inst.type === "tethered" ? `<div class="power-kv"><span>DCDC效率</span><span>94%</span></div>` : ""}
-        ${inst.temperature !== undefined ? `<div class="power-kv"><span>温度</span><span>${inst.temperature.toFixed(1)}°C</span></div>` : ""}
+        <div class="power-kv"><span>参数前缀</span><span>${prefix}_*</span></div>
+        <div class="power-kv"><span>监测类型</span><span>${typeLabel}</span></div>
+        <div class="power-kv"><span>总电压 / 电流</span><span>${voltStr} / ${currStr}</span></div>
+        <div class="power-kv"><span>串数</span><span>${cellsStr}</span></div>
+        ${inst.connected && inst.remaining != null && inst.remaining >= 0 ? `<div class="power-kv"><span>剩余</span><span>${inst.remaining}%</span></div>` : ""}
+        ${inst.connected && inst.temperature !== undefined ? `<div class="power-kv"><span>温度</span><span>${inst.temperature.toFixed(1)}°C</span></div>` : ""}
         ${cellBars}
-        <div class="power-kv"><span>Fail-safe</span><span>见右侧 ${battKey}_FS_LOW_ACT</span></div>
+        <div class="power-kv"><span>Fail-safe</span><span>${prefix}_FS_LOW_ACT</span></div>
       `;
       root.appendChild(card);
     });
@@ -173,8 +198,10 @@
       cellsInput.value = String(s);
       const min = +(s * 3.4).toFixed(1);
       const max = +(s * 3.9).toFixed(1);
-      warnSlider.min = String(min); warnSlider.max = String(max);
-      critSlider.min = String(min); critSlider.max = String(max);
+      warnSlider.min = String(min);
+      warnSlider.max = String(max);
+      critSlider.min = String(min);
+      critSlider.max = String(max);
       if (+warnSlider.value < min || +warnSlider.value > max) warnSlider.value = String((s * 3.7).toFixed(1));
       if (+critSlider.value < min || +critSlider.value > max) critSlider.value = String((s * 3.5).toFixed(1));
       if (+critSlider.value > +warnSlider.value) critSlider.value = warnSlider.value;
@@ -194,56 +221,104 @@
     recalcRange();
   }
 
-  function updateMultiBatteryPanels() {
-    const n = getInstances().length;
-    const p2 = document.getElementById("power-batt2-panel");
-    const p3 = document.getElementById("power-batt3-panel");
-    if (p2) p2.classList.toggle("hidden", n < 2);
-    if (p3) p3.classList.toggle("hidden", n < 3);
+  function ensureDynamicFailsafePanels(slots) {
+    const host = document.getElementById("power-failsafe-dynamic")
+      || document.querySelector("#setup-panel-power .power-right");
+    if (!host) return;
+
+    let dyn = document.getElementById("power-failsafe-dynamic");
+    if (!dyn) {
+      dyn = document.createElement("div");
+      dyn.id = "power-failsafe-dynamic";
+      dyn.className = "power-failsafe-dynamic";
+      const writeBlock = document.querySelector("#setup-panel-power .power-write-actions");
+      if (writeBlock && writeBlock.parentNode) {
+        writeBlock.parentNode.insertBefore(dyn, writeBlock);
+      } else {
+        host.appendChild(dyn);
+      }
+    }
+
+    const needDynamic = slots.filter((s) => s.slotIndex >= 3);
+    const sig = needDynamic.map((s) => s.prefix).join("|");
+    if (dyn.dataset.sig === sig) return;
+    dyn.dataset.sig = sig;
+    dyn.innerHTML = "";
+
+    needDynamic.forEach((slot) => {
+      const ids = fsIds(slot.slotIndex);
+      const panel = document.createElement("div");
+      panel.className = "power-batt2-panel";
+      panel.innerHTML = `
+        <h4 class="power-subhead">第 ${slot.slotIndex + 1} 路 ${slot.prefix}（${slot.typeShort}）</h4>
+        <div class="power-failsafe-block">
+          <label for="${ids.cells}">电池串数 (S)</label>
+          <input id="${ids.cells}" type="number" value="12" min="3" max="16" step="1">
+        </div>
+        <div class="power-failsafe-block">
+          <label for="${ids.warn}">一级低压阈值 (V)</label>
+          <input id="${ids.warn}" type="range" min="30" max="60" value="44.4" step="0.1">
+          <div id="${ids.warnText}" class="muted">44.4V</div>
+        </div>
+        <div class="power-failsafe-block">
+          <label for="${ids.crit}">二级低压阈值 (V)</label>
+          <input id="${ids.crit}" type="range" min="30" max="60" value="42.0" step="0.1">
+          <div id="${ids.critText}" class="muted">42.0V</div>
+        </div>
+        <div class="power-failsafe-block">
+          <label for="${ids.fs}">低压保护 ${slot.prefix}_FS_LOW_ACT</label>
+          <select id="${ids.fs}">
+            <option value="0">0 — 仅警告</option>
+            <option value="1">1 — Land</option>
+            <option value="2" selected>2 — RTL</option>
+            <option value="3">3 — SmartRTL / RTL</option>
+            <option value="4">4 — Terminate</option>
+          </select>
+        </div>
+      `;
+      dyn.appendChild(panel);
+      bindFailsafeGroup(
+        document.getElementById(ids.cells),
+        document.getElementById(ids.warn),
+        document.getElementById(ids.crit),
+        document.getElementById(ids.warnText),
+        document.getElementById(ids.critText)
+      );
+    });
   }
 
-  function battPrefix(chainIndex) {
-    return chainIndex === 0 ? "BATT" : `BATT${chainIndex + 1}`;
+  function updateMultiBatteryPanels(slots) {
+    const p2 = document.getElementById("power-batt2-panel");
+    const p3 = document.getElementById("power-batt3-panel");
+    const has2 = slots.some((s) => s.slotIndex === 1);
+    const has3 = slots.some((s) => s.slotIndex === 2);
+    if (p2) p2.classList.toggle("hidden", !has2);
+    if (p3) p3.classList.toggle("hidden", !has3);
+    ensureDynamicFailsafePanels(slots);
   }
 
   async function writePowerParamsToFc() {
     const statusEl = document.getElementById("power-write-status");
     const logicEl = document.getElementById("power-logic-select");
-    const instances = getInstances();
-    if (instances.length === 0) {
-      if (statusEl) statusEl.textContent = "无电源遥测实例：仍将写入 BATT 主路（请确认已连接并已加载参数）。";
-    }
 
     if (typeof window.sendParamSet !== "function") {
       if (statusEl) statusEl.textContent = "写入失败：内部未注册 sendParamSet。";
       return;
     }
 
-    const chains = [];
-    chains.push({
-      prefix: battPrefix(0),
-      low: Number(document.getElementById("power-warn-slider")?.value),
-      crit: Number(document.getElementById("power-crit-slider")?.value),
-      fs: Number(document.getElementById("power-fs-low-act")?.value),
-    });
+    const slots = typeof window.listEnabledBatterySlots === "function"
+      ? window.listEnabledBatterySlots(window.params)
+      : [{ slotIndex: 0, prefix: "BATT" }];
 
-    const nRemote = instances.length >= 2 ? instances.length : 1;
-    if (nRemote >= 2) {
-      chains.push({
-        prefix: battPrefix(1),
-        low: Number(document.getElementById("power-warn-slider-2")?.value),
-        crit: Number(document.getElementById("power-crit-slider-2")?.value),
-        fs: Number(document.getElementById("power-fs-low-act-2")?.value),
-      });
-    }
-    if (nRemote >= 3) {
-      chains.push({
-        prefix: battPrefix(2),
-        low: Number(document.getElementById("power-warn-slider-3")?.value),
-        crit: Number(document.getElementById("power-crit-slider-3")?.value),
-        fs: Number(document.getElementById("power-fs-low-act-3")?.value),
-      });
-    }
+    const chains = slots.map((slot) => {
+      const ids = fsIds(slot.slotIndex);
+      return {
+        prefix: slot.prefix,
+        low: Number(document.getElementById(ids.warn)?.value),
+        crit: Number(document.getElementById(ids.crit)?.value),
+        fs: Number(document.getElementById(ids.fs)?.value),
+      };
+    });
 
     let sent = 0;
     const lines = [];
@@ -275,24 +350,27 @@
     const logic = logicEl ? logicEl.value : "";
     let logicNote = "";
     if (logic === "any") {
-      logicNote = "界面已选「任意一路低压」逻辑；ArduPilot 默认为各路独立 BATTx_FS_*，并联策略请在飞控脚本/自定义档位中复核。";
+      logicNote = "界面已选「任意一路低压」逻辑；ArduPilot 默认为各路独立 BATTx_FS_*。";
     } else if (logic === "all") {
-      logicNote = "界面已选「双路同时低压」逻辑：标准固件无单一参数等价，需在任务规划端或 LUA/自定义Failsafe处理。";
+      logicNote = "界面已选「双路同时低压」逻辑：标准固件无单一参数等价。";
     }
 
-    const msg = `电源参数写入已发送 ${sent} 条；${logicNote}`;
+    const msg = `电源参数写入已发送 ${sent} 条（${chains.length} 路监测槽）；${logicNote}`;
     if (typeof log === "function") log(`🔋 ${msg} | ${lines.join(" · ")}`, "power-param-write");
     if (statusEl) {
-      statusEl.textContent = `已发送 ${sent} 条（${lines.join("；")}）。请等待 PARAM_VALUE / 地面站 ACK。`;
+      statusEl.textContent = `已发送 ${sent} 条（${lines.join("；")}）。`;
     }
   }
 
   function tick() {
     syncSlidersFromParamsOnce();
+    const slots = typeof window.listEnabledBatterySlots === "function"
+      ? window.listEnabledBatterySlots(window.params)
+      : [];
     const instances = getInstances();
+    updateMultiBatteryPanels(slots.length ? slots : [{ slotIndex: 0, prefix: "BATT" }]);
     renderTopology(instances);
     renderCards(instances);
-    updateMultiBatteryPanels();
   }
 
   function mount() {
@@ -322,6 +400,18 @@
 
     document.getElementById("power-write-params-btn")?.addEventListener("click", () => {
       writePowerParamsToFc();
+    });
+
+    document.addEventListener("gcs-connection", () => {
+      if (window._gcsConnState === "connected") {
+        window._powerParamsHydrated = false;
+      } else if (window.powerInstances instanceof Map) {
+        window.powerInstances.clear();
+      }
+    });
+
+    document.addEventListener("gcs-sensor-overview-changed", () => {
+      window._powerParamsHydrated = false;
     });
 
     tick();

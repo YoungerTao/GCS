@@ -203,6 +203,11 @@ window.rcChannels = window.rcChannels || Array.from({ length: 16 }, () => 1500);
   function openSetupPanel(panel) {
     const panels = document.querySelectorAll(".ov-panel");
     panels.forEach((p) => p.classList.toggle("active", p.id === `setup-panel-${panel}`));
+    try {
+      window.dispatchEvent(new CustomEvent("gcs:setup-panel-changed", {
+        detail: { panel }
+      }));
+    } catch (_) { /* ignore */ }
   }
 
   function bindSetupSidebar() {

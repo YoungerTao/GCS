@@ -34,6 +34,10 @@ async function closeSerialResources() {
   if (typeof window.endParamLoadingUI === "function" && window._paramLoadActive) {
     window.endParamLoadingUI(false, "disconnect");
   }
+  if (window.MavlinkMission && window.MavlinkMission.resetMissionSession) {
+    window.MavlinkMission.resetMissionSession();
+  }
+  window._missionUploadActive = false;
 
   const p = window.port;
   const r = typeof reader !== "undefined" ? reader : null;
@@ -306,7 +310,9 @@ async function send_v2(msgid, payload, crc_extra) {
   let crc = crc_calculate(pkt.slice(1));
   crc = crc_accumulate(crc_extra, crc);
   pkt.push(crc & 0xff, crc >> 8);
-  await writer.write(new Uint8Array(pkt));
+  const w = window.writer || writer;
+  if (!w) throw new Error("未连接串口");
+  await w.write(new Uint8Array(pkt));
 }
 
 async function sendCommandLong(command, p1, p2, p3, p4, p5, p6, p7, confirmation, targetSystem, targetComponent) {
@@ -316,11 +322,10 @@ async function sendCommandLong(command, p1, p2, p3, p4, p5, p6, p7, confirmation
   const tc = targetComponent != null ? Number(targetComponent) : (window.compid || 1);
 
   const payload = [
-    ts & 0xff, tc & 0xff,
-    ...u16bytes(command), (confirmation || 0) & 0xff,
     ...f32bytes(p1 || 0), ...f32bytes(p2 || 0), ...f32bytes(p3 || 0),
     ...f32bytes(p4 || 0), ...f32bytes(p5 || 0), ...f32bytes(p6 || 0),
     ...f32bytes(p7 || 0),
+    ...u16bytes(command), ts & 0xff, tc & 0xff, (confirmation || 0) & 0xff,
   ];
   await send_v2(76, payload, 152);
 }

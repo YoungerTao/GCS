@@ -887,6 +887,8 @@ body {
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 10px;
+  flex: 1 1 0;
+  min-height: 0;
   height: 100%;
 }
 
@@ -932,19 +934,382 @@ body {
   background: rgba(34, 197, 94, 0.18);
 }
 
+.ov-panel#setup-panel-airframe.active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .af-grid {
   display: grid;
-  grid-template-columns: minmax(420px, 3fr) minmax(540px, 5fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
+  flex: 1 1 0;
   min-height: 0;
+  align-items: stretch;
+}
+
+/* 左右栏同高、顶对齐、底边留白一致 */
+.af-grid > section.af-left.card-dark,
+.af-grid > section.af-right.card-dark {
+  height: 100%;
+  min-height: 0;
+  align-self: stretch;
+  padding: 10px 12px 16px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
 }
 
 .af-left,
 .af-right {
   min-height: 0;
+  min-width: 0;
+}
+
+.af-left .rc-card-head,
+.af-right .rc-card-head {
+  flex-shrink: 0;
+}
+
+.af-left .af-firmware-banner {
+  flex-shrink: 0;
+}
+
+/* 机架类型 + 混控布局：纵向分栏，机架区可滚动，混控区随内容高度 */
+.af-left-stack {
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.af-left-stack > .af-block-class {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.af-left-stack > .af-block-class > h4 {
+  margin-top: 0;
+}
+
+.af-left-stack > .af-block-type,
+.af-left-stack > #af-type-block {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  min-height: 0;
+  max-height: min(200px, 32vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.af-left-stack > .af-block-type > h4,
+.af-left-stack > #af-type-block > h4 {
+  flex-shrink: 0;
+}
+
+.af-right > .af-block {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 拓扑图区域约为 IMU 区 2 倍高度（仅 flex 比例，不用固定 min-height 避免撑破父容器） */
+.af-right > .af-block-topology {
+  flex: 2 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.af-right > .af-block-imu {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+/* IMU 区 3D 预览需露出透视范围，勿裁切 */
+.af-right > .af-block.af-block-imu {
+  overflow: visible;
+}
+
+.af-imu-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 5px 8px 5px 0;
+  box-sizing: border-box;
+}
+
+.af-imu-controls {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.af-imu-controls .af-orient-row,
+.af-imu-controls .af-angle-row {
+  flex-wrap: wrap;
+}
+
+.af-right > .af-block > h4,
+.af-left-stack > .af-block > h4 {
+  flex-shrink: 0;
+}
+
+.af-class-grid::-webkit-scrollbar,
+.af-left-stack > .af-block-class::-webkit-scrollbar,
+.af-left-stack > .af-block-type::-webkit-scrollbar {
+  width: 8px;
+}
+
+.af-class-grid::-webkit-scrollbar-thumb,
+.af-left-stack > .af-block-class::-webkit-scrollbar-thumb,
+.af-left-stack > .af-block-type::-webkit-scrollbar-thumb {
+  background: #5a6d9a;
+  border-radius: 4px;
+}
+
+.af-class-grid::-webkit-scrollbar-thumb:hover,
+.af-left-stack > .af-block-class::-webkit-scrollbar-thumb:hover,
+.af-left-stack > .af-block-type::-webkit-scrollbar-thumb:hover {
+  background: #7b92c9;
+}
+
+.af-class-grid::-webkit-scrollbar-track,
+.af-left-stack > .af-block-class::-webkit-scrollbar-track,
+.af-left-stack > .af-block-type::-webkit-scrollbar-track {
+  background: rgba(15, 21, 39, 0.6);
+  border-radius: 4px;
+}
+
+.af-firmware-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid #33406a;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(30, 41, 79, 0.9) 0%, rgba(20, 27, 47, 0.95) 100%);
+}
+
+.af-firmware-banner.af-firmware-copter {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.25);
+}
+
+.af-firmware-banner.af-firmware-other {
+  border-color: #b45309;
+  background: linear-gradient(135deg, rgba(120, 53, 15, 0.35) 0%, rgba(20, 27, 47, 0.95) 100%);
+}
+
+.af-firmware-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.af-firmware-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.af-firmware-copy strong {
+  color: #f1f5f9;
+  font-size: 14px;
+}
+
+.af-firmware-hint {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.af-block-desc {
+  margin: -4px 0 10px;
+  color: #8fa3d8;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.af-param-tag {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #93c5fd;
+  border: 1px solid #3b5a9a;
+  border-radius: 4px;
+  padding: 1px 5px;
+  vertical-align: middle;
+}
+
+.af-class-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.af-class-card {
+  border: 1px solid #364061;
+  border-radius: 10px;
+  background: #11182a;
+  color: #dce2fb;
+  padding: 8px 6px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.af-class-card:hover {
+  border-color: #5f6b94;
+}
+
+.af-class-card.active {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.45);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.14) 0%, rgba(17, 24, 42, 0.98) 100%);
+}
+
+.af-class-fig {
+  width: 100%;
+  aspect-ratio: 10 / 7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 2px 2px;
+}
+
+.af-class-fig-svg {
+  width: 100%;
+  height: 100%;
+  max-height: 56px;
+  display: block;
+}
+
+.af-class-caption {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #e2e8f0;
+  padding: 0 4px;
+  word-break: keep-all;
+}
+
+.af-class-card.active .af-class-caption {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.af-type-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-content: flex-start;
+  width: 100%;
+}
+
+.af-type-chip {
+  border: 1px solid #364061;
+  border-radius: 999px;
+  background: #11182a;
+  color: #dce2fb;
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.af-type-chip:hover {
+  border-color: #5f6b94;
+}
+
+.af-type-chip.active {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.35);
+}
+
+.af-type-main {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  width: 100%;
+}
+
+#af-type-block .af-type-note {
+  flex-shrink: 0;
+  margin-top: 8px;
+}
+
+.af-mini-badge {
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+}
+
+.af-mini-badge.af-mini-ok {
+  color: #86efac;
+  border-color: #166534;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.af-type-note {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #bfdbfe;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.af-type-note.hidden,
+.hidden {
+  display: none !important;
+}
+
+.af-empty-msg {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.af-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.af-chip-warn {
+  color: #fde68a;
+  border-color: #854d0e;
+  background: rgba(245, 158, 11, 0.14);
 }
 
 .af-block {
@@ -1038,25 +1403,20 @@ body {
   border-radius: 10px;
   background: #0f1527;
   padding: 8px;
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 #af-topology-svg {
+  flex: 1 1 0;
   width: 100%;
-  height: min(340px, 42vw);
-  min-height: 240px;
+  min-height: 0;
+  max-height: 100%;
   display: block;
-}
-
-.af-hover-hint {
-  margin-top: 8px;
-  color: #8fa3d8;
-  font-size: 12px;
-}
-
-.af-topology-tip {
-  margin-top: 8px;
-  color: #9bb0df;
-  font-size: 12px;
 }
 
 .af-motor-node {
@@ -1075,20 +1435,16 @@ body {
   stroke-width: 2;
 }
 
+/* 转向弧：静态虚线环即可；旋转用 SVG animateTransform（见 airframe-setup.js），勿用 CSS transform 以免绕画布原点公转 */
 .af-motor-spin-cw {
   stroke: #7dd3fc;
-  transform-origin: center;
-  animation: af-spin-cw 1.2s linear infinite;
+  pointer-events: none;
 }
 
 .af-motor-spin-ccw {
   stroke: #34d399;
-  transform-origin: center;
-  animation: af-spin-ccw 1.2s linear infinite;
+  pointer-events: none;
 }
-
-@keyframes af-spin-cw { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes af-spin-ccw { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
 
 .af-forward-label {
   fill: #fde68a;
@@ -1113,18 +1469,34 @@ body {
   width: 70px;
 }
 
-.af-board-wrap {
-  margin-top: 10px;
-  perspective: 800px;
-  height: 120px;
+/* 3D 预览框：正方形，在 IMU 内容区垂直居中，距父区域上下各 5px */
+.af-right > .af-block-imu .af-board-wrap {
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0 4px 0 0;
+  width: 118px;
+  height: 118px;
+  aspect-ratio: 1;
+  padding: 10px;
+  box-sizing: border-box;
+  perspective: 900px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: visible;
+  border: 1px solid #364061;
+  border-radius: 10px;
+  background: rgba(15, 21, 39, 0.85);
+}
+
+.af-right > .af-block .af-orient-row,
+.af-right > .af-block .af-angle-row {
+  flex-shrink: 0;
 }
 
 .af-board3d {
-  width: 100px;
-  height: 70px;
+  width: 82px;
+  height: 58px;
   position: relative;
   transform-style: preserve-3d;
   transform: rotateX(58deg) rotateY(0deg) rotateZ(0deg);
@@ -1158,12 +1530,18 @@ body {
 .af-board-side {
   background: rgba(34, 197, 94, 0.2);
   color: #b9f7d5;
-  transform: rotateY(90deg) translateZ(50px);
+  transform: rotateY(90deg) translateZ(44px);
 }
 
 @media (max-width: 1280px) {
   .af-grid {
     grid-template-columns: 1fr;
+    grid-auto-rows: minmax(420px, 1fr);
+  }
+
+  .af-left,
+  .af-right {
+    min-height: 420px;
   }
 }
 
@@ -1607,6 +1985,16 @@ body {
 }
 .power-chip.warn { border-color: #f59e0b; color: #ffd999; }
 .power-chip.danger { border-color: #ef4444; color: #ffb0b0; }
+.power-chip.muted { border-color: #4b5563; color: #9ca8c9; }
+.power-card-offline {
+  opacity: 0.72;
+  border-style: dashed;
+}
+.power-failsafe-dynamic .power-batt2-panel {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(100, 116, 139, 0.35);
+}
 .power-kv { display:flex; justify-content:space-between; font-size:12px; color:#dce2fb; }
 .power-cell-grid {
   display: grid;

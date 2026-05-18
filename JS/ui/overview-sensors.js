@@ -226,23 +226,25 @@
     }
 
     if (mounted.batteries.length) {
+      const battView = typeof window.buildBatteryMonitorView === "function"
+        ? window.buildBatteryMonitorView(p)
+        : [];
       const lis = mounted.batteries
         .map((b) => {
-          const inst = window.powerInstances instanceof Map
-            ? window.powerInstances.get(battInstanceIndex(b.key))
-            : null;
+          const slotIdx = battInstanceIndex(b.key);
+          const view = battView.find((v) => v.slotIndex === slotIdx);
           let volt = null;
-          if (inst && Number.isFinite(inst.voltage) && inst.voltage > 0) {
-            volt = inst.voltage;
-          } else if (b.key === "BATT_MONITOR" && typeof window.battery_voltage === "number" && window.battery_voltage > 0) {
-            volt = window.battery_voltage;
+          let hasTelem = false;
+          if (view && view.connected && Number.isFinite(view.voltage) && view.voltage > 0) {
+            volt = view.voltage;
+            hasTelem = true;
           }
           const proto = esc(b.protocol || b.short || "BATT");
           const bus = b.busHint ? esc(b.busHint) : "";
           const mid = bus ? `${proto} ${bus}` : proto;
           const voltStr = volt != null ? ` · ${volt.toFixed(2)} V` : "";
-          const body = `${mid}${voltStr}`;
-          const hasTelem = volt != null;
+          const waitStr = !hasTelem && Math.round(b.type) === 8 ? " · 未检测到 BMS" : "";
+          const body = `${mid}${voltStr}${waitStr}`;
           const status = healthSuffix(hasTelem ? volt > 0 : null, hasTelem);
           const tip = `${b.key}=${b.type} · ${b.zh || ""}`;
           return `<li title="${escAttr(tip)}"><strong>${esc(b.prefix)}</strong> — ${body} ${status}</li>`;
@@ -257,17 +259,26 @@
     }
 
     if (mounted.gnss.length) {
-      const fix = window.gps_fix_type;
+      const gpsState = typeof window.resolveGpsFixDisplay === "function"
+        ? window.resolveGpsFixDisplay()
+        : { fix: Number(window.gps_fix_type) || 0, mode: "live" };
+      const fix = gpsState.fix;
       const lis = mounted.gnss
         .map((g) => {
           const body = `${esc(g.short)} ${esc(g.bus || "—")} · ${esc(g.zh)}`;
           let status;
-          if (typeof fix === "number" && fix >= 3) {
+          if (gpsState.mode === "waiting") {
+            status = '<span class="ov-sensor-health warn">等待 GPS 数据</span>';
+          } else if (gpsState.mode === "inferred") {
+            status = '<span class="ov-sensor-health warn">融合定位</span>';
+          } else if (typeof fix === "number" && fix >= 3) {
             status = '<span class="ov-sensor-health ok">定位正常</span>';
           } else if (typeof fix === "number" && fix >= 2) {
-            status = '<span class="ov-sensor-health warn">定位中</span>';
+            status = '<span class="ov-sensor-health warn">2D 定位</span>';
+          } else if (typeof fix === "number" && fix === 1) {
+            status = '<span class="ov-sensor-health warn">未定位 / 搜星</span>';
           } else {
-            status = '<span class="ov-sensor-health muted">待定位</span>';
+            status = '<span class="ov-sensor-health muted">无 GPS</span>';
           }
           return `<li title="${escAttr(g.key)}"><strong>${esc(g.label)}</strong> — ${body} ${status}</li>`;
         })

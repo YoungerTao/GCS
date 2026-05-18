@@ -22,6 +22,7 @@
   const MESSAGE_INTERVALS_AP4 = [
     { id: 30, hz: 10, name: "ATTITUDE" },
     { id: 33, hz: 5, name: "GLOBAL_POSITION_INT" },
+    { id: 24, hz: 2, name: "GPS_RAW_INT" },
     { id: 74, hz: 4, name: "VFR_HUD" },
     { id: 1, hz: 2, name: "SYS_STATUS" },
     { id: 65, hz: 2, name: "RC_CHANNELS" },

@@ -55,6 +55,105 @@ function getFlightModeString(custom_mode) {
 }
 window.getFlightModeString = getFlightModeString;
 
+const GPS_FIX_LABELS = {
+  0: "无 GPS",
+  1: "未定位",
+  2: "2D定位",
+  3: "3D定位",
+  4: "DGPS",
+  5: "RTK Float",
+  6: "RTK Fixed",
+};
+
+function hasFreshGlobalPosition() {
+  const lastGpos = Number(window._lastGposMs) || 0;
+  if (!lastGpos || Date.now() - lastGpos > 6000) return false;
+  const lat = Number(window.lat);
+  const lon = Number(window.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  if (Math.abs(lat) < 1e-5 && Math.abs(lon) < 1e-5) return false;
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+}
+
+/** 综合 fix_type、卫星数、GPS 消息是否新鲜、GLOBAL_POSITION 兜底 */
+function resolveGpsFixDisplay() {
+  let fix = Number(window.gps_fix_type);
+  if (!Number.isFinite(fix)) fix = 0;
+
+  let sats = Number(window.gps_satellites_visible);
+  if (!Number.isFinite(sats)) sats = 0;
+
+  const lastGps = Number(window._lastGpsRawMs) || 0;
+  const gpsFresh = lastGps > 0 && Date.now() - lastGps <= 6000;
+
+  // 有卫星但 fix=0：模块在，视为搜星中（非「无 GPS」）
+  if (fix === 0 && sats > 0) fix = 1;
+
+  if (!gpsFresh) {
+    if (hasFreshGlobalPosition() && fix < 2) {
+      return { fix, sats, mode: "inferred" };
+    }
+    if (lastGps === 0 && fix < 2) {
+      return { fix, sats, mode: "waiting" };
+    }
+    if (fix < 2) {
+      return { fix, sats, mode: "stale" };
+    }
+  }
+
+  return { fix, sats, mode: "live" };
+}
+window.resolveGpsFixDisplay = resolveGpsFixDisplay;
+
+/** HUD 用 GPS 定位文案（与 Mission Planner 习惯一致） */
+function formatGpsFixHudLabel() {
+  const { fix, sats, mode } = resolveGpsFixDisplay();
+
+  const satSuffix = sats > 0 ? ` (${sats}星)` : "";
+
+  if (mode === "waiting") return "GPS: 等待数据";
+  if (mode === "stale" && fix < 2) return `GPS: 信号中断${satSuffix}`;
+  if (mode === "inferred") return "GPS: 融合定位";
+
+  if (fix === 0) return "GPS: 无";
+  if (fix === 1) return `GPS: 未定位${satSuffix}`;
+
+  const base = GPS_FIX_LABELS[fix] || `Fix${fix}`;
+  return satSuffix ? `GPS: ${base}${satSuffix}` : `GPS: ${base}`;
+}
+window.formatGpsFixHudLabel = formatGpsFixHudLabel;
+
+/** HUD 右下角紧凑文案（避免 28px 长串中文超出 800px 画布） */
+function formatGpsFixHudLabelCompact() {
+  const { fix, sats, mode } = resolveGpsFixDisplay();
+  const sat = sats > 0 ? `·${sats}` : "";
+
+  if (mode === "waiting") return "GPS 等待";
+  if (mode === "stale" && fix < 2) return `GPS 中断${sat}`;
+  if (mode === "inferred") return "GPS EKF";
+
+  if (fix === 0) return "GPS 无";
+  if (fix === 1) return `GPS 搜星${sat}`;
+
+  const short = { 2: "2D", 3: "3D", 4: "DGPS", 5: "RTK-F", 6: "RTK" };
+  const base = short[fix] || `F${fix}`;
+  return `GPS ${base}${sat}`;
+}
+window.formatGpsFixHudLabelCompact = formatGpsFixHudLabelCompact;
+
+/**
+ * @returns {'danger'|'warning'|'normal'}
+ */
+function getGpsFixHudSeverity() {
+  const { fix, mode } = resolveGpsFixDisplay();
+  if (mode === "waiting" || mode === "stale" || mode === "inferred") return "warning";
+  if (fix === 0) return "danger";
+  if (fix === 1) return "warning";
+  if (fix === 2) return "warning";
+  return "normal";
+}
+window.getGpsFixHudSeverity = getGpsFixHudSeverity;
+
 /** 把常用的已解析变量同步到 window.telemetry */
 function syncToTelemetry() {
   try {
@@ -94,7 +193,7 @@ function syncToTelemetry() {
     }
 
     // 补充 window 上存在的常见变量
-    ['lat', 'lon', 'gps_fix_type', 'wp_current', 'vibe_status', 'ekf_status'].forEach(k => {
+    ['lat', 'lon', 'gps_fix_type', 'gps_satellites_visible', 'wp_current', 'vibe_status', 'ekf_status'].forEach(k => {
       if (typeof window[k] !== 'undefined' && typeof t[k] === 'undefined') t[k] = window[k];
     });
   } catch (e) {

@@ -755,8 +755,20 @@
     return "—";
   }
 
+  /**
+   * @param {number} frameClass
+   * @returns {ReturnType<typeof buildMap>[]}
+   */
+  function getMotorMapsForClass(frameClass) {
+    const fc = Math.round(Number(frameClass));
+    return Object.values(MOTOR_MAPS)
+      .filter((m) => m.frameClass === fc)
+      .sort((a, b) => a.frameType - b.frameType || a.name.localeCompare(b.name));
+  }
+
   window.MOTOR_MAPS = MOTOR_MAPS;
   window.getMotorMapByFrame = getMotorMapByFrame;
+  window.getMotorMapsForClass = getMotorMapsForClass;
   window.motorMapPositionLabelZh = positionLabelZh;
   window.motorMapLayerLabelZh = layerLabelZh;
 }());

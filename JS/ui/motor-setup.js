@@ -126,6 +126,8 @@
   }
 
   function computeFrameMismatch() {
+    // FRAME_CLASS / FRAME_TYPE 为权威；STATUSTEXT「Frame:」启动横幅可能与当前参数不同步
+    if (hasBothFrameParams()) return "";
     if (!state.frameFromStatustext || state.frameClass == null) return "";
     const h = state.frameFromStatustext;
     if (h.frameClass !== state.frameClass || h.frameType !== state.frameType) {
@@ -970,6 +972,9 @@
   function refreshLayoutIfChanged() {
     if (!isSerialConnected()) {
       state.didMotorTopoPaint = false;
+      state.frameFromStatustext = null;
+    } else if (hasBothFrameParams()) {
+      state.frameFromStatustext = null;
     }
 
     requestAirframeParamsIfNeeded();
@@ -1062,6 +1067,7 @@
   }
 
   function onFrameStatustext(ev) {
+    if (hasBothFrameParams()) return;
     const text = ev && ev.detail ? ev.detail.text : "";
     const hint = parseStatustextFrameHint(text);
     if (hint) state.frameFromStatustext = hint;

@@ -60,14 +60,41 @@ function setComPlaceholder(comSelect, text) {
   comSelect.appendChild(option);
 }
 
+function isLikelyEmbeddedPreviewBrowser() {
+  const ua = String(navigator.userAgent || "");
+  return /Cursor/i.test(ua) || /Electron/i.test(ua) || /VSCode/i.test(ua);
+}
+
+function setConnectSerialHint(text) {
+  const btn = document.getElementById("connectBtn");
+  if (btn) btn.title = text || "";
+}
+
 /** 刷新可用串口列表 */
 async function refreshPorts(opts = {}) {
   const probeBridge = opts.probeBridge !== false;
   if (!("serial" in navigator)) {
     const comSelect = document.getElementById("comPort");
     comSelect.innerHTML = "";
-    setComPlaceholder(comSelect, "-- 当前浏览器不支持串口(Web Serial) --");
-    if (typeof log === "function") log("❌ 当前浏览器不支持 Web Serial，请使用 Chrome/Edge（桌面版）");
+    const embedded = isLikelyEmbeddedPreviewBrowser();
+    setComPlaceholder(
+      comSelect,
+      embedded
+        ? "-- 内置预览不支持串口，请用 Chrome/Edge 打开 --"
+        : "-- 当前浏览器不支持串口(Web Serial) --"
+    );
+    setConnectSerialHint(
+      embedded
+        ? "Cursor 内置浏览器通常无法访问 USB 串口。请在本机 Chrome 或 Edge 中打开 http://127.0.0.1:8080"
+        : "请使用 Chrome/Edge 桌面版，并通过 http://localhost 打开页面"
+    );
+    if (typeof log === "function") {
+      log(
+        embedded
+          ? "❌ 内置预览浏览器不支持 Web Serial。请用 Chrome/Edge 打开本地面站（如 http://127.0.0.1:8080）"
+          : "❌ 当前浏览器不支持 Web Serial，请使用 Chrome/Edge（桌面版）"
+      );
+    }
     return;
   }
 
@@ -142,16 +169,20 @@ async function refreshPorts(opts = {}) {
   }
 
   if (ports.length === 0) {
-    setComPlaceholder(comSelect, "-- 尚未授权，请选下方或点「连接串口」--");
+    comSelect.innerHTML = "";
     const addOptEmpty = document.createElement("option");
     addOptEmpty.value = "__add__";
-    addOptEmpty.text = "＋ 选择串口设备（首次连接）…";
+    addOptEmpty.text = "＋ 选择飞控 USB 串口（首次连接）…";
     comSelect.appendChild(addOptEmpty);
+    comSelect.value = "__add__";
+    setConnectSerialHint("首次连接：点击「连接串口」，在浏览器弹窗中选择飞控 USB 口");
     if (typeof log === "function") {
-      log("⚠️ 尚未授权串口：点「连接串口」或在下拉选「选择串口设备」，在浏览器弹窗中选飞控 USB 口");
+      log("ℹ️ 尚未授权串口：直接点右侧「连接串口」，在弹窗中选择飞控 USB 口即可");
     }
     return;
   }
+
+  setConnectSerialHint("");
 
   ports.forEach((port, index) => {
     const option = document.createElement("option");
