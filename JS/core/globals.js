@@ -7,9 +7,11 @@ window.buf = [];
 // 全局 telemetry 容器：确保其他模块可以统一读取
 window.telemetry = window.telemetry || {};
 
-// 飞控目标（从下行帧里更新）；勿用作本地面站发出的 MAVLink 帧头 sysid
+// 飞控目标（仅从 HEARTBEAT 更新）；勿用作本地面站发出的 MAVLink 帧头 sysid
 window.sysid = 1;
 window.compid = 1;
+window.fcSysid = 1;
+window.fcCompid = 1;
 // 与 Mission Planner 一致：地面站自身 MAVLink system id 用 255，避免与飞控(常为1)冲突
 window.gcsSysId = 255;
 
@@ -64,6 +66,8 @@ window.powerInstances = window.powerInstances || new Map();
 window._lastLogByKey = {};
 // 用于存储上次重要数值（如电池电压）以便阈值判断
 window._lastValues = {};
+window._logEntryCount = 0;
+window._logMaxEntries = 240;
 
 function log(s, key = null) {
   try {
@@ -87,7 +91,19 @@ function log(s, key = null) {
     if (window._lastLogByKey[dedupeKey] === s) return;
     window._lastLogByKey[dedupeKey] = s;
 
-    el.innerHTML += s + "<br>";
+    const line = document.createElement("div");
+    line.className = "gcs-log-line";
+    line.textContent = s;
+    el.appendChild(line);
+    window._logEntryCount += 1;
+    const maxEntries =
+      Number.isFinite(window._logMaxEntries) && window._logMaxEntries > 20
+        ? window._logMaxEntries
+        : 240;
+    while (window._logEntryCount > maxEntries && el.firstChild) {
+      el.removeChild(el.firstChild);
+      window._logEntryCount -= 1;
+    }
     el.scrollTop = el.scrollHeight;
   } catch (e) {
     console.error('log error', e);

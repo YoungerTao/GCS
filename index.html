@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>GCS HUD + MAP + PARAM</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Montserrat:wght@500;600;700&display=swap" rel="stylesheet">
@@ -865,15 +866,23 @@
 <script src="JS/core/ardupilot-board-types.js" defer></script>
 <script src="JS/core/ardupilot-devid.js" defer></script>
 <script src="JS/ui/status-messages.js" defer></script>
-<script src="JS/core/mavlink.js" defer></script>
+<script src="JS/core/mavlink-crc-ardupilot.js?v=20260517d" defer></script>
+<script src="JS/core/mavlink.js?v=20260517e" defer></script>
+<script src="JS/core/gcs-mission-debug.js?v=20260517e" defer></script>
 <script src="JS/services/serial.js" defer></script>
 <script src="JS/ui/overview-sensors.js" defer></script>
 <script src="JS/ui/hud-map-tabs.js" defer></script>
 <script src="JS/mission/mission-model.js" defer></script>
+<script src="JS/mission/ardupilot-mission-compat.js" defer></script>
+<script src="JS/core/mavlink-mission-pack.js?v=20260517e" defer></script>
+<script src="JS/mission/fixed-wing-params.js" defer></script>
+<script src="JS/mission/survey-planner.js" defer></script>
+<script src="JS/mission/mission-composer.js" defer></script>
+<script src="JS/mission/mission-validator.js" defer></script>
 <script src="JS/mission/flight-plan-draft.js" defer></script>
 <script src="JS/mission/vehicle-templates.js" defer></script>
 <script src="JS/mission/waypoint-file.js" defer></script>
-<script src="JS/mission/mavlink-mission.js" defer></script>
+<script src="JS/mission/mavlink-mission.js?v=20260517e" defer></script>
 <script src="JS/ui/flight-plan-editor.js" defer></script>
 <script src="JS/ui/quick-grid.js" defer></script>
 <script src="JS/ui/splitter.js" defer></script>
@@ -882,7 +891,7 @@
 <script src="JS/ui/motor-maps.js" defer></script>
 <script src="JS/ui/motor-setup.js" defer></script>
 <script src="JS/ui/power-setup.js" defer></script>
-<script src="https://unpkg.com/three@0.160.0/build/three.min.js" defer></script>
+<script src="https://unpkg.com/three@0.149.0/build/three.min.js" defer></script>
 <script src="JS/ui/accel-calib-three.js" defer></script>
 <script src="JS/ui/accel-calibration.js" defer></script>
 <script src="JS/ui/compass-calibration.js" defer></script>

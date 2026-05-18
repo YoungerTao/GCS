@@ -14,11 +14,14 @@
     const p4 = Number(wp.param4) || 0;
     const lat = Number(wp.lat) || 0;
     const lng = Number(wp.lng) || 0;
-    const alt = Number(wp.alt) || 0;
+    const alt = Number(wp.alt) != null && Number.isFinite(Number(wp.alt)) ? Number(wp.alt) : 0;
     const cmd = Number(wp.command) || MM.MAV_CMD.NAV_WAYPOINT;
+    const AP = window.ArdupilotMissionCompat;
+    const isHome = AP && AP.isHomeRow && AP.isHomeRow(wp, seq);
+    const current = isHome || seq === 0 ? 1 : 0;
     return [
       seq,
-      0,
+      current,
       frame,
       cmd,
       p1,
@@ -32,9 +35,17 @@
     ].join("\t");
   }
 
-  function serializeWaypointFile(waypoints) {
+  function serializeWaypointFile(waypoints, platform) {
     const lines = [WPL_VERSION];
-    const list = MM.renumberWaypoints(waypoints || []);
+    let list = waypoints || [];
+    const FWP = window.FixedWingParams;
+    if (FWP && FWP.normalizeWaypointsForPlatform && platform) {
+      list = FWP.normalizeWaypointsForPlatform(list, platform);
+    }
+    list = MM.renumberWaypoints(list);
+    if (window.ArdupilotMissionCompat && window.ArdupilotMissionCompat.expandWithHomeRow) {
+      list = window.ArdupilotMissionCompat.expandWithHomeRow(list);
+    }
     list.forEach(function (wp, index) {
       lines.push(commandToRow(wp, index));
     });
@@ -61,6 +72,10 @@
         continue;
       }
       const cmd = Number(parts[3]);
+      const isCameraCmd =
+        cmd === MM.MAV_CMD.DO_SET_CAM_TRIGG_DIST ||
+        cmd === MM.MAV_CMD.IMAGE_START_CAPTURE ||
+        cmd === MM.MAV_CMD.IMAGE_STOP_CAPTURE;
       waypoints.push(
         MM.createWaypoint({
           seq: waypoints.length,
@@ -73,16 +88,24 @@
           lat: Number(parts[8]) || 0,
           lng: Number(parts[9]) || 0,
           alt: Number(parts[10]) || 0,
-          label: MM.getCommandLabel(cmd),
-          source: "file"
+          label: isCameraCmd
+            ? Number(parts[4]) > 0
+              ? "开始拍照"
+              : "停止拍照"
+            : MM.getCommandLabel(cmd),
+          source: isCameraCmd ? "camera" : "file",
+          mapVisible: !isCameraCmd
         })
       );
+    }
+    if (window.ArdupilotMissionCompat && window.ArdupilotMissionCompat.stripHomeRowForEditor) {
+      return window.ArdupilotMissionCompat.stripHomeRowForEditor(waypoints);
     }
     return MM.renumberWaypoints(waypoints);
   }
 
-  function downloadWaypointFile(waypoints, filename) {
-    const text = serializeWaypointFile(waypoints);
+  function downloadWaypointFile(waypoints, filename, platform) {
+    const text = serializeWaypointFile(waypoints, platform);
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

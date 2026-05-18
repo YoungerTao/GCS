@@ -1,5 +1,6 @@
 (function () {
   const MM = window.MissionModel;
+  const FWP = window.FixedWingParams;
   if (!MM) {
     return;
   }
@@ -11,6 +12,8 @@
   ];
 
   const LOITER_DISTANCE_THRESHOLD_M = 200;
+  const BOOTSTRAP_LEG_DISTANCE_M = 220;
+  const BOOTSTRAP_BEARING_DEG = 0;
   const GRADE_WARN_DEG = 20;
 
   function getFrameParamKeys() {
@@ -95,10 +98,26 @@
     return gradeDegrees(wp1, wp2) > GRADE_WARN_DEG ? "#f44336" : "#f0c24f";
   }
 
+  function bearingBetween(a, b) {
+    const lat1 = (a.lat * Math.PI) / 180;
+    const lat2 = (b.lat * Math.PI) / 180;
+    const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x =
+      Math.cos(lat1) * Math.sin(lat2) -
+      Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    return (Math.atan2(y, x) * 180) / Math.PI;
+  }
+
+  function loiterPositionAfterGuide(takeoff, guide) {
+    const bearing = bearingBetween(takeoff, guide);
+    return offsetLatLngMeters(guide, bearing, BOOTSTRAP_LEG_DISTANCE_M);
+  }
+
   function buildBootstrapWaypoints(platform, origin, connected) {
     const takeoff = Object.assign({}, origin);
     const locked = Boolean(connected);
-    const list = [];
+    let list = [];
 
     if (platform === "multirotor") {
       list.push(
@@ -143,52 +162,140 @@
           command: MM.MAV_CMD.NAV_VTOL_TAKEOFF,
           param7: 40,
           locked: locked,
-          label: "垂起起飞",
+          label: "垂直起飞",
           source: "template"
         })
       );
     } else {
+      const guide1Alt = 50;
       list.push(
-        MM.createWaypoint({
-          lng: takeoff.lng,
-          lat: takeoff.lat,
-          alt: 0,
-          command: MM.MAV_CMD.NAV_TAKEOFF,
-          param7: 0,
-          locked: locked,
-          label: "起飞",
-          source: "template"
-        })
+        FWP
+          ? FWP.createPlaneTakeoffWaypoint(
+              {
+                lng: takeoff.lng,
+                lat: takeoff.lat,
+                locked: locked,
+                source: "template"
+              },
+              guide1Alt
+            )
+          : MM.createWaypoint({
+              lng: takeoff.lng,
+              lat: takeoff.lat,
+              alt: guide1Alt,
+              command: MM.MAV_CMD.NAV_TAKEOFF,
+              locked: locked,
+              label: "起飞",
+              source: "template"
+            })
       );
     }
 
-    const guide = offsetLatLngMeters(takeoff, 0, 150);
+    const leg = BOOTSTRAP_LEG_DISTANCE_M;
+    const guide1 = offsetLatLngMeters(takeoff, BOOTSTRAP_BEARING_DEG, leg);
+    const guide1Alt = platform === "vtol" ? Number(list[0].alt) || 40 : 50;
     list.push(
       MM.createWaypoint({
-        lng: guide.lng,
-        lat: guide.lat,
-        alt: 50,
-        label: "起飞引导",
+        lng: guide1.lng,
+        lat: guide1.lat,
+        alt: guide1Alt,
+        label: "引导",
         source: "template"
       })
     );
 
-    const withLoiter = maybeInsertLoiter(list, platform === "vtol" ? 40 : 0);
-    const cruise = offsetLatLngMeters(
-      withLoiter[withLoiter.length - 1],
-      45,
-      120
+    const loiterPt = offsetLatLngMeters(guide1, BOOTSTRAP_BEARING_DEG, leg);
+    const loiterAlt = 300;
+    list.push(
+      FWP
+        ? FWP.createPlaneLoiterToAltWaypoint(
+            {
+              lng: loiterPt.lng,
+              lat: loiterPt.lat,
+              source: "template"
+            },
+            FWP.signedLoiterRadiusMeters(FWP.FW_BOOTSTRAP_LOITER_RADIUS_M, true),
+            loiterAlt
+          )
+        : MM.createWaypoint({
+            lng: loiterPt.lng,
+            lat: loiterPt.lat,
+            alt: loiterAlt,
+            command: MM.MAV_CMD.NAV_LOITER_TO_ALT,
+            label: "盘旋",
+            source: "template"
+          })
     );
-    withLoiter.push(
+
+    const guide2 = offsetLatLngMeters(loiterPt, BOOTSTRAP_BEARING_DEG, leg);
+    list.push(
       MM.createWaypoint({
-        lng: cruise.lng,
-        lat: cruise.lat,
+        lng: guide2.lng,
+        lat: guide2.lat,
         alt: 300,
-        label: "巡航航点",
+        label: "引导",
         source: "template"
       })
     );
-    return MM.renumberWaypoints(withLoiter);
+
+    if (platform === "vtol") {
+      const vtolAlt = Number(list[0].alt) || 40;
+      list[1] = Object.assign({}, list[1], { alt: vtolAlt });
+    }
+
+    const normalized = FWP && FWP.normalizeWaypointsForPlatform
+      ? FWP.normalizeWaypointsForPlatform(list, platform)
+      : list;
+    return MM.renumberWaypoints(normalized);
+  }
+
+  function insertTemplateLoiter(waypoints, vtolTakeoffAlt) {
+    const list = waypoints.slice();
+    if (list.length < 2) {
+      return list;
+    }
+    if (
+      list.some(function (wp) {
+        return wp.label === "盘旋" && wp.source === "template";
+      })
+    ) {
+      return list;
+    }
+    const wp1 = list[0];
+    const wp2 = list[1];
+    const loiterPos = loiterPositionAfterGuide(wp1, wp2);
+    const gradeBaseAlt =
+      wp1.command === MM.MAV_CMD.NAV_VTOL_TAKEOFF
+        ? Number(vtolTakeoffAlt) || Number(wp1.alt) || 40
+        : Number(wp2.alt) || 50;
+    list.splice(
+      2,
+      0,
+      FWP
+        ? FWP.createPlaneLoiterToAltWaypoint(
+            {
+              lng: loiterPos.lng,
+              lat: loiterPos.lat,
+              source: "template"
+            },
+            FWP.signedLoiterRadiusMeters(FWP.FW_BOOTSTRAP_LOITER_RADIUS_M, true),
+            300
+          )
+        : MM.createWaypoint({
+            lng: loiterPos.lng,
+            lat: loiterPos.lat,
+            alt: 300,
+            command: MM.MAV_CMD.NAV_LOITER_TO_ALT,
+            label: "盘旋",
+            source: "template"
+          })
+    );
+    if (wp1.command === MM.MAV_CMD.NAV_VTOL_TAKEOFF) {
+      list[1] = Object.assign({}, list[1], {
+        alt: gradeBaseAlt
+      });
+    }
+    return list;
   }
 
   function maybeInsertLoiter(waypoints, vtolTakeoffAlt) {
@@ -202,38 +309,18 @@
     if (dist <= LOITER_DISTANCE_THRESHOLD_M) {
       return list;
     }
-    const loiterPos = Object.assign({}, wp2);
-    const gradeBaseAlt =
-      wp1.command === MM.MAV_CMD.NAV_VTOL_TAKEOFF
-        ? Number(vtolTakeoffAlt) || Number(wp1.alt) || 40
-        : Number(wp2.alt) || 50;
-    list.splice(
-      2,
-      0,
-      MM.createWaypoint({
-        lng: loiterPos.lng,
-        lat: loiterPos.lat,
-        alt: 300,
-        command: MM.MAV_CMD.NAV_LOITER_TO_ALT,
-        param1: 0,
-        param2: 0,
-        param3: -120,
-        param4: 0,
-        label: "盘旋",
-        source: "template"
-      })
-    );
-    if (wp1.command === MM.MAV_CMD.NAV_VTOL_TAKEOFF) {
-      list[1] = Object.assign({}, list[1], {
-        alt: gradeBaseAlt
-      });
-    }
-    return list;
+    return insertTemplateLoiter(list, vtolTakeoffAlt);
   }
 
   function refreshLoiterForMission(waypoints, platform) {
     const base = waypoints.filter(function (wp) {
-      return wp.command !== MM.MAV_CMD.NAV_LOITER_TO_ALT || wp.source !== "template";
+      if (wp.command === MM.MAV_CMD.NAV_LOITER_TO_ALT && wp.source === "template") {
+        return false;
+      }
+      if (wp.command === MM.MAV_CMD.DO_VTOL_TRANSITION) {
+        return false;
+      }
+      return true;
     });
     if (platform === "multirotor" || base.length < 2) {
       return MM.renumberWaypoints(base);
@@ -244,26 +331,89 @@
     if (dist <= LOITER_DISTANCE_THRESHOLD_M) {
       return MM.renumberWaypoints(base);
     }
-    const vtolAlt = platform === "vtol" ? Number(wp1.alt) || 40 : 0;
+    const loiterPos = loiterPositionAfterGuide(wp1, wp2);
     const rebuilt = base.slice(0, 2);
     rebuilt.push(
-      MM.createWaypoint({
-        lng: wp2.lng,
-        lat: wp2.lat,
-        alt: 300,
-        command: MM.MAV_CMD.NAV_LOITER_TO_ALT,
-        param3: -120,
-        label: "盘旋",
-        source: "template"
-      })
+      FWP
+        ? FWP.createPlaneLoiterToAltWaypoint(
+            {
+              lng: loiterPos.lng,
+              lat: loiterPos.lat,
+              source: "template"
+            },
+            FWP.signedLoiterRadiusMeters(FWP.FW_BOOTSTRAP_LOITER_RADIUS_M, true),
+            300
+          )
+        : MM.createWaypoint({
+            lng: loiterPos.lng,
+            lat: loiterPos.lat,
+            alt: 300,
+            command: MM.MAV_CMD.NAV_LOITER_TO_ALT,
+            label: "盘旋",
+            source: "template"
+          })
     );
-    for (let i = 2; i < base.length; i++) {
+    const legBearing = bearingBetween(wp1, wp2);
+    let guide2Aligned = false;
+    for (let i = 2; i < base.length; i += 1) {
       if (base[i].source === "template" && base[i].label === "盘旋") {
+        continue;
+      }
+      if (
+        !guide2Aligned &&
+        base[i].source === "template" &&
+        base[i].label === "引导"
+      ) {
+        const g2Pos = offsetLatLngMeters(loiterPos, legBearing, BOOTSTRAP_LEG_DISTANCE_M);
+        rebuilt.push(
+          Object.assign({}, base[i], {
+            lng: g2Pos.lng,
+            lat: g2Pos.lat
+          })
+        );
+        guide2Aligned = true;
         continue;
       }
       rebuilt.push(base[i]);
     }
     return MM.renumberWaypoints(rebuilt);
+  }
+
+  function shouldRebuildBootstrapTemplate(waypoints, platform) {
+    if (platform === "multirotor") {
+      return false;
+    }
+    const list = waypoints || [];
+    if (
+      list.some(function (wp) {
+        return wp.source === "survey" || wp.source === "connector";
+      })
+    ) {
+      return false;
+    }
+    const template = list.filter(function (wp) {
+      return wp.source === "template";
+    });
+    if (!template.length) {
+      return false;
+    }
+    if (
+      !template.some(function (wp) {
+        return wp.label === "盘旋";
+      })
+    ) {
+      return true;
+    }
+    const loiter = template.find(function (wp) {
+      return wp.label === "盘旋";
+    });
+    const guide1 = template.find(function (wp) {
+      return wp.label === "引导";
+    });
+    if (loiter && guide1 && horizontalDistanceM(loiter, guide1) < 30) {
+      return true;
+    }
+    return false;
   }
 
   function syncTakeoffFromVehicle(waypoints, connected) {
@@ -284,10 +434,15 @@
   window.VehicleTemplates = {
     PLATFORM_OPTIONS: PLATFORM_OPTIONS,
     LOITER_DISTANCE_THRESHOLD_M: LOITER_DISTANCE_THRESHOLD_M,
+    BOOTSTRAP_LEG_DISTANCE_M: BOOTSTRAP_LEG_DISTANCE_M,
+    bearingBetween: bearingBetween,
+    loiterPositionAfterGuide: loiterPositionAfterGuide,
+    insertTemplateLoiter: insertTemplateLoiter,
     GRADE_WARN_DEG: GRADE_WARN_DEG,
     detectVehiclePlatform: detectVehiclePlatform,
     buildBootstrapWaypoints: buildBootstrapWaypoints,
     maybeInsertLoiter: maybeInsertLoiter,
+    shouldRebuildBootstrapTemplate: shouldRebuildBootstrapTemplate,
     refreshLoiterForMission: refreshLoiterForMission,
     gradeDegrees: gradeDegrees,
     gradeSegmentColor: gradeSegmentColor,

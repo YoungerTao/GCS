@@ -817,8 +817,10 @@
   let accelThreeApi = null;
   let accelThreeResizeObs = null;
   let accelThreeMissingWarned = false;
+  let accelPanelActive = false;
 
   function ensureAccelThree() {
+    if (!accelPanelActive) return;
     if (accelThreeApi) return;
     if (typeof window.THREE === "undefined" || !window.AccelCalibThree) {
       if (!accelThreeMissingWarned) {
@@ -838,6 +840,21 @@
         accelThreeApi.resize();
       });
       accelThreeResizeObs.observe(obsHost);
+    }
+  }
+
+  function disposeAccelThree() {
+    if (accelThreeResizeObs) {
+      try {
+        accelThreeResizeObs.disconnect();
+      } catch (_) { /* ignore */ }
+      accelThreeResizeObs = null;
+    }
+    if (accelThreeApi) {
+      try {
+        accelThreeApi.dispose();
+      } catch (_) { /* ignore */ }
+      accelThreeApi = null;
     }
   }
 
@@ -1111,6 +1128,10 @@
   }
 
   function accelSimTick() {
+    if (!accelPanelActive) {
+      accel.raf = 0;
+      return;
+    }
     const now = performance.now();
     const dt = accel.lastSimT ? Math.min(0.05, (now - accel.lastSimT) / 1000) : 1 / 60;
     accel.lastSimT = now;
@@ -1193,8 +1214,29 @@
   }
 
   function startAccelSim() {
+    if (!accelPanelActive) return;
     cancelAnimationFrame(accel.raf);
     accel.raf = requestAnimationFrame(accelSimTick);
+  }
+
+  function stopAccelSim() {
+    cancelAnimationFrame(accel.raf);
+    accel.raf = 0;
+    accel.lastSimT = 0;
+  }
+
+  function setAccelPanelActive(active) {
+    const next = !!active;
+    if (accelPanelActive === next) return;
+    accelPanelActive = next;
+    if (next) {
+      ensureAccelThree();
+      startAccelSim();
+      updateAccelLiveLabel();
+      return;
+    }
+    stopAccelSim();
+    disposeAccelThree();
   }
 
   function resetAccelUi() {
@@ -1319,8 +1361,6 @@
   function bindAccel() {
     renderFaceList();
     resetAccelUi();
-    ensureAccelThree();
-    startAccelSim();
 
     $("sc-ahrs-apply")?.addEventListener("click", async () => {
       const sel = $("sc-orient-select");
@@ -1508,6 +1548,7 @@
     bindAccel();
     updateAccelLiveLabel();
     window.sensorCalibAccelUpdateLive = updateAccelLiveLabel;
+    window.setAccelCalibrationPanelActive = setAccelPanelActive;
     window.project3DAccel = project3D;
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

@@ -447,17 +447,28 @@ console.log("✅ HUD 绘制已导出为 window.renderHudToCanvas / window.drawHU
 
 // ==================== 地图初始化（新增） ====================
 let mapInstance, mapMarker;
+let mapInfoDiv = null;
+let mapBootstrapped = false;
+let mapInitScheduled = false;
 
 function initMap() {
+  if (mapBootstrapped && mapInstance) {
+    return mapInstance;
+  }
   const mapEl = document.getElementById('map');
+  if (!mapEl) return null;
   if (typeof L === 'undefined') {
     console.error("❌ Leaflet 未加载");
     mapEl.innerHTML = '<div style="color:#f66;padding:40px;text-align:center;font-size:18px;">地图加载失败<br>请检查网络或关闭代理</div>';
-    return;
+    return null;
+  }
+  if (mapInstance) {
+    return mapInstance;
   }
 
   const center = typeof window.getMapCenterLatLng === "function" ? window.getMapCenterLatLng() : [29.59256, 106.22742];
   mapInstance = L.map('map', { zoomControl: true }).setView(center, 11);
+  mapBootstrapped = true;
   // expose for other modules (e.g. splitter resizing)
   window.mapInstance = mapInstance;
   
@@ -486,7 +497,6 @@ function initMap() {
   mapMarker = L.marker(center).addTo(mapInstance);
 
   // 创建一个自定义控件显示经纬度与海拔（左下角）
-  let mapInfoDiv = null;
   const MapInfoControl = L.Control.extend({
     onAdd: function(map) {
       mapInfoDiv = L.DomUtil.create('div', 'map-info');
@@ -511,15 +521,43 @@ function initMap() {
   };
 
   console.log("✅ 地图初始化成功");
+  return mapInstance;
 }
 
-// 启动地图
-initMap();
+function ensureMainMapReady() {
+  if (mapInstance) {
+    return mapInstance;
+  }
+  if (mapInitScheduled) {
+    return null;
+  }
+  mapInitScheduled = true;
+  requestAnimationFrame(() => {
+    mapInitScheduled = false;
+    const inst = initMap();
+    if (inst) {
+      setTimeout(() => {
+        try {
+          inst.invalidateSize();
+          if (typeof window.lat === "number" && typeof window.lon === "number" && window.updateMap) {
+            window.updateMap(window.lat, window.lon);
+          }
+        } catch (_) { /* ignore */ }
+      }, 80);
+    }
+  });
+  return null;
+}
+
+window.ensureMainMapReady = ensureMainMapReady;
 
 // 页面完全加载后强制刷新地图尺寸
 window.addEventListener('load', () => {
   setTimeout(() => {
-    if (mapInstance) mapInstance.invalidateSize();
+    if (window._currentMainView === 'flight-data') {
+      const inst = ensureMainMapReady();
+      if (inst) inst.invalidateSize();
+    }
   }, 800);
 });
 
@@ -560,6 +598,7 @@ function initMainTabs() {
   if (!tabs.length || !views.length) return;
 
   function setMainView(name) {
+    window._currentMainView = name;
     tabs.forEach(t => t.classList.toggle('active', t.dataset.view === name));
     views.forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
 
@@ -568,8 +607,11 @@ function initMainTabs() {
     }));
 
     // 切换回飞行数据页时，刷新地图尺寸避免 Leaflet 拉伸异常
-    if (name === 'flight-data' && window.mapInstance) {
-      setTimeout(() => window.mapInstance.invalidateSize(), 80);
+    if (name === 'flight-data') {
+      const inst = ensureMainMapReady();
+      if (inst) {
+        setTimeout(() => inst.invalidateSize(), 80);
+      }
     }
   }
 

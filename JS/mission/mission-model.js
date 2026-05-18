@@ -1,27 +1,48 @@
 (function () {
   const MAV_FRAME_GLOBAL_RELATIVE_ALT_INT = 6;
 
+  const MAV_FRAME_MISSION = 2;
+
   const MAV_CMD = {
     NAV_WAYPOINT: 16,
     NAV_LOITER_TO_ALT: 31,
     NAV_TAKEOFF: 22,
     NAV_VTOL_TAKEOFF: 84,
-    NAV_RETURN_TO_LAUNCH: 20
+    NAV_VTOL_LAND: 85,
+    NAV_RETURN_TO_LAUNCH: 20,
+    DO_SET_CAM_TRIGG_DIST: 206,
+    IMAGE_START_CAPTURE: 2000,
+    IMAGE_STOP_CAPTURE: 2001,
+    DO_VTOL_TRANSITION: 3000
+  };
+
+  const MAV_VTOL_STATE = {
+    MC: 0,
+    TRANSITION_TO_FW: 1,
+    FW: 2,
+    TRANSITION_TO_MC: 3
   };
 
   const CMD_LABELS = {
     16: "航点",
     31: "盘旋",
     22: "起飞",
-    84: "垂起起飞",
-    20: "返航"
+    84: "垂直起飞",
+    85: "垂起降落",
+    20: "返航",
+    206: "相机间距",
+    2000: "开始拍照",
+    2001: "停止拍照",
+    3000: "模式切换"
   };
 
   const ROLE_MAP_LABELS = {
     22: "起飞",
-    84: "垂起起飞",
+    84: "垂直起飞",
     31: "盘旋",
-    20: "返航"
+    20: "返航",
+    85: "垂起降落",
+    3000: "模式切换"
   };
 
   function round6(n) {
@@ -42,10 +63,17 @@
         param4: 0,
         locked: false,
         label: "",
-        source: "manual"
+        source: "manual",
+        segmentRole: "",
+        pathRole: "",
+        blockId: "",
+        mapVisible: true
       },
       partial || {}
     );
+    if (partial && partial.mapVisible === false) {
+      wp.mapVisible = false;
+    }
     wp.lng = round6(wp.lng);
     wp.lat = round6(wp.lat);
     wp.alt = Number(wp.alt) || 0;
@@ -85,6 +113,98 @@
     });
   }
 
+  function stripConnectorWaypoints(list) {
+    return (list || []).filter(function (wp) {
+      return wp.source !== "connector";
+    });
+  }
+
+  function stripCameraWaypoints(list) {
+    return (list || []).filter(function (wp) {
+      return wp.source !== "camera";
+    });
+  }
+
+  function buildSurveyMapVisibilitySet(waypoints) {
+    const visible = new Set();
+    (waypoints || []).forEach(function (wp, index) {
+      if (wp.source !== "camera") {
+        visible.add(index);
+      }
+    });
+    return visible;
+  }
+
+  function applySurveyMapVisibility(waypoints) {
+    const list = waypoints || [];
+    list.forEach(function (wp) {
+      if (wp.source === "survey") {
+        wp.mapVisible = true;
+      }
+    });
+    return list;
+  }
+
+  function isMapVisibleWaypoint(wp) {
+    return Boolean(wp) && wp.mapVisible !== false && wp.source !== "camera";
+  }
+
+  function createCameraTriggerStart(afterWp, triggerDistanceMeters, blockId) {
+    return createWaypoint({
+      lng: afterWp.lng,
+      lat: afterWp.lat,
+      alt: afterWp.alt,
+      command: MAV_CMD.DO_SET_CAM_TRIGG_DIST,
+      frame: MAV_FRAME_MISSION,
+      param1: Math.max(0.5, Number(triggerDistanceMeters) || 0),
+      param2: 0,
+      param3: 1,
+      source: "camera",
+      segmentRole: "cam-start",
+      blockId: blockId || afterWp.blockId || "",
+      label: "开始拍照",
+      mapVisible: false,
+      listVisible: true,
+      locked: true
+    });
+  }
+
+  function createCameraTriggerStop(afterWp, blockId) {
+    return createWaypoint({
+      lng: afterWp.lng,
+      lat: afterWp.lat,
+      alt: afterWp.alt,
+      command: MAV_CMD.DO_SET_CAM_TRIGG_DIST,
+      frame: MAV_FRAME_MISSION,
+      param1: 0,
+      param2: 0,
+      param3: 0,
+      source: "camera",
+      segmentRole: "cam-stop",
+      blockId: blockId || afterWp.blockId || "",
+      label: "停止拍照",
+      mapVisible: false,
+      listVisible: true,
+      locked: true
+    });
+  }
+
+  function appendSurveyCameraCommands(waypoints, triggerDistanceMeters) {
+    const list = [];
+    (waypoints || []).forEach(function (wp) {
+      list.push(wp);
+      if (wp.source !== "survey") {
+        return;
+      }
+      if (wp.pathRole === "line-start") {
+        list.push(createCameraTriggerStart(wp, triggerDistanceMeters, wp.blockId));
+      } else if (wp.pathRole === "line-end") {
+        list.push(createCameraTriggerStop(wp, wp.blockId));
+      }
+    });
+    return list;
+  }
+
   function stripRtlWaypoints(list) {
     return (list || []).filter(function (wp) {
       return wp.command !== MAV_CMD.NAV_RETURN_TO_LAUNCH;
@@ -93,13 +213,16 @@
 
   function appendRtlWaypoint(list) {
     const base = stripRtlWaypoints(list);
-    const last = base[base.length - 1];
     const rtl = createWaypoint({
-      lng: last ? last.lng : 0,
-      lat: last ? last.lat : 0,
+      lng: 0,
+      lat: 0,
       alt: 0,
       command: MAV_CMD.NAV_RETURN_TO_LAUNCH,
       frame: MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+      param1: 0,
+      param2: 0,
+      param3: 0,
+      param4: 0,
       label: "返航",
       source: "template"
     });
@@ -140,32 +263,41 @@
     return window._gcsConnState === "connected";
   }
 
-  function getTakeoffLatLng() {
-    if (isVehicleConnected()) {
-      const fix = Number(window.gps_fix_type);
-      const lat = window.lat;
-      const lon = window.lon;
-      if (
-        Number.isFinite(fix) &&
-        fix >= 2 &&
-        Number.isFinite(lat) &&
-        Number.isFinite(lon)
-      ) {
-        return { lat: lat, lng: lon };
-      }
-    }
-    if (typeof window.getMapCenterLatLng === "function") {
-      const c = window.getMapCenterLatLng();
-      return { lat: c[0], lng: c[1] };
+  function hasFlightPlanVehiclePosition() {
+    return (
+      isVehicleConnected() &&
+      Number(window.gps_fix_type) >= 2 &&
+      Number.isFinite(window.lat) &&
+      Number.isFinite(window.lon)
+    );
+  }
+
+  /** 飞行计划 Home / 默认中心：已连接且有定位用当前位置，否则用地图默认中点 */
+  function getFlightPlanHomeLatLng() {
+    if (hasFlightPlanVehiclePosition()) {
+      return {
+        lat: window.lat,
+        lng: window.lon,
+        alt: Number(window.altitude) || 30,
+        source: "vehicle"
+      };
     }
     return {
       lat: window.DEFAULT_MAP_LAT || 29.59256,
-      lng: window.DEFAULT_MAP_LON || 106.22742
+      lng: window.DEFAULT_MAP_LON || 106.22742,
+      alt: 30,
+      source: "default"
     };
+  }
+
+  function getTakeoffLatLng() {
+    const home = getFlightPlanHomeLatLng();
+    return { lat: home.lat, lng: home.lng };
   }
 
   window.MissionModel = {
     MAV_CMD: MAV_CMD,
+    MAV_VTOL_STATE: MAV_VTOL_STATE,
     MAV_FRAME_GLOBAL_RELATIVE_ALT_INT: MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
     createWaypoint: createWaypoint,
     getCommandLabel: getCommandLabel,
@@ -173,12 +305,23 @@
     getDisplayTitle: getDisplayTitle,
     renumberWaypoints: renumberWaypoints,
     stripSurveyWaypoints: stripSurveyWaypoints,
+    stripConnectorWaypoints: stripConnectorWaypoints,
+    stripCameraWaypoints: stripCameraWaypoints,
+    isMapVisibleWaypoint: isMapVisibleWaypoint,
+    buildSurveyMapVisibilitySet: buildSurveyMapVisibilitySet,
+    applySurveyMapVisibility: applySurveyMapVisibility,
+    createCameraTriggerStart: createCameraTriggerStart,
+    createCameraTriggerStop: createCameraTriggerStop,
+    appendSurveyCameraCommands: appendSurveyCameraCommands,
+    MAV_FRAME_MISSION: MAV_FRAME_MISSION,
     stripRtlWaypoints: stripRtlWaypoints,
     appendRtlWaypoint: appendRtlWaypoint,
     surveyPointsToWaypoints: surveyPointsToWaypoints,
     mergeSurveyIntoMission: mergeSurveyIntoMission,
     appendSurveyIntoMission: appendSurveyIntoMission,
     isVehicleConnected: isVehicleConnected,
+    hasFlightPlanVehiclePosition: hasFlightPlanVehiclePosition,
+    getFlightPlanHomeLatLng: getFlightPlanHomeLatLng,
     getTakeoffLatLng: getTakeoffLatLng
   };
 })();

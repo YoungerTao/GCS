@@ -3,6 +3,17 @@ window._comOptionMap = window._comOptionMap || new Map();
 window._systemComPorts = window._systemComPorts || [];
 window._pendingParamRequest = false;
 
+function isComBridgeEnabled() {
+  if (window._comBridgeEnabled === true) {
+    return true;
+  }
+  try {
+    return window.localStorage.getItem("gcs.comBridgeEnabled") === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * 释放 Web Serial 读写锁并关闭端口。Windows 上若未关闭就再次 open，会报
  * InvalidStateError / Failed to open serial port（端口仍被占用）。
@@ -24,9 +35,19 @@ async function closeSerialResources() {
     clearTimeout(window._postConnectInfoRetryTimer);
     window._postConnectInfoRetryTimer = null;
   }
+  if (window._serialHealthTimer) {
+    clearInterval(window._serialHealthTimer);
+    window._serialHealthTimer = null;
+  }
+  window._readLoopStopRequested = true;
+  window._readLoopWakeRequested = false;
   if (typeof window.endParamLoadingUI === "function" && window._paramLoadActive) {
     window.endParamLoadingUI(false, "disconnect");
   }
+  if (window.MavlinkMission && window.MavlinkMission.resetMissionSession) {
+    window.MavlinkMission.resetMissionSession();
+  }
+  window._missionUploadActive = false;
 
   const p = window.port;
   const r = typeof reader !== "undefined" ? reader : null;
@@ -71,6 +92,7 @@ async function closeSerialResources() {
       await p.close();
     }
   } catch (_) { /* ignore */ }
+  window._readLoopRunning = false;
   window.port = null;
 }
 
@@ -113,7 +135,62 @@ function setConnectionUI(state) {
   }
 }
 
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function startSerialHealthWatchdog() {
+  if (window._serialHealthTimer) {
+    clearInterval(window._serialHealthTimer);
+    window._serialHealthTimer = null;
+  }
+
+  window._serialHealthTimer = setInterval(async () => {
+    if (window._gcsConnState !== "connected") return;
+    if (!window.port) return;
+
+    if (!window._readLoopRunning && !window._readLoopRestartPending && window.port.readable) {
+      window._readLoopRestartPending = true;
+      try {
+        log("⚠️ 串口读取循环已停，正在自动恢复…", "serial-readloop-restart");
+        readLoop().catch((e) => {
+          log(`⚠️ 读取循环恢复失败: ${e?.message || e}`, "serial-readloop-restart-fail");
+        });
+      } finally {
+        setTimeout(() => {
+          window._readLoopRestartPending = false;
+        }, 1200);
+      }
+    }
+
+    const lastRx = Number(window._lastMavlinkRxMs) || 0;
+    const now = Date.now();
+    const staleMs = lastRx > 0 ? (now - lastRx) : Infinity;
+    if (staleMs < 3500) return;
+    if (window._missionUploadActive) return;
+
+    const lastKick = Number(window._serialHealthLastKickMs) || 0;
+    if (now - lastKick < 1800) return;
+    window._serialHealthLastKickMs = now;
+
+    try {
+      await sendHeartbeat();
+    } catch (_) { /* ignore */ }
+    try {
+      await requestDataStream();
+    } catch (_) { /* ignore */ }
+    try {
+      if (typeof window.scheduleUIUpdate === "function") window.scheduleUIUpdate();
+    } catch (_) { /* ignore */ }
+  }, 3000);
+}
+
 async function fetchSystemComPortsImpl() {
+  if (!isComBridgeEnabled()) {
+    window._comBridgeOnline = null;
+    window._lastFetchedSystemPorts = window._lastFetchedSystemPorts || [];
+    return window._lastFetchedSystemPorts;
+  }
   const now = Date.now();
   if (typeof window._comBridgeBackoffUntil === "number" && now < window._comBridgeBackoffUntil) {
     return Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : [];
@@ -174,7 +251,7 @@ function setComPlaceholder(comSelect, text) {
 // 刷新可用串口列表（基于浏览器已授权端口）
 // probeBridge: 是否请求本地 COM 桥接（8765）。定时轮询应传 false，避免与 serial connect 等事件叠加造成并发 fetch、控制台刷屏。
 async function refreshPorts(opts = {}) {
-  const probeBridge = opts.probeBridge !== false;
+  const probeBridge = opts.probeBridge !== false && isComBridgeEnabled();
   if (!("serial" in navigator)) {
     const comSelect = document.getElementById("comPort");
     comSelect.innerHTML = "";
@@ -256,7 +333,7 @@ async function refreshPorts(opts = {}) {
     return;
   }
 
-  if (window._comBridgeOnline === false && !window._comBridgeOfflineHintLogged) {
+  if (probeBridge && window._comBridgeOnline === false && !window._comBridgeOfflineHintLogged) {
     window._comBridgeOfflineHintLogged = true;
     log("⚠️ COM 桥接未运行（约每 30 秒探测一次）。要显示系统 COM 名请执行: python tools/com-bridge/server.py — 切回此窗口可立即重试");
   }
@@ -276,7 +353,7 @@ async function refreshPorts(opts = {}) {
     window._comOptionMap.set(option.value, { authIndex: index, systemPort: null });
   });
 
-  if (systemPorts.length === 0 && window._comBridgeOnline === false) {
+  if (probeBridge && systemPorts.length === 0 && window._comBridgeOnline === false) {
     const hint = document.createElement("option");
     hint.value = "__bridge_hint__";
     hint.disabled = true;
@@ -337,12 +414,13 @@ async function requestAllPortsInteractive() {
 
 function initSerialAutoRefresh() {
   // 页面加载后先刷新一次
-  window.addEventListener("load", () => refreshPorts({ probeBridge: true }));
+  window.addEventListener("load", () => refreshPorts({ probeBridge: isComBridgeEnabled() }));
 
   // 用户启动桥接后切回浏览器：低频触发一次完整探测（避免 focus 风暴导致连续 ERR_CONNECTION_REFUSED）
   if (!window._comBridgeFocusHooked) {
     window._comBridgeFocusHooked = true;
     window.addEventListener("focus", () => {
+      if (!isComBridgeEnabled()) return;
       const t = Date.now();
       if (window._comBridgeLastFocusProbe && t - window._comBridgeLastFocusProbe < 12000) return;
       window._comBridgeLastFocusProbe = t;
@@ -353,8 +431,8 @@ function initSerialAutoRefresh() {
 
   // 插拔串口设备时自动刷新
   if (navigator.serial && navigator.serial.addEventListener) {
-    navigator.serial.addEventListener("connect", () => refreshPorts({ probeBridge: true }));
-    navigator.serial.addEventListener("disconnect", () => refreshPorts({ probeBridge: true }));
+    navigator.serial.addEventListener("connect", () => refreshPorts({ probeBridge: isComBridgeEnabled() }));
+    navigator.serial.addEventListener("disconnect", () => refreshPorts({ probeBridge: isComBridgeEnabled() }));
   }
 
   // 仅同步浏览器已授权串口；COM 桥接由 load / focus / connect 等显式探测
@@ -363,7 +441,10 @@ function initSerialAutoRefresh() {
 
   // 用户稍后启动 server.py 且未切回窗口时，仍能偶尔刷新系统 COM 列表
   if (window._comBridgeSlowProbeTimer) clearInterval(window._comBridgeSlowProbeTimer);
-  window._comBridgeSlowProbeTimer = setInterval(() => refreshPorts({ probeBridge: true }), 60000);
+  window._comBridgeSlowProbeTimer = setInterval(() => {
+    if (!isComBridgeEnabled()) return;
+    refreshPorts({ probeBridge: true });
+  }, 60000);
 }
 
 initSerialAutoRefresh();
@@ -525,14 +606,17 @@ async function connect() {
     });
 
     window.port = port;
-    reader = port.readable.getReader();
     writer = port.writable.getWriter();
-    window.reader = reader;
+    reader = null;
+    window.reader = null;
     window.writer = writer;
 
     log(`✅ 已连接串口（${baudRate} 8N1）`);
 
     window._readLoopLostWarned = false;
+    window._readLoopStopRequested = false;
+    window._readLoopWakeRequested = false;
+    window._lastMavlinkRxMs = Date.now();
     if (window._heartbeatInterval) clearInterval(window._heartbeatInterval);
     window._heartbeatInterval = setInterval(sendHeartbeat, 1000);
     // MP 连上即发 HEARTBEAT；我们原先要等 setInterval 首帧最多 1s，部分固件会晚响应
@@ -540,8 +624,11 @@ async function connect() {
     setTimeout(() => {
       sendHeartbeat().catch(() => {});
     }, 250);
-    readLoop();
+    readLoop().catch((e) => {
+      log(`⚠️ 读取循环异常退出: ${e?.message || e}`, "serial-readloop-fatal");
+    });
     startTelemetryRequests();
+    startSerialHealthWatchdog();
 
     // 连接后刷新一次下拉框状态，让 [未授权] 变为已授权（如果 VID/PID 匹配成功）
     try { await refreshPorts(); } catch (e) { /* ignore */ }
@@ -554,7 +641,7 @@ async function connect() {
       window._pendingParamRequest = false;
       log("📥 连接成功：开始加载参数表（PARAM_REQUEST_LIST）");
       if (typeof window.beginParamLoadingUI === "function") window.beginParamLoadingUI();
-      setTimeout(() => send_v2(21, [sysid || 1, compid || 1], 159), 300);
+      setTimeout(() => send_v2(21, [sysid || 1, compid ?? 1], 159), 300);
     }
   } catch (e) {
     const name = e?.name || "Error";
@@ -603,7 +690,11 @@ async function send_v2(msgid, payload, crc_extra) {
   crc = crc_accumulate(crc_extra, crc);
 
   pkt.push(crc & 0xff, crc >> 8);
-  await writer.write(new Uint8Array(pkt));
+  const w = window.writer || writer;
+  await w.write(new Uint8Array(pkt));
+  if (w.ready) {
+    await w.ready;
+  }
 
   if (window._MAVLINK_DEBUG_TX) {
     console.log(`[MAVLink TX] msgid=${msgid} srcSys=${srcSys} len=${payload.length}`);
@@ -624,7 +715,7 @@ async function sendCommandLong(
   const ts = targetSystem != null && Number.isFinite(Number(targetSystem)) && Number(targetSystem) > 0
     ? Number(targetSystem) : (window.sysid || 1);
   const tc = targetComponent != null && Number.isFinite(Number(targetComponent))
-    ? Number(targetComponent) : (window.compid || 1);
+    ? Number(targetComponent) : (window.compid ?? 1);
 
   if (window._MAVLINK_DEBUG_TX) {
     console.log(`[DEBUG sendCommandLong] cmd=${command} (PREFLIGHT_CAL=${command === 241}) p5=${p5} ts=${ts} tc=${tc}`);
@@ -722,6 +813,8 @@ async function sendHeartbeat() {
   await send_v2(0, payload, 50);
 }
 
+window.sendHeartbeat = sendHeartbeat;
+
 function f32bytes(v) {
   const buf = new ArrayBuffer(4);
   new DataView(buf).setFloat32(0, v, true);
@@ -763,7 +856,7 @@ window.sendParamSet = async function sendParamSet(name, value) {
   const payload = [
     ...Array.from(new Uint8Array(buf)),
     sysid || 1,
-    compid || 1,
+    compid ?? 1,
     ...bytes,
     9, // MAV_PARAM_TYPE_REAL32
   ];
@@ -803,7 +896,7 @@ async function setDefaultStreamRates() {
 // REQUEST_DATA_STREAM（msg 66）：Mission Planner 式分项请求各 MAV_DATA_STREAM；每 30s 整批重发（见 startTelemetryRequests）。
 async function requestDataStream() {
   const ts = window.sysid || 1;
-  const tc = window.compid || 1;
+  const tc = window.compid ?? 1;
 
   const streams = [
     { sid: 10, hz: 4 },
@@ -828,6 +921,9 @@ function startTelemetryRequests() {
   }
   // 周期重发，30秒一次
   window._telemetryReqTimer = setInterval(async () => {
+    if (window._missionUploadActive) {
+      return;
+    }
     try {
       await requestDataStream();
     } catch (e) {
@@ -835,6 +931,8 @@ function startTelemetryRequests() {
     }
   }, 30000);
 }
+
+window.startTelemetryRequests = startTelemetryRequests;
 
 const PARAM_LOAD_WATCHDOG_MS = 120000;
 
@@ -870,6 +968,9 @@ function wireParamLoadCancelOnce() {
 }
 
 window.beginParamLoadingUI = function beginParamLoadingUI() {
+  if (window._missionUploadActive) {
+    return false;
+  }
   if (window._paramLoadActive) return false;
   wireParamLoadCancelOnce();
 
@@ -949,6 +1050,13 @@ window.endParamLoadingUI = function endParamLoadingUI(ok, reason) {
     try {
       document.dispatchEvent(new CustomEvent("gcs-airframe-params-changed", { detail: { bulk: true } }));
     } catch (_) { /* ignore */ }
+    setTimeout(() => {
+      if (window._gcsConnState !== "connected" || !(window.writer || writer)) return;
+      sendHeartbeat().catch(() => {});
+      requestDataStream().catch((e) => {
+        log(`⚠️ 参数加载完成后补发遥测请求失败: ${e?.message || e}`, "param-load-rekick");
+      });
+    }, 250);
     if (typeof fwOverviewStillPlaceholder === "function" && fwOverviewStillPlaceholder()) {
       setTimeout(() => {
         if (window._gcsConnState === "connected" && (window.writer || writer)) {
@@ -980,7 +1088,7 @@ async function loadParams() {
   window._pendingParamRequest = false;
   try {
     log("发送 PARAM_REQUEST_LIST");
-    setTimeout(() => send_v2(21, [sysid || 1, compid || 1], 159), 300);
+    setTimeout(() => send_v2(21, [sysid || 1, compid ?? 1], 159), 300);
   } catch (e) {
     window.endParamLoadingUI(false, "send-fail");
     window._pendingParamRequest = true;
@@ -989,43 +1097,105 @@ async function loadParams() {
 }
 
 async function readLoop() {
-  while (true) {
-    try {
-      const { value } = await reader.read();
-      if (!value) continue;
-      // 切勿每字节 parse()：大 chunk 下会 O(n²) 卡死主线程（表现为一点连接就页面无响应）
-      for (let i = 0; i < value.length; i++) buf.push(value[i]);
-      parse();
-    } catch (e) {
-      const msg = String(e?.message || e || "");
-      if (e?.name === "AbortError") {
-        try {
-          if (typeof reader !== "undefined" && reader && typeof reader.releaseLock === "function") {
-            reader.releaseLock();
+  if (window._readLoopRunning) {
+    window._readLoopWakeRequested = true;
+    return;
+  }
+
+  window._readLoopRunning = true;
+  window._readLoopStopRequested = false;
+  window._readLoopWakeRequested = false;
+
+  try {
+    while (!window._readLoopStopRequested) {
+      const activePort = window.port;
+      if (!activePort || !activePort.readable) return;
+
+      let localReader = null;
+      try {
+        localReader = activePort.readable.getReader();
+        reader = localReader;
+        window.reader = localReader;
+
+        while (!window._readLoopStopRequested && window.port === activePort) {
+          const { value, done } = await localReader.read();
+          if (done) break;
+          if (!value || !value.length) continue;
+          // 切勿每字节 parse()：大 chunk 下会 O(n²) 卡死主线程（表现为一点连接就页面无响应）
+          const rxBuf = window.buf || (window.buf = []);
+          for (let i = 0; i < value.length; i++) rxBuf.push(value[i]);
+          parse();
+        }
+      } catch (e) {
+        const msg = String(e?.message || e || "");
+        const isAbort = e?.name === "AbortError";
+        const isBreak =
+          e?.name === "BreakError" ||
+          /break received|framing error|parity error|buffer overrun|overflow/i.test(msg);
+        const lost =
+          e?.name === "NetworkError" || /device has been lost|设备丢失/i.test(msg);
+        const canRetry =
+          isBreak ||
+          e?.name === "InvalidStateError" ||
+          /reader.*lock|stream closed|buffer/i.test(msg);
+
+        if (lost) {
+          if (!window._readLoopLostWarned) {
+            window._readLoopLostWarned = true;
+            try {
+              log("⚠️ 串口读取中断（设备已断开），请重新连接。");
+            } catch (_) { /* ignore */ }
           }
-        } catch (_) { /* ignore */ }
-        reader = null;
-        window.reader = null;
-        return;
-      }
-      const lost =
-        e?.name === "NetworkError" || /device has been lost|设备丢失/i.test(msg);
-      if (lost) {
-        if (!window._readLoopLostWarned) {
-          window._readLoopLostWarned = true;
           try {
-            log("⚠️ 串口读取中断（设备已断开），请重新连接。");
+            await closeSerialResources();
+          } catch (_) { /* ignore */ }
+          try {
+            setConnectionUI("error");
+          } catch (_) { /* ignore */ }
+          return;
+        }
+
+        if (isAbort && window._readLoopStopRequested) {
+          return;
+        }
+
+        if (isBreak && !window._readLoopBreakWarned) {
+          window._readLoopBreakWarned = true;
+          try {
+            log("⚠️ 串口 Break/帧错误（已自动重试）", "serial-break-retry");
           } catch (_) { /* ignore */ }
         }
-        try {
-          await closeSerialResources();
-        } catch (_) { /* ignore */ }
-        try {
-          setConnectionUI("error");
-        } catch (_) { /* ignore */ }
-        return;
+
+        if (isAbort || canRetry) {
+          await sleepMs(80);
+          continue;
+        }
+
+        throw e;
+      } finally {
+        if (reader === localReader) {
+          reader = null;
+          window.reader = null;
+        }
+        if (localReader) {
+          try {
+            localReader.releaseLock();
+          } catch (_) { /* ignore */ }
+        }
       }
-      throw e;
+
+      if (!window.port || window.port !== activePort) return;
+      await sleepMs(40);
+    }
+  } finally {
+    window._readLoopRunning = false;
+    if (!window._readLoopStopRequested && window._readLoopWakeRequested && window.port && window.port.readable) {
+      window._readLoopWakeRequested = false;
+      queueMicrotask(() => {
+        readLoop().catch((e) => {
+          log(`⚠️ 读取循环重启失败: ${e?.message || e}`, "serial-readloop-restart-fail");
+        });
+      });
     }
   }
 }

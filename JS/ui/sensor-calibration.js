@@ -33,6 +33,7 @@
       else panel.setAttribute("hidden", "");
     });
 
+    window.setAccelCalibrationPanelActive?.(mod === "accel");
     if (mod === "compass") window.sensorCalibRefreshCompassCanvas?.();
     if (mod === "accel") window.sensorCalibAccelUpdateLive?.();
     if (mod === "compass") window.sensorCalibCompassUpdateLive?.();
@@ -52,8 +53,23 @@
       window.sensorCalibAccelUpdateLive?.();
       window.sensorCalibCompassUpdateLive?.();
     });
+    window.addEventListener("gcs:setup-panel-changed", (ev) => {
+      const panel = ev && ev.detail ? ev.detail.panel : null;
+      if (panel !== "sensors") {
+        window.setAccelCalibrationPanelActive?.(false);
+        return;
+      }
+      const page = document.querySelector("#setup-panel-sensors .sc-page");
+      const activeMod = page?.getAttribute("data-active-module") || "accel";
+      window.setAccelCalibrationPanelActive?.(activeMod === "accel");
+    });
     bindSensorSubtabs();
     setSensorModule("accel");
+    const initialPanelBtn = document.querySelector(".ov-nav-item.active[data-setup-panel]");
+    const initialPanel = initialPanelBtn?.getAttribute("data-setup-panel") || "overview";
+    if (initialPanel !== "sensors") {
+      window.setAccelCalibrationPanelActive?.(false);
+    }
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
