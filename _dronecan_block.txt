@@ -1,0 +1,56 @@
+<div class="ov-panel" id="setup-panel-dronecan">
+        <div class="sc-page cal-tokens">
+          <nav class="sc-breadcrumb" aria-label="DroneCAN 导航">
+            <span>初始设置</span>
+            <span class="sc-bc-sep">›</span>
+            <span>DroneCAN / UAVCAN 总线</span>
+          </nav>
+          <div class="sc-dc-bar sc-card sc-card--bar">
+            <div class="sc-bar-item">CAN1 总线负载: <span id="sc-dc-load" class="sc-mono">24%</span> <span class="sc-pill sc-pill-ok">正常</span></div>
+            <div class="sc-bar-item">侦听包速率: <span id="sc-dc-fps" class="sc-mono">450</span> frames/s</div>
+            <div class="sc-bar-item">故障帧 Err: <span id="sc-dc-err" class="sc-mono">0</span> <span class="sc-pill sc-pill-ok">正常</span></div>
+          </div>
+          <div class="sc-split sc-split-25">
+            <section class="sc-card">
+              <div class="sc-card-head">
+                <h3>在线 CAN 节点拓扑</h3>
+                <button type="button" id="sc-dc-scan" class="sc-btn sc-btn-ghost sc-btn-sm">重新扫描总线</button>
+              </div>
+              <div class="sc-topology-host">
+                <svg id="sc-dc-svg" viewBox="0 0 420 420" class="sc-dc-svg" aria-label="DroneCAN 拓扑"></svg>
+              </div>
+              <p class="sc-prose sc-prose--sm">双击节点打开参数表。红色为离线/故障。</p>
+            </section>
+            <aside class="sc-card sc-card-side">
+              <div class="sc-subcard">
+                <h4 id="sc-dc-node-title">节点详情: —</h4>
+                <dl id="sc-dc-node-meta" class="sc-dl"></dl>
+              </div>
+              <div class="sc-subcard">
+                <h4>DSDL 实时遥测</h4>
+                <div class="sc-table-wrap">
+                  <table class="sc-dsdl-table" id="sc-dsdl-table">
+                    <thead><tr><th>字段</th><th>数值</th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="sc-subcard">
+                <div class="sc-btn-row">
+                  <button type="button" id="sc-dc-write" class="sc-btn sc-btn-primary">Write Params</button>
+                  <button type="button" class="sc-btn sc-btn-ghost">进入固件升级 (OTA)</button>
+                </div>
+                <div id="sc-dc-write-progress" class="sc-progress-wrap hidden">
+                  <div class="sc-progress-label"><span>下发数据包</span><span id="sc-dc-write-pct" class="sc-mono">0%</span></div>
+                  <div class="sc-progress sc-progress--striped sc-progress--rtl">
+                    <div id="sc-dc-write-bar" class="sc-progress-fill sc-progress-fill--green" style="width:0%"></div>
+                    <div class="sc-progress-sheen sc-progress-sheen--rtl"></div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+
+      

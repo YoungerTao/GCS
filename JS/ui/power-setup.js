@@ -35,24 +35,21 @@
     }
 
     const mon = getParamNum("BATT_MONITOR");
-    if (mon === 0 || mon == null) {
-      return [{
-        id: 0,
-        slotIndex: 0,
-        name: "Battery 1",
-        prefix: "BATT",
-        monitorKey: "BATT_MONITOR",
-        monitorType: mon ?? 0,
-        typeShort: "Disabled",
-        typeUi: "disabled",
-        connected: false,
-        voltage: 0,
-        current: 0,
-        cells: 0,
-        cellVoltages: [],
-      }];
-    }
-    return [];
+    return [{
+      id: 0,
+      slotIndex: 0,
+      name: "Battery 1",
+      prefix: "BATT",
+      monitorKey: "BATT_MONITOR",
+      monitorType: mon ?? 0,
+      typeShort: mon === 0 || mon == null ? "Disabled" : "BATT",
+      typeUi: mon === 0 || mon == null ? "disabled" : "monitor",
+      connected: false,
+      voltage: 0,
+      current: 0,
+      cells: 0,
+      cellVoltages: [],
+    }];
   }
 
   function statusOf(inst) {
@@ -92,7 +89,7 @@
 
     const W = 720;
     const nodeW = 140;
-    const nodeH = 32;
+    const nodeH = 26;
     const pdbW = 130;
     const pdbH = 48;
     const margin = 50;
@@ -147,17 +144,13 @@
         const b = mk("rect", {
           x: bx, y: y - nodeH / 2, width: nodeW, height: nodeH, rx: 8,
           fill: colors.fill, stroke: colors.stroke, "stroke-width": 2,
+          class: "topo-batt-rect",
         });
         const nameText = mk("text", {
-          x: cx, y: y - 3, "text-anchor": "middle",
+          x: cx, y: y + 4, "text-anchor": "middle",
           fill: inst.connected ? "#ecf1ff" : "#8b95b0", "font-size": 11,
         });
-        nameText.textContent = inst.name;
-        const idText = mk("text", {
-          x: cx, y: y + 10, "text-anchor": "middle",
-          fill: "#c6d4f5", "font-size": 10, "font-weight": "600",
-        });
-        idText.textContent = `ID ${battId}`;
+        nameText.textContent = `${inst.name}  ID ${battId}`;
         const alive = inst.connected && inst.voltage > 1;
         const lineAttrs = side === "left"
           ? { x1: bx + nodeW, y1: y, x2: pdbX, y2: pdbY }
@@ -170,7 +163,6 @@
         }));
         svg.appendChild(b);
         svg.appendChild(nameText);
-        svg.appendChild(idText);
       });
       lines.forEach((line) => svg.appendChild(line));
     }
@@ -220,6 +212,7 @@
       card.dataset.batteryId = String(inst.id);
       const prefix = inst.prefix || (inst.id === 0 ? "BATT" : `BATT${inst.id + 1}`);
       const monitorParam = `${prefix}_MONITOR`;
+      const serialParamKey = `${prefix}_SERIAL_NUM`;
       const currentMonitorType = Number.isFinite(inst.monitorType) ? Math.round(inst.monitorType) : 0;
       const voltStr = inst.connected ? `${inst.voltage.toFixed(2)}V` : "—";
       const currStr = inst.connected ? `${inst.current.toFixed(2)}A` : "—";
@@ -227,11 +220,22 @@
 
       let cellBars = "";
       if (inst.connected && inst.cellVoltages && inst.cellVoltages.length) {
-        cellBars = `<div class="power-cell-grid">${inst.cellVoltages.map((v, i, arr) => {
+        // 判断是否为估算数据
+        const isEstimated = inst.validation && inst.validation.isEstimated;
+        
+        cellBars = `<div class="power-cell-grid ${isEstimated ? 'power-cell-grid-estimated' : ''}">${inst.cellVoltages.map((v, i, arr) => {
           const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
           const bad = Math.abs(v - avg) > 0.1;
-          return `<div class="power-cell-bar ${bad ? "bad" : ""}" title="Cell${i + 1}: ${v.toFixed(3)}V"></div>`;
+          return `<div class="power-cell-bar ${bad ? "bad" : ""} ${isEstimated ? "power-cell-bar-estimated" : ""}" 
+                    title="Cell${i + 1}: ${v.toFixed(3)}V${isEstimated ? ' (估算)' : ''}">
+                    <span class="power-cell-voltage">${v.toFixed(2)}</span>
+                  </div>`;
         }).join("")}</div>`;
+        
+        // 如果是估算数据，显示标记
+        if (isEstimated) {
+          cellBars += `<div class="power-cell-estimated-tag" title="${inst.validation.reason}">≈ 估算值 (${inst.validation.estimatedCells}S)</div>`;
+        }
       } else if (!inst.connected) {
         const sn = inst.serialNum != null ? ` · CAN ID=${inst.serialNum}` : "";
         const monHint = inst.monitorType === 0 || inst.monitorType == null
@@ -247,7 +251,8 @@
       card.innerHTML = `
         <div class="power-card-head">
           <div class="power-card-title">
-            <strong>🔋 ${inst.name}</strong>
+            <strong> ${inst.name}</strong>
+            <span class="power-card-id">ID ${inst.serialNum != null ? inst.serialNum : '-'}</span>
             <span class="power-status-bar ${st.cls}" title="${st.label}" aria-label="${st.label}"></span>
           </div>
           <span class="power-chip ${st.cls}">${st.label}</span>
@@ -291,6 +296,12 @@
     instances.forEach((inst) => {
       const card = root.querySelector(`.power-card[data-battery-id="${inst.id}"]`);
       if (!card) return;
+
+      // 更新 ID 显示
+      const idDisplay = card.querySelector('.power-card-id');
+      if (idDisplay) {
+        idDisplay.textContent = `ID ${inst.serialNum != null ? inst.serialNum : '-'}`;
+      }
 
       const st = statusOf(inst);
       const chip = card.querySelector(".power-chip");

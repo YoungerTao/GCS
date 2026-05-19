@@ -2107,6 +2107,14 @@ body {
   max-height: 280px;
   display: block;
 }
+#power-topology-svg .topo-batt-rect {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+#power-topology-svg .topo-batt-rect:hover {
+  filter: brightness(1.2) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  stroke-width: 3;
+}
 .power-topology-legend {
   position: relative;
   z-index: 1;
@@ -2210,11 +2218,18 @@ body {
   border: 1px solid rgba(78, 97, 153, 0.45);
   border-radius: 12px;
   background: linear-gradient(165deg, rgba(30, 40, 68, 0.95) 0%, rgba(18, 24, 42, 0.98) 55%);
-  padding: 12px 12px 10px;
+  padding: 8px 12px 6px;
   display: grid;
-  gap: 12px;
+  gap: 4px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.power-card:hover {
+  border-color: rgba(106, 127, 190, 0.85);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(106, 127, 190, 0.3);
+  transform: translateY(-2px);
+  background: linear-gradient(165deg, rgba(35, 48, 78, 0.98) 0%, rgba(22, 28, 50, 1) 55%);
 }
 .power-card::before {
   content: "";
@@ -2229,10 +2244,6 @@ body {
 .power-card.power-card-offline::before { background: #64748b; }
 .power-card:has(.power-chip.warn)::before { background: #f59e0b; }
 .power-card:has(.power-chip.danger)::before { background: #ef4444; }
-.power-card:hover {
-  border-color: rgba(106, 127, 190, 0.7);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
-}
 .power-card.tethered {
   border-color: rgba(245, 158, 11, 0.55);
   background: linear-gradient(165deg, rgba(124, 93, 26, 0.28) 0%, rgba(18, 24, 42, 0.98) 50%);
@@ -2242,15 +2253,31 @@ body {
 .power-card-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 4px;
 }
 .power-card-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
   flex: 1;
+  white-space: nowrap;
+}
+.power-card-title strong {
+  flex-shrink: 0;
+}
+.power-card-id {
+  font-size: 10px;
+  font-weight: 600;
+  color: #93a8d4;
+  background: rgba(106, 127, 190, 0.12);
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  line-height: 1.2;
+  flex-shrink: 0;
 }
 .power-card-head .power-chip {
   flex-shrink: 0;
@@ -2376,14 +2403,17 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 11px;
+  line-height: 1.3;
   color: #a8b4d4;
   min-width: 0;
+  height: 24px;
 }
 .power-kv[hidden] {
   display: none !important;
 }
 .power-kv > span:first-child {
   flex-shrink: 0;
+  white-space: nowrap;
 }
 .power-kv > span:last-child {
   color: #dce2fb;
@@ -2392,26 +2422,39 @@ body {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .power-monitor-select {
   font-size: 11px;
-  padding: 2px 6px;
+  font-weight: 600;
+  padding: 2px 24px 2px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(106, 127, 190, 0.4);
+  border: 1px solid rgba(106, 127, 190, 0.35);
   background: #1a2238;
   color: #e2e8f0;
-  max-width: 160px;
+  max-width: 180px;
   cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: all 0.2s;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23e2e8f0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  height: 24px;
+  line-height: 1.3;
 }
 .power-monitor-select:hover {
-  border-color: #6a7fbe;
+  border-color: rgba(106, 127, 190, 0.6);
+  background-color: #1f2847;
 }
 .power-monitor-select:focus {
   outline: none;
   border-color: #4ade80;
-  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.15);
+  background-color: #1f2847;
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.12);
 }
+
 .power-kv-select {
   flex-direction: column;
   align-items: stretch;
@@ -2487,12 +2530,61 @@ body {
   background: linear-gradient(180deg, #22c55e 0%, #15803d 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
   transition: transform 0.15s;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.power-cell-voltage {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
 }
 .power-cell-bar:hover {
   transform: scaleY(1.06);
 }
 .power-cell-bar.bad {
   background: linear-gradient(180deg, #f87171 0%, #991b1b 100%);
+}
+
+/* 估算数据的样式 */
+.power-cell-grid-estimated {
+  opacity: 0.7;
+}
+
+.power-cell-bar-estimated {
+  background: linear-gradient(180deg, #94a3b8 0%, #64748b 100%);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 3px,
+    rgba(255, 255, 255, 0.1) 3px,
+    rgba(255, 255, 255, 0.1) 6px
+  );
+}
+
+.power-cell-bar-estimated .power-cell-voltage {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.power-cell-estimated-tag {
+  margin-top: 6px;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: #94a3b8;
+  background: rgba(100, 116, 139, 0.15);
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
 }
 
 .power-kv-failsafe {

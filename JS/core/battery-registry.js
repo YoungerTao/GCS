@@ -95,6 +95,93 @@
     return c;
   }
 
+  /**
+   * BMS数据合理性判定与降级策略
+   * @param {number} totalVoltage - 总电压（V）
+   * @param {number[]} cellVoltages - 电芯电压数组（V）
+   * @param {number} reportedCells - BMS上报的串数
+   * @param {number} monitorType - 监测类型
+   * @returns {{isValid: boolean, estimatedCells: number, correctedCells: number[], reason: string, isEstimated: boolean}}
+   */
+  function validateAndCorrectBatteryData(totalVoltage, cellVoltages, reportedCells, monitorType) {
+    // 1. 基础检查
+    if (!totalVoltage || totalVoltage < 1) {
+      return { 
+        isValid: false, 
+        estimatedCells: 0, 
+        correctedCells: [], 
+        reason: "总电压无效",
+        isEstimated: false 
+      };
+    }
+
+    // 2. 估算合理串数范围
+    const estMin = Math.ceil(totalVoltage / 4.45);  // 高压锂电上限
+    const estMax = Math.floor(totalVoltage / 2.5);  // 放空保护下限
+    const estMost = Math.round(totalVoltage / 3.7); // 标称电压估算
+
+    // 3. 验证电芯数据
+    let isValid = true;
+    let reasons = [];
+
+    // 3.1 单芯电压物理极限检查
+    if (cellVoltages && cellVoltages.length > 0) {
+      for (let cell of cellVoltages) {
+        if (cell > 4.45) {
+          isValid = false;
+          reasons.push(`单芯电压${cell.toFixed(2)}V超过物理上限4.45V`);
+        }
+        if (cell < 2.5 && cell > 0.1) {
+          isValid = false;
+          reasons.push(`单芯电压${cell.toFixed(2)}V低于保护下限2.5V`);
+        }
+      }
+
+      // 3.2 串数一致性检查
+      if (reportedCells && (reportedCells < estMin || reportedCells > estMax)) {
+        isValid = false;
+        reasons.push(`上报${reportedCells}S不在合理范围${estMin}-${estMax}S`);
+      }
+
+      // 3.3 电芯和与总压偏差检查
+      const cellSum = cellVoltages.reduce((a, b) => a + b, 0);
+      if (Math.abs(cellSum - totalVoltage) > 0.3) {
+        isValid = false;
+        reasons.push(`电芯和${cellSum.toFixed(2)}V与总压${totalVoltage.toFixed(2)}V偏差过大`);
+      }
+
+      // 3.4 电芯均衡性检查（真实电池不可能完全一致）
+      if (cellVoltages.length > 1) {
+        const allSame = cellVoltages.every(v => Math.abs(v - cellVoltages[0]) < 0.001);
+        if (allSame) {
+          isValid = false;
+          reasons.push(`所有${cellVoltages.length}个电芯电压完全相同，疑似伪数据`);
+        }
+      }
+    }
+
+    // 4. 生成结果
+    if (isValid && cellVoltages && cellVoltages.length > 0) {
+      return {
+        isValid: true,
+        estimatedCells: cellVoltages.length,
+        correctedCells: cellVoltages,
+        reason: "BMS数据可信",
+        isEstimated: false
+      };
+    }
+
+    // 降级策略：使用总压估算电芯电压
+    const correctedCells = Array(estMost).fill(totalVoltage / estMost);
+    return {
+      isValid: false,
+      estimatedCells: estMost,
+      correctedCells: correctedCells,
+      reason: reasons.length > 0 ? reasons.join("; ") : "无电芯数据",
+      isEstimated: true
+    };
+  }
+
   function batteryUiType(monitorType, cellVoltages, voltage) {
     const t = Math.round(monitorType || 0);
     if (voltage > 100) return "tethered";
@@ -259,4 +346,5 @@
   window.assessBatteryTelemetryConnected = assessBatteryTelemetryConnected;
   window.battFailsafeControlSuffix = failsafeControlSuffix;
   window.BATT_MONITOR_TYPES = BATT_MONITOR_TYPES;
+  window.validateAndCorrectBatteryData = validateAndCorrectBatteryData;
 })();

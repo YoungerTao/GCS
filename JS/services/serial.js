@@ -7,6 +7,64 @@
  */
 
 window._pendingParamRequest = false;
+window._bridgeMode = window._bridgeMode || "auto";
+window._bridgeConnActive = window._bridgeConnActive || false;
+
+async function bridgeFetch(path, body = null) {
+  const opts = body ? {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  } : { method: "GET" };
+  const resp = await fetch(`http://127.0.0.1:8765${path}`, opts);
+  const text = await resp.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch (_) {}
+  if (!resp.ok || data?.ok === false) {
+    throw new Error(data?.error || `bridge ${path} failed (${resp.status})`);
+  }
+  return data;
+}
+
+function bridgeBytesToBase64(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+function bridgeBase64ToBytes(text) {
+  if (!text) return new Uint8Array(0);
+  const bin = atob(text);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function bridgeWriteBytes(bytes) {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  await bridgeFetch("/bridge-write", { data: bridgeBytesToBase64(arr) });
+}
+
+async function bridgeReadLoop() {
+  while (window._bridgeConnActive) {
+    try {
+      const resp = await bridgeFetch("/bridge-read");
+      const chunk = bridgeBase64ToBytes(resp?.data || "");
+      if (chunk.length) {
+        for (let i = 0; i < chunk.length; i++) buf.push(chunk[i]);
+        parse();
+      } else {
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    } catch (e) {
+      const msg = e?.message || String(e);
+      log(`桥接读失败: ${msg}`);
+      window._bridgeConnActive = false;
+      setConnectionUI("error");
+      return;
+    }
+  }
+}
 
 // ========== 串口生命周期管理 ==========
 
@@ -38,6 +96,7 @@ async function closeSerialResources() {
     window.MavlinkMission.resetMissionSession();
   }
   window._missionUploadActive = false;
+  window._bridgeConnActive = false;
 
   const p = window.port;
   const r = typeof reader !== "undefined" ? reader : null;
@@ -69,6 +128,9 @@ async function closeSerialResources() {
     if (p && typeof p.close === "function") await p.close();
   } catch (_) { /* ignore */ }
   window.port = null;
+  try {
+    await bridgeFetch("/bridge-close", {});
+  } catch (_) { /* ignore */ }
 }
 
 function setConnectionUI(state) {
@@ -150,6 +212,60 @@ async function connect() {
     }
 
     await closeSerialResources();
+
+    if ((window._bridgeMode === "auto" || window._bridgeMode === "bridge") && selectedValue) {
+      try {
+        const baudRate = getSelectedBaudRate();
+        const optionMeta = window._comOptionMap?.get(selectedValue);
+        const systemPort = optionMeta?.systemPort || null;
+        const portName = selectedValue.startsWith("auth:")
+          ? (comSelect.options[comSelect.selectedIndex]?.text || selectedValue)
+          : (systemPort?.deviceId || selectedValue.replace(/^sys:/, ""));
+        if (!portName) throw new Error("missing bridge port name");
+        setConnectionUI("connecting");
+        const opened = await bridgeFetch("/bridge-open", { port: portName.split(" ")[0], baudrate: baudRate });
+        window._bridgeConnActive = true;
+        window.port = { bridge: true, close: async () => { await bridgeFetch("/bridge-close", {}); } };
+        writer = { write: async (bytes) => bridgeWriteBytes(bytes) };
+        window.writer = writer;
+        reader = { cancel: async () => {}, releaseLock: () => {} };
+        window.reader = reader;
+        log(`✅ 桥接串口已打开：${opened.port || portName} @ ${opened.baudrate}`);
+        window._readLoopLostWarned = false;
+        if (window._heartbeatInterval) clearInterval(window._heartbeatInterval);
+        window._heartbeatInterval = setInterval(sendHeartbeat, 1000);
+        sendHeartbeat().catch(() => {});
+        setTimeout(() => sendHeartbeat().catch(() => {}), 250);
+        bridgeReadLoop();
+        setConnectionUI("connected");
+        if (typeof window.rememberSelectedPort === "function") {
+          window.rememberSelectedPort(
+            selectedValue,
+            comSelect.options[comSelect.selectedIndex]?.text || selectedValue
+          );
+        }
+        schedulePostConnectMavlinkInfoRequests();
+        if (typeof window.applyConnectionTelemetrySetup === "function") {
+          window.applyConnectionTelemetrySetup()
+            .then(() => {
+              if (typeof window.startTelemetryMaintenance === "function") {
+                window.startTelemetryMaintenance(window._telemetryProfile || "sr0");
+              }
+            })
+            .catch((e) => log(`桥接遥测初始化失败: ${e?.message || e}`));
+        }
+        if (window._pendingParamRequest) {
+          window._pendingParamRequest = false;
+          log("桥接连接成功：开始加载参数表");
+          if (typeof window.beginParamLoadingUI === "function") window.beginParamLoadingUI();
+          setTimeout(() => send_v2(21, [window.sysid || 1, window.compid || 1], 159), 300);
+        }
+        return;
+      } catch (bridgeErr) {
+        log(`⚠️ 桥接模式失败，回退 Web Serial：${bridgeErr?.message || bridgeErr}`);
+        window._bridgeConnActive = false;
+      }
+    }
 
     if (selectedValue === "__add__") {
       setConnectionUI("connecting");
@@ -247,6 +363,12 @@ async function connect() {
 
     try { await refreshPorts(); } catch (e) { /* ignore */ }
     setConnectionUI("connected");
+    if (typeof window.rememberSelectedPort === "function") {
+      window.rememberSelectedPort(
+        comSelect.value || selectedValue,
+        comSelect.options[comSelect.selectedIndex]?.text || selectedValue
+      );
+    }
     schedulePostConnectMavlinkInfoRequests();
     if (typeof window.applyConnectionTelemetrySetup === "function") {
       window.applyConnectionTelemetrySetup()

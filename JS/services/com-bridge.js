@@ -1,35 +1,29 @@
-/**
- * 串口/COM 端口枚举 — 从 serial.js 拆分
- *  负责：navigator.serial.getPorts, local COM bridge 服务, 端口列表 UI
- */
-
 window._knownPorts = window._knownPorts || [];
 window._comOptionMap = window._comOptionMap || new Map();
 window._systemComPorts = window._systemComPorts || [];
+window._autoConnectAttempted = window._autoConnectAttempted || false;
 
-/** 从本地 COM 桥接服务获取系统 COM 列表 */
 async function fetchSystemComPortsImpl() {
   const now = Date.now();
   if (typeof window._comBridgeBackoffUntil === "number" && now < window._comBridgeBackoffUntil) {
     return Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : [];
   }
-  const url = "http://127.0.0.1:8765/com-ports";
   try {
-    const resp = await fetch(url, { cache: "no-store" });
-    if (resp.ok) {
-      const data = await resp.json();
-      const ports = Array.isArray(data.ports) ? data.ports : [];
-      window._comBridgeOnline = true;
-      window._comBridgeBackoffUntil = 0;
-      window._lastFetchedSystemPorts = ports;
-      window._comBridgeOfflineHintLogged = false;
-      return ports;
-    }
-  } catch (_) { /* 桥接未运行 */ }
-  window._comBridgeOnline = false;
-  window._comBridgeBackoffUntil = Date.now() + 30000;
-  window._lastFetchedSystemPorts = window._lastFetchedSystemPorts || [];
-  return window._lastFetchedSystemPorts;
+    const resp = await fetch("http://127.0.0.1:8765/com-ports", { cache: "no-store" });
+    if (!resp.ok) throw new Error(`bridge list failed (${resp.status})`);
+    const data = await resp.json();
+    const ports = Array.isArray(data.ports) ? data.ports : [];
+    window._comBridgeOnline = true;
+    window._comBridgeBackoffUntil = 0;
+    window._lastFetchedSystemPorts = ports;
+    window._comBridgeOfflineHintLogged = false;
+    return ports;
+  } catch (_) {
+    window._comBridgeOnline = false;
+    window._comBridgeBackoffUntil = Date.now() + 30000;
+    window._lastFetchedSystemPorts = window._lastFetchedSystemPorts || [];
+    return window._lastFetchedSystemPorts;
+  }
 }
 
 async function fetchSystemComPorts() {
@@ -39,30 +33,19 @@ async function fetchSystemComPorts() {
   return run;
 }
 
-function portLabel(p, idx) {
-  const info = p.getInfo ? p.getInfo() : {};
-  const hasVid = typeof info.usbVendorId === "number";
-  const hasPid = typeof info.usbProductId === "number";
-  if (hasVid && hasPid) {
-    const vid = `VID_${info.usbVendorId.toString(16).toUpperCase().padStart(4, "0")}`;
-    const pid = `PID_${info.usbProductId.toString(16).toUpperCase().padStart(4, "0")}`;
-    return `串口${idx + 1} (${vid}:${pid})`;
-  }
-  return `串口${idx + 1}（已授权，无 USB 信息）`;
+function getRememberedPortKey() {
+  try { return localStorage.getItem("gcs.lastPortKey") || ""; } catch (_) { return ""; }
 }
 
-function setComPlaceholder(comSelect, text) {
-  const option = document.createElement("option");
-  option.value = "";
-  option.text = text;
-  option.disabled = true;
-  option.selected = true;
-  comSelect.appendChild(option);
+function getRememberedPortLabel() {
+  try { return localStorage.getItem("gcs.lastPortLabel") || ""; } catch (_) { return ""; }
 }
 
-function isLikelyEmbeddedPreviewBrowser() {
-  const ua = String(navigator.userAgent || "");
-  return /Cursor/i.test(ua) || /Electron/i.test(ua) || /VSCode/i.test(ua);
+function rememberSelectedPort(value, label) {
+  try {
+    if (value) localStorage.setItem("gcs.lastPortKey", value);
+    if (label) localStorage.setItem("gcs.lastPortLabel", label);
+  } catch (_) { /* ignore */ }
 }
 
 function setConnectSerialHint(text) {
@@ -70,124 +53,115 @@ function setConnectSerialHint(text) {
   if (btn) btn.title = text || "";
 }
 
-/** 刷新可用串口列表 */
+async function tryAutoConnect() {
+  if (window._autoConnectAttempted) return;
+  if (window._gcsConnState === "connected" || window._gcsConnState === "connecting") return;
+  const comSelect = document.getElementById("comPort");
+  if (!comSelect || !comSelect.options.length) return;
+  const rememberedKey = getRememberedPortKey();
+  const rememberedLabel = getRememberedPortLabel();
+  let target = "";
+  if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
+    target = rememberedKey;
+  } else if (rememberedLabel) {
+    const match = Array.from(comSelect.options).find((o) => String(o.text || "") === rememberedLabel);
+    if (match && match.value && match.value !== "__add__") target = match.value;
+  }
+  if (!target) return;
+  window._autoConnectAttempted = true;
+  comSelect.value = target;
+  setTimeout(() => {
+    if (typeof window.connect === "function") {
+      try { window.connect(); } catch (_) { /* ignore */ }
+    }
+  }, 180);
+}
+
 async function refreshPorts(opts = {}) {
   const probeBridge = opts.probeBridge !== false;
-  if (!("serial" in navigator)) {
-    const comSelect = document.getElementById("comPort");
-    comSelect.innerHTML = "";
-    const embedded = isLikelyEmbeddedPreviewBrowser();
-    setComPlaceholder(
-      comSelect,
-      embedded
-        ? "-- 内置预览不支持串口，请用 Chrome/Edge 打开 --"
-        : "-- 当前浏览器不支持串口(Web Serial) --"
-    );
-    setConnectSerialHint(
-      embedded
-        ? "Cursor 内置浏览器通常无法访问 USB 串口。请在本机 Chrome 或 Edge 中打开 http://127.0.0.1:8080"
-        : "请使用 Chrome/Edge 桌面版，并通过 http://localhost 打开页面"
-    );
-    if (typeof log === "function") {
-      log(
-        embedded
-          ? "❌ 内置预览浏览器不支持 Web Serial。请用 Chrome/Edge 打开本地面站（如 http://127.0.0.1:8080）"
-          : "❌ 当前浏览器不支持 Web Serial，请使用 Chrome/Edge（桌面版）"
-      );
-    }
-    return;
-  }
+  const comSelect = document.getElementById("comPort");
+  if (!comSelect) return;
 
-  if (!window.isSecureContext) {
-    const comSelect = document.getElementById("comPort");
-    comSelect.innerHTML = "";
-    setComPlaceholder(comSelect, "-- 需在 localhost/https 下使用串口 --");
-    if (typeof log === "function") log("❌ 当前页面不是安全上下文。请通过 http://127.0.0.1:<端口> 或 https 打开页面");
-    return;
+  let ports = [];
+  if ("serial" in navigator && window.isSecureContext) {
+    try { ports = await navigator.serial.getPorts(); } catch (_) { ports = []; }
   }
-
-  const ports = await navigator.serial.getPorts();
   const systemPorts = probeBridge
     ? await fetchSystemComPorts()
     : (Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : []);
-  const comSelect = document.getElementById("comPort");
-  const currentValue = comSelect.value;
-  const desiredSystem = window._desiredSystemCom || null;
 
+  const currentValue = comSelect.value;
   window._knownPorts = ports;
   window._systemComPorts = systemPorts;
   window._comOptionMap = new Map();
-
   comSelect.innerHTML = "";
 
   if (systemPorts.length > 0) {
     const usedAuth = new Set();
     systemPorts.forEach((sp, i) => {
-      const option = document.createElement("option");
       let authIndex = -1;
-      for (let j = 0; j < ports.length; j++) {
+      for (let j = 0; j < ports.length; j += 1) {
         if (usedAuth.has(j)) continue;
         const info = ports[j].getInfo ? ports[j].getInfo() : {};
         if (
-          typeof sp.usbVendorId === "number" && typeof sp.usbProductId === "number" &&
-          info.usbVendorId === sp.usbVendorId && info.usbProductId === sp.usbProductId
+          typeof sp.usbVendorId === "number" &&
+          typeof sp.usbProductId === "number" &&
+          info.usbVendorId === sp.usbVendorId &&
+          info.usbProductId === sp.usbProductId
         ) {
           authIndex = j;
           usedAuth.add(j);
           break;
         }
       }
-      const value = authIndex >= 0 ? `auth:${authIndex}` : `sys:${sp.deviceId || i}`;
-      option.value = value;
+      const option = document.createElement("option");
+      option.value = authIndex >= 0 ? `auth:${authIndex}` : `sys:${sp.deviceId || i}`;
       option.text = authIndex >= 0
         ? `${sp.deviceId} (${sp.name || "Unknown"})`
         : `${sp.deviceId} (${sp.name || "Unknown"}) [未授权]`;
       comSelect.appendChild(option);
-      window._comOptionMap.set(value, { authIndex, systemPort: sp });
+      window._comOptionMap.set(option.value, { authIndex, systemPort: sp });
     });
 
-    if (desiredSystem) {
-      const targetOpt = Array.from(comSelect.options).find(o => o.text && o.text.startsWith(desiredSystem));
-      if (targetOpt) comSelect.value = targetOpt.value;
-      window._desiredSystemCom = null;
-    } else if (currentValue !== "" && window._comOptionMap.has(currentValue)) {
+    const rememberedKey = getRememberedPortKey();
+    const rememberedLabel = getRememberedPortLabel();
+    if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
+      comSelect.value = rememberedKey;
+    } else if (rememberedLabel) {
+      const remembered = Array.from(comSelect.options).find((o) => String(o.text || "") === rememberedLabel);
+      if (remembered) comSelect.value = remembered.value;
+    } else if (currentValue && window._comOptionMap.has(currentValue)) {
       comSelect.value = currentValue;
-    } else if (comSelect.options.length > 0) {
+    } else if (comSelect.options.length) {
       comSelect.value = comSelect.options[0].value;
     }
 
-    const addOptSys = document.createElement("option");
-    addOptSys.value = "__add__";
-    addOptSys.text = "＋ 添加/重新选择串口设备…";
-    comSelect.appendChild(addOptSys);
+    const addOpt = document.createElement("option");
+    addOpt.value = "__add__";
+    addOpt.text = "＋ 添加/重新选择串口设备…";
+    comSelect.appendChild(addOpt);
+    setConnectSerialHint("");
+    tryAutoConnect().catch(() => {});
     return;
-  }
-
-  if (window._comBridgeOnline === false && !window._comBridgeOfflineHintLogged) {
-    window._comBridgeOfflineHintLogged = true;
-    if (typeof log === "function") log("⚠️ COM 桥接未运行（约每 30 秒探测一次）。要显示系统 COM 名请执行: python tools/com-bridge/server.py");
   }
 
   if (ports.length === 0) {
-    comSelect.innerHTML = "";
-    const addOptEmpty = document.createElement("option");
-    addOptEmpty.value = "__add__";
-    addOptEmpty.text = "＋ 选择飞控 USB 串口（首次连接）…";
-    comSelect.appendChild(addOptEmpty);
+    const addOnly = document.createElement("option");
+    addOnly.value = "__add__";
+    addOnly.text = "＋ 选择飞控 USB 串口（首次连接）…";
+    comSelect.appendChild(addOnly);
     comSelect.value = "__add__";
-    setConnectSerialHint("首次连接：点击「连接串口」，在浏览器弹窗中选择飞控 USB 口");
-    if (typeof log === "function") {
-      log("ℹ️ 尚未授权串口：直接点右侧「连接串口」，在弹窗中选择飞控 USB 口即可");
-    }
+    setConnectSerialHint("首次连接：点击“连接串口”，在浏览器弹窗中选择飞控 USB 串口");
     return;
   }
 
-  setConnectSerialHint("");
-
   ports.forEach((port, index) => {
     const option = document.createElement("option");
+    const info = port.getInfo ? port.getInfo() : {};
+    const vid = typeof info.usbVendorId === "number" ? info.usbVendorId.toString(16).toUpperCase().padStart(4, "0") : "----";
+    const pid = typeof info.usbProductId === "number" ? info.usbProductId.toString(16).toUpperCase().padStart(4, "0") : "----";
     option.value = `auth:${index}`;
-    option.text = portLabel(port, index);
+    option.text = `串口${index + 1} (VID_${vid}:PID_${pid})`;
     comSelect.appendChild(option);
     window._comOptionMap.set(option.value, { authIndex: index, systemPort: null });
   });
@@ -197,14 +171,21 @@ async function refreshPorts(opts = {}) {
   addOpt.text = "＋ 添加/重新选择串口设备…";
   comSelect.appendChild(addOpt);
 
-  if (currentValue && currentValue !== "__add__" && window._comOptionMap.has(currentValue)) {
+  const rememberedKey = getRememberedPortKey();
+  const rememberedLabel = getRememberedPortLabel();
+  if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
+    comSelect.value = rememberedKey;
+  } else if (rememberedLabel) {
+    const remembered = Array.from(comSelect.options).find((o) => String(o.text || "") === rememberedLabel);
+    if (remembered) comSelect.value = remembered.value;
+  } else if (currentValue && window._comOptionMap.has(currentValue)) {
     comSelect.value = currentValue;
   } else {
-    const first = Array.from(comSelect.options).find(
-      o => !o.disabled && o.value && (o.value.startsWith("auth:") || o.value.startsWith("sys:"))
-    );
-    if (first) comSelect.value = first.value;
+    comSelect.value = comSelect.options[0]?.value || "__add__";
   }
+
+  setConnectSerialHint("");
+  tryAutoConnect().catch(() => {});
 }
 
 async function requestAndRefreshPort() {
@@ -213,10 +194,7 @@ async function requestAndRefreshPort() {
     await refreshPorts();
     return true;
   } catch (e) {
-    if (e && e.name === "NotFoundError") {
-      if (typeof log === "function") log("⚠️ 未选择串口设备");
-      return false;
-    }
+    if (e && e.name === "NotFoundError") return false;
     throw e;
   }
 }
@@ -243,9 +221,9 @@ function initComPortAutoRefresh() {
   if (!window._comBridgeFocusHooked) {
     window._comBridgeFocusHooked = true;
     window.addEventListener("focus", () => {
-      const t = Date.now();
-      if (window._comBridgeLastFocusProbe && t - window._comBridgeLastFocusProbe < 12000) return;
-      window._comBridgeLastFocusProbe = t;
+      const now = Date.now();
+      if (window._comBridgeLastFocusProbe && now - window._comBridgeLastFocusProbe < 12000) return;
+      window._comBridgeLastFocusProbe = now;
       window._comBridgeBackoffUntil = 0;
       refreshPorts({ probeBridge: true }).catch(() => {});
     });
@@ -268,11 +246,7 @@ window.refreshPorts = refreshPorts;
 window.requestAndRefreshPort = requestAndRefreshPort;
 window.requestAllPortsInteractive = requestAllPortsInteractive;
 window.initComPortAutoRefresh = initComPortAutoRefresh;
+window.rememberSelectedPort = rememberSelectedPort;
 
-// 兼容旧引用
 window.initSerialAutoRefresh = initComPortAutoRefresh;
-
-// 自动初始化
 initComPortAutoRefresh();
-
-console.log("✅ com-bridge.js 已加载");

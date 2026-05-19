@@ -4,6 +4,9 @@
   const MAV_CMD_DO_CANCEL_MAG_CAL = 42426;
   const MAG_CAL_SUCCESS = 4;
   const MAG_CAL_FAILED = 5;
+  const STUCK_99_WARN_MS = 12000;
+  const STUCK_99_ACCEPT_MS = 20000;
+  const MAG_CAL_RUNNING_STEP_TWO = 3;
 
   const MAG_SLOTS = 3;
   const SLOT_PARAM = [
@@ -39,8 +42,23 @@
     sphereRot: 0,
     /** 已对某路下发过 MAV_CMD_DO_ACCEPT_MAG_CAL，避免 progress+report 双触发重复发送 */
     magAcceptSent: new Set(),
-    fcFailed: [false, false, false]
+    fcFailed: [false, false, false],
+    /** 某路首次到达 99% 且未确认的时间戳（用于超时补发 ACCEPT） */
+    stuck99Since: [0, 0, 0],
+    stuck99Warned: [false, false, false],
+    reached99: [false, false, false],
+    lastCalStatus: [0, 0, 0],
+    lastProgressMs: [0, 0, 0],
+    lastProgressPct: [0, 0, 0],
+    coverageBits: [0, 0, 0],
+    progressStallWarned: [false, false, false],
+    stuckTimer: 0
   };
+
+  const MAG_CAL_PROGRESS_MSG_ID = 191;
+  const MAG_CAL_REPORT_MSG_ID = 192;
+  const COMPLETION_MASK_BITS = 80;
+  const PROGRESS_STALL_MS = 12000;
 
   function $(id) { return document.getElementById(id); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -228,7 +246,7 @@
       el.textContent = "等待飞控初始化并返回采样数据...";
       el.style.color = "#f59e0b";
     } else {
-      el.textContent = "已连接：正在接收 MAVLink 采样。进度到 99% 后飞控会做最后拟合，请稍候直至提示「校准成功」；成功后本页会自动向飞控发送「接受校准」以写入参数（与 Mission Planner 一致）。";
+      el.textContent = "已连接：正在接收采样。ArduPilot 在拟合完成前最高显示 99%（内置罗盘更慢）；达到 SUCCESS 后为 100%。已启用飞控自动保存；若某路长时间停在 99%，约 20 秒将自动/可手动「接受未确认罗盘」。";
       el.style.color = "#10b981";
     }
   }
@@ -238,7 +256,7 @@
       const bar = $(BAR_IDS[i]);
       const label = $(LABEL_IDS[i]);
       const samples = $(SAMPLE_IDS[i]);
-      const pct = compass.progress[i];
+      const pct = compass.fcSuccess[i] ? 100 : compass.progress[i];
       if (bar) bar.style.width = `${pct}%`;
 
       const active = slotActiveMask()[i];
@@ -248,12 +266,21 @@
       else suffix = "";
 
       let q;
+      const st = compass.lastCalStatus[i];
       if (compass.fcSuccess[i]) q = "已完成";
-      else if (pct >= 99 && compass.running && active) q = "等待飞控确认…";
-      else if (pct >= 95) q = "优质";
+      else if (pct >= 99 && compass.running && active) {
+        q = st === MAG_CAL_RUNNING_STEP_TWO
+          ? "飞控拟合中（内置罗盘较慢）…"
+          : "等待飞控确认…";
+      }       else if (pct >= 90 && st === MAG_CAL_RUNNING_STEP_TWO) q = "二阶段采样/拟合中";
+      else if (pct >= 70) q = "数据采集中";
       else if (pct > 0) q = "数据采集中";
       else q = "等待旋转";
-      if (label) label.textContent = `${Math.round(pct)}% (${q})${suffix}`;
+      const cov = compass.coverageBits[i];
+      const covHint = cov > 0 && compass.running && active && !compass.fcSuccess[i]
+        ? ` · 方向覆盖约 ${Math.round((cov / COMPLETION_MASK_BITS) * 100)}%`
+        : "";
+      if (label) label.textContent = `${Math.round(pct)}% (${q})${covHint}${suffix}`;
       if (samples) samples.textContent = `采样点: ${compass.pts[i].length}`;
     }
   }
@@ -303,17 +330,160 @@
     }
   }
 
-  function fireAcceptMagCalForCompass(compassIdx) {
+  function countCompletionMaskBits(maskBytes) {
+    if (!maskBytes || !maskBytes.length) return 0;
+    let n = 0;
+    for (let i = 0; i < maskBytes.length; i += 1) {
+      let b = maskBytes[i] & 0xff;
+      while (b) {
+        n += b & 1;
+        b >>= 1;
+      }
+    }
+    return n;
+  }
+
+  async function requestMagCalStreamRates() {
+    if (typeof window.sendCommandLong !== "function") return;
+    const pairs = [
+      [MAG_CAL_PROGRESS_MSG_ID, 5],
+      [MAG_CAL_REPORT_MSG_ID, 2],
+    ];
+    for (const [msgId, hz] of pairs) {
+      try {
+        await window.sendCommandLong(511, msgId, Math.round(1e6 / hz), 0, 0, 0, 0, 0, 0);
+      } catch (e) { /* ignore */ }
+    }
+    slog(`[MAG_CAL] 已请求 msg191/192 流率 ${pairs.map((p) => p[1] + "Hz").join(", ")}`);
+  }
+
+  function noteProgressStall(idx, pct) {
+    if (!compass.running || compass.fcSuccess[idx]) return;
+    const active = slotActiveMask()[idx];
+    if (!active || pct < 85) return;
+    const now = Date.now();
+    const prevPct = compass.lastProgressPct[idx];
+    const prevMs = compass.lastProgressMs[idx];
+    if (pct > prevPct) {
+      compass.lastProgressMs[idx] = now;
+      compass.lastProgressPct[idx] = pct;
+      compass.progressStallWarned[idx] = false;
+      return;
+    }
+    if (!prevMs || now - prevMs < PROGRESS_STALL_MS || compass.progressStallWarned[idx]) return;
+    compass.progressStallWarned[idx] = true;
+    const covPct = Math.round((compass.coverageBits[idx] / COMPLETION_MASK_BITS) * 100);
+    const toast = $("sc-compass-toast");
+    if (toast) {
+      toast.textContent = `罗盘 ${idx + 1} 进度停在 ${Math.round(pct)}%：飞控仍在等待更多姿态（方向覆盖约 ${covPct}%）。请继续缓慢翻转/绕 8 字，远离金属；内置 RM3100 比外置慢。若长期不动可暂时只校内置罗盘（取消 COMPASS_USE2）。`;
+      toast.className = "sc-toast sc-toast--idle";
+      toast.style.color = "#f59e0b";
+    }
+    slog(`[MAG_CAL] 罗盘 ${idx + 1} 进度停滞 ${pct}% ≥${PROGRESS_STALL_MS / 1000}s，coverage≈${covPct}%`);
+  }
+
+  function buildActiveMagMask() {
+    let mask = 0;
+    for (let i = 0; i < MAG_SLOTS; i += 1) {
+      if (compass.calSnapshot[i]) mask |= 1 << i;
+    }
+    return mask || 0;
+  }
+
+  function fireAcceptMagCalForCompass(compassIdx, useAllMask) {
     if (!fcConnected() || typeof window.sendCommandLong !== "function") return;
-    if (compass.magAcceptSent.has(compassIdx)) return;
-    compass.magAcceptSent.add(compassIdx);
-    const mask = 1 << compassIdx;
+    if (!useAllMask && compass.magAcceptSent.has(compassIdx)) return;
+    if (!useAllMask) compass.magAcceptSent.add(compassIdx);
+    const mask = useAllMask ? 0 : (1 << compassIdx);
     window.sendCommandLong(MAV_CMD_DO_ACCEPT_MAG_CAL, mask, 0, 0, 0, 0, 0, 0)
-      .then(() => slog(`[MAG_CAL] 已下发 MAV_CMD_DO_ACCEPT_MAG_CAL（param1 位掩码=${mask}），飞控将把本路偏差写入参数`))
+      .then(() => slog(`[MAG_CAL] 已下发 MAV_CMD_DO_ACCEPT_MAG_CAL（param1=${useAllMask ? "0(全部)" : `位掩码=${mask}`}）`))
       .catch(e => {
-        compass.magAcceptSent.delete(compassIdx);
+        if (!useAllMask) compass.magAcceptSent.delete(compassIdx);
         slog(`[MAG_CAL] ACCEPT 下发失败: ${e?.message || e}`);
       });
+  }
+
+  function acceptStuckCompassesNow(reasonZh) {
+    const pending = [];
+    for (let i = 0; i < MAG_SLOTS; i += 1) {
+      if (!compass.calSnapshot[i] || compass.fcSuccess[i]) continue;
+      if (compass.progress[i] >= 99 || compass.reached99[i]) pending.push(i);
+    }
+    if (!pending.length) return false;
+    pending.forEach((i) => {
+      if (!compass.magAcceptSent.has(i)) fireAcceptMagCalForCompass(i);
+      compass.fcSuccess[i] = true;
+      compass.stuck99Since[i] = 0;
+      compass.reached99[i] = false;
+    });
+    const toast = $("sc-compass-toast");
+    if (toast) {
+      toast.textContent = `${reasonZh}（罗盘 ${pending.map((i) => i + 1).join("、")}）`;
+      toast.className = "sc-toast sc-toast--ok";
+      toast.style.color = "";
+    }
+    syncCompassProgressDom();
+    updateFitnessLabels();
+    return true;
+  }
+
+  function checkStuck99Compasses() {
+    if (!compass.running) return;
+    const targets = [];
+    for (let i = 0; i < MAG_SLOTS; i += 1) {
+      if (compass.calSnapshot[i]) targets.push(i);
+    }
+    const now = Date.now();
+    const anySuccess = targets.some((i) => compass.fcSuccess[i]);
+    for (const i of targets) {
+      if (compass.fcSuccess[i]) continue;
+      const waiting = compass.reached99[i] || compass.progress[i] >= 99;
+      if (!waiting) continue;
+      if (!compass.stuck99Since[i]) compass.stuck99Since[i] = now;
+      const elapsed = now - compass.stuck99Since[i];
+      if (elapsed >= STUCK_99_WARN_MS && !compass.stuck99Warned[i]) {
+        compass.stuck99Warned[i] = true;
+        const toast = $("sc-compass-toast");
+        if (toast) {
+          toast.textContent = `罗盘 ${i + 1} 正在最后拟合（ArduPilot 在 SUCCESS 前最高显示 99%）。内置 RM3100 更慢，请继续缓慢旋转；约 ${Math.round(STUCK_99_ACCEPT_MS / 1000)} 秒后将自动尝试接受校准。`;
+          toast.className = "sc-toast sc-toast--idle";
+          toast.style.color = "#f59e0b";
+        }
+        slog(`[MAG_CAL] 罗盘 ${i + 1} 停留 99% ${Math.round(elapsed / 1000)}s，cal_status=${compass.lastCalStatus[i]}`);
+      }
+      const acceptAfter = anySuccess && elapsed >= 8000 ? 8000 : STUCK_99_ACCEPT_MS;
+      if (elapsed >= acceptAfter) {
+        fireAcceptMagCalForCompass(i);
+        compass.fcSuccess[i] = true;
+        compass.stuck99Since[i] = 0;
+        const toast = $("sc-compass-toast");
+        if (toast) {
+          toast.textContent = `罗盘 ${i + 1}：已自动发送「接受校准」。请重启飞控并在参数页确认 COMPASS_OFS* 已更新；若无法解锁，请放宽 COMPASS_CAL_FIT 后单独重校内置罗盘。`;
+          toast.className = "sc-toast sc-toast--ok";
+          toast.style.color = "";
+        }
+        speak(`罗盘 ${i + 1} 已自动接受校准`);
+        syncCompassProgressDom();
+        updateFitnessLabels();
+      }
+    }
+    const fcDone = targets.length > 0 && targets.every((i) => compass.fcSuccess[i]);
+    if (fcDone && compass.running) {
+      compass.running = false;
+      cancelAnimationFrame(compass.raf);
+      if (compass.stuckTimer) {
+        clearInterval(compass.stuckTimer);
+        compass.stuckTimer = 0;
+      }
+      const toast = $("sc-compass-toast");
+      if (toast) {
+        toast.textContent = "全部参与校准的罗盘已处理完成。请重启飞控使磁力计参数生效。";
+        toast.className = "sc-toast sc-toast--ok";
+        toast.style.color = "";
+      }
+      updateCompassLiveLabel();
+      applySlotVisualMute();
+    }
   }
 
   /**
@@ -341,8 +511,11 @@
           persistZh = "飞控回报本路已自动保存校准结果（autosaved=1），无需再发接受指令。";
         }
       } else {
-        persistZh = "飞控拟合阶段已完成，正在等待 MAG_CAL_REPORT 以确认落盘…";
+        fireAcceptMagCalForCompass(idx);
+        persistZh = "飞控回报拟合成功，已发送「接受校准」；若长时间无 MAG_CAL_REPORT，属正常，请稍候或查看飞控文本消息。";
       }
+      compass.stuck99Since[idx] = 0;
+      compass.stuck99Warned[idx] = false;
       if (toast) {
         toast.textContent = `罗盘 ${display} 校准成功。Fitness: ${Number.isFinite(fit) ? fit.toFixed(2) : "—"}。${persistZh}`;
         toast.className = "sc-toast sc-toast--ok";
@@ -379,12 +552,37 @@
     const calStatus = Number(d.cal_status);
 
     if (!compass.haveData[idx]) {
-      slog(`[MAG_CAL] 首次收到 compass_id=${id} 的 progress 包 → 面板 ${idx + 1} (pct=${pct}, cal_status=${calStatus})`);
+      slog(`[MAG_CAL] 首次 progress compass_id=${id} → 面板 ${idx + 1} (pct=${pct}, cal_status=${calStatus})`);
+    }
+    if (calStatus === MAG_CAL_SUCCESS || calStatus === MAG_CAL_FAILED) {
+      slog(`[MAG_CAL] progress 终态 compass_id=${id} status=${calStatus} pct=${pct}`);
     }
 
     compass.fcMode = true;
     compass.haveData[idx] = true;
-    compass.progress[idx] = pct;
+    if (pct >= compass.progress[idx]) compass.progress[idx] = pct;
+    if (Number.isFinite(calStatus)) compass.lastCalStatus[idx] = calStatus;
+    if (Array.isArray(d.completion_mask) && d.completion_mask.length) {
+      compass.coverageBits[idx] = countCompletionMaskBits(d.completion_mask);
+    }
+    if (pct > compass.lastProgressPct[idx]) {
+      compass.lastProgressMs[idx] = Date.now();
+      compass.lastProgressPct[idx] = pct;
+    } else if (!compass.lastProgressMs[idx]) {
+      compass.lastProgressMs[idx] = Date.now();
+      compass.lastProgressPct[idx] = pct;
+    }
+    noteProgressStall(idx, pct);
+
+    const active = slotActiveMask()[idx];
+    if (pct >= 99 && active && !compass.fcSuccess[idx]) {
+      compass.reached99[idx] = true;
+      if (!compass.stuck99Since[idx]) compass.stuck99Since[idx] = Date.now();
+    } else if (compass.fcSuccess[idx]) {
+      compass.stuck99Since[idx] = 0;
+      compass.stuck99Warned[idx] = false;
+      compass.reached99[idx] = false;
+    }
 
     const arr = compass.pts[idx];
     const dx = Number(d.direction_x);
@@ -423,6 +621,7 @@
     const fit = Number(d.fitness);
     const status = Number(d.cal_status);
     const autosaved = d.autosaved;
+    slog(`[MAG_CAL] REPORT compass_id=${id} → 面板 ${idx + 1} status=${status} fitness=${fit} autosaved=${autosaved}`);
 
     applyMagCalTerminal(idx, status, fit, autosaved, true);
   }
@@ -574,25 +773,8 @@
       drawMagSphere(CANVAS_IDS[i], compass.pts[i], compass.fitness[i]);
     }
 
-    const targets = [];
-    for (let i = 0; i < MAG_SLOTS; i += 1) {
-      if (compass.calSnapshot[i]) targets.push(i);
-    }
-    const fcDone = targets.length > 0 && targets.every(i => compass.fcSuccess[i]);
-
-    if (fcDone) {
-      compass.running = false;
-      cancelAnimationFrame(compass.raf);
-      const toast = $("sc-compass-toast");
-      if (toast) {
-        toast.textContent = "全部参与校准的罗盘已成功：已对需落盘的路发送「接受校准」。请重启飞控使磁力计参数完全生效，并在参数页确认 COMPASS_* 偏移/矩阵已更新。";
-        toast.className = "sc-toast sc-toast--ok";
-        toast.style.color = "";
-      }
-      updateCompassLiveLabel();
-      applySlotVisualMute();
-      return;
-    }
+    checkStuck99Compasses();
+    if (!compass.running) return;
 
     compass.raf = requestAnimationFrame(magTick);
   }
@@ -607,6 +789,18 @@
       compass.fcFailed[i] = false;
     }
     compass.magAcceptSent.clear();
+    compass.stuck99Since = [0, 0, 0];
+    compass.stuck99Warned = [false, false, false];
+    compass.reached99 = [false, false, false];
+    compass.lastCalStatus = [0, 0, 0];
+    compass.lastProgressMs = [0, 0, 0];
+    compass.lastProgressPct = [0, 0, 0];
+    compass.coverageBits = [0, 0, 0];
+    compass.progressStallWarned = [false, false, false];
+    if (compass.stuckTimer) {
+      clearInterval(compass.stuckTimer);
+      compass.stuckTimer = 0;
+    }
   }
 
   function bindCompassUseToggles() {
@@ -694,12 +888,20 @@
       }
 
       try {
+        const calMask = buildActiveMagMask();
         await window.sendCommandLong(
           MAV_CMD_DO_START_MAG_CAL,
-          0, 0, 0,
-          0, 0, 0, 0
+          calMask,
+          1,
+          1,
+          0,
+          0, 0, 0
         );
-        slog(`已下发 MAV_CMD_DO_START_MAG_CAL (mask=0)；本回合参与路: ${JSON.stringify(compass.calSnapshot)}`);
+        slog(`已下发 MAV_CMD_DO_START_MAG_CAL mask=${calMask} autosave=1 retry=1；参与: ${JSON.stringify(compass.calSnapshot)}`);
+        await requestMagCalStreamRates();
+        if (!compass.stuckTimer) {
+          compass.stuckTimer = setInterval(() => checkStuck99Compasses(), 2000);
+        }
         speak("罗盘校准启动，请开始无规则旋转飞机");
 
         setTimeout(() => {
@@ -729,6 +931,25 @@
         compass.fcMode = false;
         cancelAnimationFrame(compass.raf);
         updateCompassLiveLabel();
+      }
+    });
+
+    $("sc-compass-accept-stuck")?.addEventListener("click", () => {
+      if (!fcConnected()) {
+        const toast = $("sc-compass-toast");
+        if (toast) {
+          toast.textContent = "未连接飞控，无法发送接受校准";
+          toast.style.color = "#ef4444";
+        }
+        return;
+      }
+      const ok = acceptStuckCompassesNow("已手动向飞控发送「接受校准」");
+      if (!ok) {
+        const toast = $("sc-compass-toast");
+        if (toast) {
+          toast.textContent = "当前没有停在 99% 等待确认的罗盘";
+          toast.style.color = "#f59e0b";
+        }
       }
     });
 
