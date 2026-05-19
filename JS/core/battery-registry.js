@@ -185,7 +185,17 @@
           connected: true,
           voltage: window.battery_voltage,
           current: 0,
-          cells: Math.max(1, Math.round(window.battery_voltage / 3.7)),
+          cells: (() => {
+            const v = window.battery_voltage;
+            if (!v || v <= 0) return 1;
+            const MIN_CELL_V = 2.7;
+            const MAX_CELL_V = 4.45;
+            let s = Math.max(1, Math.round(v / 3.7));
+            const per = v / s;
+            if (per < MIN_CELL_V) s = Math.max(1, Math.floor(v / MIN_CELL_V));
+            else if (per > MAX_CELL_V) s = Math.max(1, Math.ceil(v / MAX_CELL_V));
+            return s;
+          })(),
           cellVoltages: [],
         }];
       }

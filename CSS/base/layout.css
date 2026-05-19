@@ -2104,7 +2104,7 @@ body {
   width: 100%;
   height: auto;
   min-height: 120px;
-  max-height: 220px;
+  max-height: 280px;
   display: block;
 }
 .power-topology-legend {
@@ -2197,12 +2197,9 @@ body {
   align-content: start;
 }
 .power-cards.hidden { display: none; }
-/* 2～4 路：双列；5 路及以上：单列列表，避免横向挤出与重叠 */
-.power-cards.power-cards--pair {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.power-cards.power-cards--many {
-  grid-template-columns: 1fr;
+/* 多路电源卡片：3 列布局 */
+.power-cards.power-cards--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .power-card {
@@ -2268,6 +2265,19 @@ body {
   font-size: 13px;
   color: #eef2ff;
 }
+
+.power-status-bar {
+  flex-shrink: 0;
+  align-self: center;
+  width: 48px;
+  height: 16px;
+  border-radius: 2px;
+  background: #4ade80;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.power-status-bar.warn { background: #f59e0b; }
+.power-status-bar.danger { background: #ef4444; }
+.power-status-bar.muted { background: #64748b; }
 .power-card-prefix {
   display: block;
   margin-top: 2px;
@@ -2383,6 +2393,25 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.power-monitor-select {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(106, 127, 190, 0.4);
+  background: #1a2238;
+  color: #e2e8f0;
+  max-width: 160px;
+  cursor: pointer;
+}
+.power-monitor-select:hover {
+  border-color: #6a7fbe;
+}
+.power-monitor-select:focus {
+  outline: none;
+  border-color: #4ade80;
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.15);
+}
 .power-kv-select {
   flex-direction: column;
   align-items: stretch;
@@ -2484,7 +2513,7 @@ body {
 }
 
 @media (max-width: 720px) {
-  .power-cards.power-cards--pair {
+  .power-cards.power-cards--three {
     grid-template-columns: 1fr;
   }
 }
@@ -2549,9 +2578,9 @@ body {
   color: #c6d4f5;
 }
 .power-fs-param {
-  font-size: 8px;
+  font-size: 10px;
   font-family: ui-monospace, monospace;
-  color: #6b7faa;
+  color: #e2e8f0;
   font-weight: 400;
 }
 .power-fs-field input[type="range"] {

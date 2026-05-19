@@ -64,20 +64,64 @@
     return { label: "正常", cls: "" };
   }
 
+  function topologyBatteryId(inst) {
+    if (inst.serialNum != null && inst.serialNum > 0) return Math.round(inst.serialNum);
+    if (inst.id != null) return inst.id + 1;
+    if (inst.slotIndex != null) return inst.slotIndex + 1;
+    return 1;
+  }
+
+  function topologyStatusColors(cls) {
+    switch (cls) {
+      case "warn":
+        return { fill: "#3d3018", stroke: "#f59e0b" };
+      case "danger":
+        return { fill: "#3b1818", stroke: "#ef4444" };
+      case "muted":
+        return { fill: "#1a2030", stroke: "#64748b" };
+      default:
+        return { fill: "#1a3328", stroke: "#4ade80" };
+    }
+  }
+
   function renderTopology(instances) {
     const svg = document.getElementById("power-topology-svg");
     const risk = document.getElementById("power-risk-banner");
     if (!svg || !risk) return;
     svg.innerHTML = "";
-    const pdbX = 530;
-    const pdbY = 70;
+
+    const W = 720;
+    const nodeW = 140;
+    const nodeH = 32;
+    const pdbW = 130;
+    const pdbH = 48;
+    const margin = 50;
+    const pdbX = (W - pdbW) / 2;
+    const pdbCx = W / 2;
+
+    const left = instances.slice(0, Math.ceil(instances.length / 2));
+    const right = instances.slice(Math.ceil(instances.length / 2));
+    const maxRows = Math.max(left.length, right.length, 1);
+    const nodeGap = 6;
+    const pitch = nodeH + nodeGap;
+    const maxSideH = maxRows * nodeH + Math.max(0, maxRows - 1) * nodeGap;
+    const vbH = Math.max(168, maxSideH + 40);
+    const pdbY = vbH / 2;
+    svg.setAttribute("viewBox", `0 0 ${W} ${vbH}`);
+
     const mk = (tag, attrs) => {
       const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
       Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, String(v)));
       return el;
     };
-    const pdb = mk("rect", { x: pdbX, y: pdbY - 24, width: 130, height: 48, rx: 10, fill: "#1f2944", stroke: "#6a7fbe" });
-    const pdbText = mk("text", { x: pdbX + 65, y: pdbY + 7, "text-anchor": "middle", fill: "#d8e2ff", "font-size": 16 });
+
+    const pdb = mk("rect", {
+      x: pdbX, y: pdbY - pdbH / 2, width: pdbW, height: pdbH, rx: 10,
+      fill: "#1f2944", stroke: "#6a7fbe",
+    });
+    const pdbText = mk("text", {
+      x: pdbCx, y: pdbY + 7, "text-anchor": "middle", fill: "#d8e2ff", "font-size": 16,
+    });
     pdbText.textContent = "分电板 PDB";
     svg.appendChild(pdb);
     svg.appendChild(pdbText);
@@ -89,29 +133,60 @@
       risk.textContent = `单路供电风险 ⚠️（${instances.length - online.length} 路已配置但未检测到 BMS）`;
     }
 
-    const rowH = Math.min(36, Math.max(24, 120 / Math.max(instances.length, 1)));
-    const startY = pdbY - ((instances.length - 1) * rowH) / 2;
-
-    instances.forEach((inst, idx) => {
-      const y = instances.length === 1 ? pdbY : startY + idx * rowH;
-      const bx = 70;
-      const fill = inst.connected ? "#1b243c" : "#151a28";
-      const stroke = inst.connected ? "#4e6199" : "#3a4158";
-      const b = mk("rect", { x: bx, y: y - 16, width: 140, height: 32, rx: 8, fill, stroke });
-      const t = mk("text", { x: bx + 70, y: y + 4, "text-anchor": "middle", fill: inst.connected ? "#ecf1ff" : "#8b95b0", "font-size": 12 });
-      t.textContent = inst.name;
-      const alive = inst.connected && inst.voltage > 1;
-      const line = mk("line", {
-        x1: bx + 140, y1: y, x2: pdbX, y2: pdbY,
-        stroke: alive ? "#4ade80" : "#64748b",
-        "stroke-width": alive ? 4 : 2,
-        "stroke-dasharray": inst.connected ? "" : "6 4",
+    function drawSide(items, side) {
+      const bx = side === "left" ? margin : W - margin - nodeW;
+      const sideSpan = items.length * nodeH + Math.max(0, items.length - 1) * nodeGap;
+      const startY = pdbY - sideSpan / 2 + nodeH / 2;
+      const lines = [];
+      items.forEach((inst, idx) => {
+        const y = items.length === 1 ? pdbY : startY + idx * pitch;
+        const st = statusOf(inst);
+        const colors = topologyStatusColors(st.cls);
+        const battId = topologyBatteryId(inst);
+        const cx = bx + nodeW / 2;
+        const b = mk("rect", {
+          x: bx, y: y - nodeH / 2, width: nodeW, height: nodeH, rx: 8,
+          fill: colors.fill, stroke: colors.stroke, "stroke-width": 2,
+        });
+        const nameText = mk("text", {
+          x: cx, y: y - 3, "text-anchor": "middle",
+          fill: inst.connected ? "#ecf1ff" : "#8b95b0", "font-size": 11,
+        });
+        nameText.textContent = inst.name;
+        const idText = mk("text", {
+          x: cx, y: y + 10, "text-anchor": "middle",
+          fill: "#c6d4f5", "font-size": 10, "font-weight": "600",
+        });
+        idText.textContent = `ID ${battId}`;
+        const alive = inst.connected && inst.voltage > 1;
+        const lineAttrs = side === "left"
+          ? { x1: bx + nodeW, y1: y, x2: pdbX, y2: pdbY }
+          : { x1: pdbX + pdbW, y1: pdbY, x2: bx, y2: y };
+        lines.push(mk("line", {
+          ...lineAttrs,
+          stroke: alive ? colors.stroke : "#64748b",
+          "stroke-width": alive ? 4 : 2,
+          "stroke-dasharray": inst.connected ? "" : "6 4",
+        }));
+        svg.appendChild(b);
+        svg.appendChild(nameText);
+        svg.appendChild(idText);
       });
-      svg.appendChild(b);
-      svg.appendChild(t);
-      svg.appendChild(line);
-    });
+      lines.forEach((line) => svg.appendChild(line));
+    }
+
+    drawSide(left, "left");
+    drawSide(right, "right");
   }
+
+  function getInstancesSignature(instances) {
+    return instances.map((i) => {
+      const st = statusOf(i);
+      return `${i.id}:${topologyBatteryId(i)}:${Math.round(i.monitorType || 0)}:${st.cls}`;
+    }).join("|");
+  }
+
+  let _lastInstancesSig = "";
 
   function renderCards(instances) {
     const root = document.getElementById("power-cards");
@@ -127,7 +202,14 @@
     const showEmpty = !instances.length;
     if (emptyEl) emptyEl.classList.toggle("hidden", !showEmpty);
     root.classList.toggle("hidden", showEmpty);
-    root.classList.toggle("two-cols", instances.length > 1);
+    root.classList.toggle("power-cards--three", instances.length > 1);
+
+    const sig = getInstancesSignature(instances);
+    if (sig === _lastInstancesSig && root.children.length === instances.length) {
+      updateLiveCardValues(instances);
+      return;
+    }
+    _lastInstancesSig = sig;
     root.innerHTML = "";
     if (showEmpty) return;
 
@@ -135,8 +217,10 @@
       const st = statusOf(inst);
       const card = document.createElement("article");
       card.className = `power-card ${inst.connected ? "" : "power-card-offline"} ${inst.type === "tethered" ? "tethered" : ""}`;
+      card.dataset.batteryId = String(inst.id);
       const prefix = inst.prefix || (inst.id === 0 ? "BATT" : `BATT${inst.id + 1}`);
-      const typeLabel = inst.typeShort || inst.type;
+      const monitorParam = `${prefix}_MONITOR`;
+      const currentMonitorType = Number.isFinite(inst.monitorType) ? Math.round(inst.monitorType) : 0;
       const voltStr = inst.connected ? `${inst.voltage.toFixed(2)}V` : "—";
       const currStr = inst.connected ? `${inst.current.toFixed(2)}A` : "—";
       const cellsStr = inst.connected && inst.cells > 0 ? `${inst.cells}S` : "—";
@@ -162,19 +246,87 @@
 
       card.innerHTML = `
         <div class="power-card-head">
-          <strong>🔋 ${inst.name}</strong>
+          <div class="power-card-title">
+            <strong>🔋 ${inst.name}</strong>
+            <span class="power-status-bar ${st.cls}" title="${st.label}" aria-label="${st.label}"></span>
+          </div>
           <span class="power-chip ${st.cls}">${st.label}</span>
         </div>
-        <div class="power-kv"><span>参数前缀</span><span>${prefix}_*</span></div>
-        <div class="power-kv"><span>监测类型</span><span>${typeLabel}</span></div>
-        <div class="power-kv"><span>总电压 / 电流</span><span>${voltStr} / ${currStr}</span></div>
-        <div class="power-kv"><span>串数</span><span>${cellsStr}</span></div>
-        ${inst.connected && inst.remaining != null && inst.remaining >= 0 ? `<div class="power-kv"><span>剩余</span><span>${inst.remaining}%</span></div>` : ""}
-        ${inst.connected && inst.temperature !== undefined ? `<div class="power-kv"><span>温度</span><span>${inst.temperature.toFixed(1)}°C</span></div>` : ""}
+        <div class="power-kv">
+          <span>监测类型</span>
+          <select class="power-monitor-select" data-monitor-param="${monitorParam}">
+            ${Object.entries(window.BATT_MONITOR_TYPES || {}).map(([val, label]) => {
+              const v = parseInt(val, 10);
+              const selected = v === currentMonitorType ? "selected" : "";
+              return `<option value="${v}" ${selected}>${label}</option>`;
+            }).join("")}
+          </select>
+        </div>
+        <div class="power-kv" data-kv="volt"><span>总电压 / 电流</span><span data-val="volt">${voltStr} / ${currStr}</span></div>
+        <div class="power-kv" data-kv="cells"><span>串数</span><span data-val="cells">${cellsStr}</span></div>
+        ${inst.connected && inst.remaining != null && inst.remaining >= 0 ? `<div class="power-kv" data-kv="remain"><span>剩余</span><span data-val="remain">${inst.remaining}%</span></div>` : ""}
+        ${inst.connected && inst.temperature !== undefined ? `<div class="power-kv" data-kv="temp"><span>温度</span><span data-val="temp">${inst.temperature.toFixed(1)} °C</span></div>` : ""}
         ${cellBars}
-        <div class="power-kv"><span>Fail-safe</span><span>${prefix}_FS_LOW_ACT</span></div>
       `;
       root.appendChild(card);
+
+      const sel = card.querySelector(".power-monitor-select");
+      if (sel) {
+        sel.addEventListener("change", () => {
+          const p = sel.getAttribute("data-monitor-param");
+          const val = parseInt(sel.value, 10);
+          if (p && window.params instanceof Map) {
+            window.params.set(p, val);
+            if (typeof log === "function") log(`已更新 ${p} = ${val}（需写入飞控生效）`, "power");
+          }
+        });
+      }
+    });
+  }
+
+  function updateLiveCardValues(instances) {
+    const root = document.getElementById("power-cards");
+    if (!root) return;
+
+    instances.forEach((inst) => {
+      const card = root.querySelector(`.power-card[data-battery-id="${inst.id}"]`);
+      if (!card) return;
+
+      const st = statusOf(inst);
+      const chip = card.querySelector(".power-chip");
+      if (chip) {
+        chip.className = `power-chip ${st.cls}`;
+        chip.textContent = st.label;
+      }
+
+      const statusBar = card.querySelector(".power-status-bar");
+      if (statusBar) {
+        statusBar.className = `power-status-bar ${st.cls}`;
+        statusBar.title = st.label;
+        statusBar.setAttribute("aria-label", st.label);
+      }
+
+      const voltEl = card.querySelector('[data-val="volt"]');
+      if (voltEl) {
+        voltEl.textContent = inst.connected
+          ? `${inst.voltage.toFixed(2)}V / ${inst.current.toFixed(2)}A`
+          : "— / —";
+      }
+
+      const cellsEl = card.querySelector('[data-val="cells"]');
+      if (cellsEl) {
+        cellsEl.textContent = inst.connected && inst.cells > 0 ? `${inst.cells}S` : "—";
+      }
+
+      const remainEl = card.querySelector('[data-val="remain"]');
+      if (remainEl && inst.connected && inst.remaining != null && inst.remaining >= 0) {
+        remainEl.textContent = `${inst.remaining}%`;
+      }
+
+      const tempEl = card.querySelector('[data-val="temp"]');
+      if (tempEl && inst.connected && inst.temperature !== undefined) {
+        tempEl.textContent = `${inst.temperature.toFixed(1)} °C`;
+      }
     });
   }
 
@@ -250,7 +402,6 @@
         ${fieldRow("紧急容量 (mAh)", keys.crtMah, "crtMah", `min="${CAP_MAH_MIN}" max="${CAP_MAH_MAX}" step="${CAP_MAH_STEP}" value="1000"`, "1000 mAh")}
         ${fieldRow("低容量动作", keys.fsLowAct, "fsLowMahAct", `min="0" max="${FS_ACT_MAX}" step="1" value="2"`, "2 — RTL 返航")}
         ${fieldRow("紧急容量动作", keys.fsCrtAct, "fsCrtMahAct", `min="0" max="${FS_ACT_MAX}" step="1" value="2"`, "2 — RTL 返航")}
-        <p class="power-fs-note muted">低/紧急容量动作与电压动作共用飞控参数（ArduPilot）。</p>
       </div>
     </article>`;
   }

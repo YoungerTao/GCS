@@ -947,8 +947,32 @@ function parseBatteryStatus(payload) {
 
   const safeVoltage = connected ? voltage : 0;
   const safeCurrent = connected ? current : 0;
+
+  function computeReasonableCells(voltage, reportedCells) {
+    if (!voltage || voltage <= 0) return reportedCells || 1;
+    const MIN_CELL_V = 2.7;
+    const MAX_CELL_V = 4.45;
+    const NOMINAL = 3.7;
+    let estS = Math.max(1, Math.round(voltage / NOMINAL));
+    let perEst = voltage / estS;
+    if (perEst < MIN_CELL_V) {
+      estS = Math.max(1, Math.floor(voltage / MIN_CELL_V));
+    } else if (perEst > MAX_CELL_V) {
+      estS = Math.max(1, Math.ceil(voltage / MAX_CELL_V));
+    }
+    if (reportedCells && reportedCells > 0) {
+      const perReported = voltage / reportedCells;
+      if (perReported >= MIN_CELL_V && perReported <= MAX_CELL_V) {
+        return reportedCells;
+      }
+      return estS;
+    }
+    return estS;
+  }
+
+  const reportedCells = cellVoltages.length || 0;
   const safeCells = connected
-    ? (cellVoltages.length || Math.max(1, Math.round(safeVoltage / 3.7)))
+    ? computeReasonableCells(safeVoltage, reportedCells)
     : 0;
   const uiType = typeof window.batteryUiType === "function"
     ? window.batteryUiType(monitorType, connected ? cellVoltages : [], safeVoltage)
