@@ -167,11 +167,36 @@ class SerialHub:
 MAVLINK_HUB = SerialHub("bridge")
 SLCAN_HUB = SerialHub("slcan")
 
+# Lawicel SLCAN bitrate codes (S0..S8)
+SLCAN_BITRATE_CODE = {
+    10: "0",
+    20: "1",
+    50: "2",
+    100: "3",
+    125: "4",
+    250: "5",
+    500: "6",
+    800: "7",
+    1000: "8",
+}
+
+
+def init_slcan_adapter(hub, bitrate_kbps=1000):
+    """Bring up a USB-CAN adapter in native SLCAN ASCII mode (not MAVLink CAN_FORWARD)."""
+    code = SLCAN_BITRATE_CODE.get(int(bitrate_kbps))
+    if not code:
+        raise RuntimeError(f"unsupported slcan bitrate {bitrate_kbps}")
+    # Reset adapter state: close, set bitrate, open CAN.
+    for cmd in (b"C\r", f"S{code}\r".encode("ascii"), b"O\r"):
+        hub.write(cmd)
+        time.sleep(0.08)
+
 
 class SlcanMavlinkMonitor:
     def __init__(self):
         self.lock = threading.Lock()
         self.parser = mavlink2.MAVLink(None) if mavlink2 is not None else None
+        self.slcan_ascii_buffer = bytearray()
         self.forward_enabled = False
         self.target_system = 1
         self.target_component = 1
@@ -179,10 +204,14 @@ class SlcanMavlinkMonitor:
         self.error_count = 0
         self.nodes = {}
         self.node_ascii = {}
+        self.node_recent_frames = {}
+        self.node_frame_counts = {}
+        self.last_frame_at = 0.0
 
     def reset(self):
         with self.lock:
             self.parser = mavlink2.MAVLink(None) if mavlink2 is not None else None
+            self.slcan_ascii_buffer = bytearray()
             self.forward_enabled = False
             self.target_system = 1
             self.target_component = 1
@@ -190,19 +219,28 @@ class SlcanMavlinkMonitor:
             self.error_count = 0
             self.nodes = {}
             self.node_ascii = {}
+            self.node_recent_frames = {}
+            self.node_frame_counts = {}
+            self.last_frame_at = 0.0
 
     def _trim_frames(self, now):
         self.frame_times = [t for t in self.frame_times if now - t <= 1.0]
 
-    def _prune_nodes(self, now):
-        stale = [node_id for node_id, node in self.nodes.items() if now - node.get("last_seen", 0) > 4.0]
+    def _prune_nodes(self, now, max_age_s=15.0):
+        stale = [node_id for node_id, node in self.nodes.items() if now - node.get("last_seen", 0) > max_age_s]
         for node_id in stale:
             self.nodes.pop(node_id, None)
+            self.node_ascii.pop(node_id, None)
+            self.node_recent_frames.pop(node_id, None)
+            self.node_frame_counts.pop(node_id, None)
 
     def feed(self, data):
-        if self.parser is None or not data:
+        if not data:
             return
         with self.lock:
+            self._feed_slcan_ascii(data)
+            if self.parser is None:
+                return
             for byte in data:
                 try:
                     msg = self.parser.parse_char(bytes([byte]))
@@ -211,6 +249,45 @@ class SlcanMavlinkMonitor:
                 if msg is None:
                     continue
                 self._handle_message(msg)
+
+    def _feed_slcan_ascii(self, data):
+        self.slcan_ascii_buffer.extend(data)
+        while True:
+            idx = -1
+            for sep in (b"\r", b"\n"):
+                pos = self.slcan_ascii_buffer.find(sep)
+                if pos != -1 and (idx == -1 or pos < idx):
+                    idx = pos
+            if idx == -1:
+                break
+            line = bytes(self.slcan_ascii_buffer[:idx]).strip()
+            del self.slcan_ascii_buffer[: idx + 1]
+            if not line:
+                continue
+            try:
+                self._handle_slcan_line(line.decode("ascii", errors="ignore"))
+            except Exception:
+                continue
+
+    def _handle_slcan_line(self, line):
+        if not line:
+            return
+        head = line[0]
+        if head not in ("T", "t"):
+            # Ignore adapter chatter (version strings, OK/ERROR, etc.)
+            return
+        extended = head == "T"
+        can_id_len = 8 if extended else 3
+        min_len = 1 + can_id_len + 1
+        if len(line) < min_len:
+            return
+        can_id = int(line[1:1 + can_id_len], 16)
+        dlc = int(line[1 + can_id_len], 16)
+        data_hex = line[2 + can_id_len: 2 + can_id_len + dlc * 2]
+        if len(data_hex) < dlc * 2:
+            return
+        data_bytes = bytes.fromhex(data_hex)
+        self._handle_can_frame(can_id, dlc, data_bytes, bus=1, source="SLCAN Direct")
 
     def _handle_message(self, msg):
         now = time.time()
@@ -222,42 +299,61 @@ class SlcanMavlinkMonitor:
         if mtype == "CAN_FRAME":
             msg_dict = msg.to_dict()
             frame_id = int(msg_dict.get("id", 0))
-            node_id = frame_id & 0x7F
-            if 0 < node_id <= 127:
-                node = self.nodes.get(node_id, {
-                    "nodeId": node_id,
-                    "name": "org.ardupilot" if node_id == 1 else f"node-{node_id}",
-                    "status": "online",
-                    "source": "MAVLink CAN_FRAME",
-                    "rxCount": 0,
-                    "first_seen": now,
-                })
-                node["status"] = "online"
-                node["source"] = f"MAVLink CAN{int(msg_dict.get('bus', 0)) + 1}"
-                node["rxCount"] = int(node.get("rxCount", 0)) + 1
-                node["last_seen"] = now
-                node["lastCanId"] = f"0x{frame_id:X}"
-                node["lastDlc"] = int(msg_dict.get("len", 0))
-                raw_data = msg_dict.get("data", [])
-                if isinstance(raw_data, (bytes, bytearray)):
-                    data_bytes = bytes(raw_data)
-                else:
-                    data_bytes = bytes(int(x) & 0xFF for x in raw_data[: int(msg_dict.get("len", 0))])
-                node["lastDataHex"] = data_bytes.hex().upper()
-                ascii_chunk = "".join(chr(b) if 32 <= b <= 126 else " " for b in data_bytes)
-                previous_ascii = self.node_ascii.get(node_id, "")
-                merged_ascii = (previous_ascii + ascii_chunk)[-96:]
-                self.node_ascii[node_id] = merged_ascii
-                inferred_name = self._infer_node_name(node_id, merged_ascii)
-                node["name"] = inferred_name["name"]
-                node["displayName"] = inferred_name["displayName"]
-                node["deviceHint"] = inferred_name["deviceHint"]
-                node["asciiHint"] = merged_ascii.strip()
-                self.nodes[node_id] = node
-            self.frame_times.append(now)
-            self._trim_frames(now)
-            self._prune_nodes(now)
+            raw_data = msg_dict.get("data", [])
+            if isinstance(raw_data, (bytes, bytearray)):
+                data_bytes = bytes(raw_data)
+            else:
+                data_bytes = bytes(int(x) & 0xFF for x in raw_data[: int(msg_dict.get("len", 0))])
+            self._handle_can_frame(
+                frame_id,
+                int(msg_dict.get("len", 0)),
+                data_bytes,
+                bus=int(msg_dict.get("bus", 0)) + 1,
+                source=f"MAVLink CAN{int(msg_dict.get('bus', 0)) + 1}",
+            )
             return
+
+    def _handle_can_frame(self, frame_id, dlc, data_bytes, bus=1, source="SLCAN Direct"):
+        now = time.time()
+        self.last_frame_at = now
+        node_id = frame_id & 0x7F
+        if 0 < node_id <= 127:
+            node = self.nodes.get(node_id, {
+                "nodeId": node_id,
+                "name": "org.ardupilot" if node_id == 1 else f"node-{node_id}",
+                "status": "online",
+                "source": source,
+                "rxCount": 0,
+                "first_seen": now,
+            })
+            node["status"] = "online"
+            node["source"] = source
+            node["rxCount"] = int(node.get("rxCount", 0)) + 1
+            node["last_seen"] = now
+            node["lastCanId"] = f"0x{frame_id:X}"
+            node["lastDlc"] = int(dlc)
+            node["lastDataHex"] = data_bytes.hex().upper()
+            recent = self.node_recent_frames.get(node_id, [])
+            recent.append({
+                "ts": int(now * 1000),
+                "canId": f"0x{frame_id:X}",
+                "dlc": int(dlc),
+                "dataHex": data_bytes.hex().upper(),
+                "bus": int(bus),
+            })
+            self.node_recent_frames[node_id] = recent[-40:]
+            counts = self.node_frame_counts.get(node_id, {})
+            can_id_key = f"0x{frame_id:X}"
+            counts[can_id_key] = int(counts.get(can_id_key, 0)) + 1
+            self.node_frame_counts[node_id] = counts
+            inferred_name = self._infer_node_name(node_id, "")
+            node["name"] = inferred_name["name"]
+            node["displayName"] = inferred_name["displayName"]
+            node["deviceHint"] = inferred_name["deviceHint"]
+            node["asciiHint"] = ""
+            self.nodes[node_id] = node
+        self.frame_times.append(now)
+        self._trim_frames(now)
 
     def _infer_node_name(self, node_id, ascii_hint):
         text = ascii_hint.lower()
@@ -295,6 +391,18 @@ class SlcanMavlinkMonitor:
                 "displayName": "DroneCAN ESC",
                 "deviceHint": "ESC",
             }
+        if node_id == 10:
+            return {
+                "name": "org.ardupilot",
+                "displayName": "ArduPilot Flight Controller",
+                "deviceHint": "Likely flight controller",
+            }
+        if node_id == 34:
+            return {
+                "name": "org.cuav.can_pmu_lite",
+                "displayName": "CUAV CAN PMU Lite",
+                "deviceHint": "Power module / BEC",
+            }
         return {
             "name": "org.ardupilot" if node_id == 1 else f"node-{node_id}",
             "displayName": "Flight Controller" if node_id == 1 else f"Node {node_id}",
@@ -305,7 +413,9 @@ class SlcanMavlinkMonitor:
         now = time.time()
         with self.lock:
             self._trim_frames(now)
-            self._prune_nodes(now)
+            # Do not immediately drop nodes on brief parser / polling gaps.
+            if now - self.last_frame_at > 15.0:
+                self._prune_nodes(now)
             return {
                 "forwardEnabled": self.forward_enabled,
                 "targetSystem": self.target_system,
@@ -328,6 +438,8 @@ class SlcanMavlinkMonitor:
                             "lastDlc": node.get("lastDlc", 0),
                             "firstSeenAt": int(node.get("first_seen", now) * 1000),
                             "lastSeenAt": int(node.get("last_seen", now) * 1000),
+                            "recentFrames": list(self.node_recent_frames.get(node["nodeId"], []))[-20:],
+                            "frameIdCounts": dict(sorted(self.node_frame_counts.get(node["nodeId"], {}).items(), key=lambda kv: kv[1], reverse=True)[:12]),
                         }
                         for node in self.nodes.values()
                     ],
@@ -398,6 +510,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if self.path == "/health":
+            send_json(self, 200, {"ok": True, "service": "com-bridge"})
+            return
         if self.path == "/com-ports":
             send_json(self, 200, {"ports": read_ports()})
             return
@@ -453,11 +568,33 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/slcan-open":
                 port = str(payload.get("port") or "").strip() or str(detect_slcan_port() or "").strip()
                 baudrate = int(payload.get("baudrate") or 115200)
+                bitrate_kbps = int(payload.get("bitrate_kbps") or 1000)
                 if not port:
                     raise RuntimeError("slcan adapter port not found")
                 SLCAN_MONITOR.reset()
                 status = SLCAN_HUB.open(port, baudrate)
-                send_json(self, 200, {"ok": True, "adapterPort": port, **status})
+                init_slcan_adapter(SLCAN_HUB, bitrate_kbps=bitrate_kbps)
+                send_json(self, 200, {
+                    "ok": True,
+                    "adapterPort": port,
+                    "bitrateKbps": bitrate_kbps,
+                    "slcanInit": True,
+                    **status,
+                })
+                return
+            if self.path == "/slcan-init":
+                bitrate_kbps = int(payload.get("bitrate_kbps") or 1000)
+                force = bool(payload.get("force"))
+                if not SLCAN_HUB.status().get("open"):
+                    raise RuntimeError("slcan port not open")
+                now = time.time()
+                last_init = getattr(SLCAN_HUB, "_last_slcan_init_at", 0.0)
+                if not force and now - last_init < 30.0:
+                    send_json(self, 200, {"ok": True, "skipped": True, "bitrateKbps": bitrate_kbps})
+                    return
+                init_slcan_adapter(SLCAN_HUB, bitrate_kbps=bitrate_kbps)
+                SLCAN_HUB._last_slcan_init_at = now
+                send_json(self, 200, {"ok": True, "bitrateKbps": bitrate_kbps, "slcanInit": True})
                 return
             if self.path == "/slcan-close":
                 SLCAN_HUB.close()
@@ -474,6 +611,14 @@ class Handler(BaseHTTPRequestHandler):
                 data = base64.b64decode(b64.encode("ascii"))
                 written = SLCAN_HUB.write(data)
                 send_json(self, 200, {"ok": True, "written": written})
+                return
+            if self.path == "/slcan-inject":
+                line = str(payload.get("line") or "").strip()
+                if not line:
+                    raise RuntimeError("line is required")
+                SLCAN_MONITOR.feed((line + "\r").encode("ascii"))
+                status = SLCAN_MONITOR.status()
+                send_json(self, 200, {"ok": True, "injected": line, **status})
                 return
         except Exception as e:
             send_json(self, 500, {"ok": False, "error": str(e)})

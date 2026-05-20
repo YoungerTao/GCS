@@ -1,15 +1,88 @@
 window._knownPorts = window._knownPorts || [];
 window._comOptionMap = window._comOptionMap || new Map();
 window._systemComPorts = window._systemComPorts || [];
-window._autoConnectAttempted = window._autoConnectAttempted || false;
+window._autoConnectAttempts = 0;
+const AUTO_CONNECT_MAX_ATTEMPTS = 6;
+const BRIDGE_API = "http://127.0.0.1:8765";
+let ensureBridgePromise = null;
+
+async function probeBridgeHealth() {
+  try {
+    const resp = await fetch(`${BRIDGE_API}/health`, { cache: "no-store" });
+    return resp.ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function requestBridgeStartup() {
+  const bases = [
+    "http://127.0.0.1:8766",
+    (typeof location !== "undefined" && String(location.origin || "").startsWith("http"))
+      ? location.origin
+      : "",
+  ].filter(Boolean);
+  const seen = new Set();
+  for (const base of bases) {
+    if (seen.has(base)) continue;
+    seen.add(base);
+    try {
+      const resp = await fetch(`${base}/__gcs/ensure-bridge`, {
+        method: "POST",
+        cache: "no-store",
+      });
+      if (resp.ok) return true;
+    } catch (_) {
+      // Try next runtime origin.
+    }
+  }
+  return false;
+}
+
+async function ensureComBridgeRunning() {
+  if (typeof window.ensureGcsStackReady === "function") {
+    await window.ensureGcsStackReady();
+  }
+  if (await probeBridgeHealth()) {
+    window._comBridgeOnline = true;
+    window._comBridgeBackoffUntil = 0;
+    return true;
+  }
+  if (!ensureBridgePromise) {
+    ensureBridgePromise = (async () => {
+      await requestBridgeStartup();
+      for (let i = 0; i < 32; i += 1) {
+        if (await probeBridgeHealth()) {
+          window._comBridgeOnline = true;
+          window._comBridgeBackoffUntil = 0;
+          window._comBridgeOfflineHintLogged = false;
+          return true;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      window._comBridgeOnline = false;
+      if (!window._comBridgeOfflineHintLogged) {
+        window._comBridgeOfflineHintLogged = true;
+        if (typeof window.log === "function") {
+          window.log("本地 COM 桥接未就绪。请从桌面「GCS」图标打开。");
+        }
+      }
+      return false;
+    })().finally(() => {
+      ensureBridgePromise = null;
+    });
+  }
+  return ensureBridgePromise;
+}
 
 async function fetchSystemComPortsImpl() {
   const now = Date.now();
   if (typeof window._comBridgeBackoffUntil === "number" && now < window._comBridgeBackoffUntil) {
     return Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : [];
   }
+  await ensureComBridgeRunning();
   try {
-    const resp = await fetch("http://127.0.0.1:8765/com-ports", { cache: "no-store" });
+    const resp = await fetch(`${BRIDGE_API}/com-ports`, { cache: "no-store" });
     if (!resp.ok) throw new Error(`bridge list failed (${resp.status})`);
     const data = await resp.json();
     const ports = Array.isArray(data.ports) ? data.ports : [];
@@ -20,7 +93,7 @@ async function fetchSystemComPortsImpl() {
     return ports;
   } catch (_) {
     window._comBridgeOnline = false;
-    window._comBridgeBackoffUntil = Date.now() + 30000;
+    window._comBridgeBackoffUntil = Date.now() + 5000;
     window._lastFetchedSystemPorts = window._lastFetchedSystemPorts || [];
     return window._lastFetchedSystemPorts;
   }
@@ -41,10 +114,95 @@ function getRememberedPortLabel() {
   try { return localStorage.getItem("gcs.lastPortLabel") || ""; } catch (_) { return ""; }
 }
 
+function extractComDeviceId(text) {
+  const m = String(text || "").match(/\b(COM\d+)\b/i);
+  return m ? m[1].toUpperCase() : "";
+}
+
+function isAutoReconnectEnabled() {
+  try {
+    return localStorage.getItem("gcs.autoReconnect") !== "0";
+  } catch (_) {
+    return true;
+  }
+}
+
+function getRememberedDeviceId() {
+  try {
+    const id = localStorage.getItem("gcs.lastDeviceId") || "";
+    if (id) return id.toUpperCase();
+    return extractComDeviceId(getRememberedPortLabel());
+  } catch (_) {
+    return "";
+  }
+}
+
+function shouldAutoReconnectOnLoad() {
+  if (!isAutoReconnectEnabled()) return false;
+  try {
+    if (localStorage.getItem("gcs.wasConnected") === "0") return false;
+  } catch (_) { /* ignore */ }
+  return !!(getRememberedPortKey() || getRememberedPortLabel() || getRememberedDeviceId());
+}
+
+function restoreRememberedBaud() {
+  try {
+    const raw = localStorage.getItem("gcs.lastBaud");
+    const n = raw != null ? parseInt(String(raw), 10) : NaN;
+    if (!Number.isFinite(n) || n <= 0) return;
+    const el = document.getElementById("serialBaud");
+    if (el) el.value = String(n);
+  } catch (_) { /* ignore */ }
+}
+
+function resolveRememberedPortValue(comSelect) {
+  if (!comSelect) return "";
+  const rememberedKey = getRememberedPortKey();
+  if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
+    return rememberedKey;
+  }
+  const deviceId = getRememberedDeviceId();
+  if (deviceId) {
+    for (const [val, meta] of window._comOptionMap.entries()) {
+      if (val === "__add__") continue;
+      if (meta?.systemPort?.deviceId && String(meta.systemPort.deviceId).toUpperCase() === deviceId) {
+        return val;
+      }
+    }
+    const byDev = Array.from(comSelect.options).find(
+      (o) => o.value !== "__add__" && String(o.text || "").toUpperCase().includes(deviceId)
+    );
+    if (byDev) return byDev.value;
+  }
+  const rememberedLabel = getRememberedPortLabel();
+  if (rememberedLabel) {
+    const match = Array.from(comSelect.options).find((o) => String(o.text || "") === rememberedLabel);
+    if (match && match.value && match.value !== "__add__") return match.value;
+  }
+  return "";
+}
+
 function rememberSelectedPort(value, label) {
   try {
     if (value) localStorage.setItem("gcs.lastPortKey", value);
     if (label) localStorage.setItem("gcs.lastPortLabel", label);
+    const meta = window._comOptionMap?.get(value);
+    const deviceId = meta?.systemPort?.deviceId || extractComDeviceId(label);
+    if (deviceId) localStorage.setItem("gcs.lastDeviceId", String(deviceId).toUpperCase());
+    const baudEl = document.getElementById("serialBaud");
+    if (baudEl) localStorage.setItem("gcs.lastBaud", String(baudEl.value || "115200"));
+  } catch (_) { /* ignore */ }
+}
+
+function markGcsSessionConnected() {
+  try {
+    localStorage.setItem("gcs.wasConnected", "1");
+  } catch (_) { /* ignore */ }
+}
+
+function markGcsSessionDisconnected() {
+  try {
+    localStorage.setItem("gcs.wasConnected", "0");
   } catch (_) { /* ignore */ }
 }
 
@@ -54,27 +212,50 @@ function setConnectSerialHint(text) {
 }
 
 async function tryAutoConnect() {
-  if (window._autoConnectAttempted) return;
+  if (!shouldAutoReconnectOnLoad()) return;
   if (window._gcsConnState === "connected" || window._gcsConnState === "connecting") return;
+  if (window._autoConnectAttempts >= AUTO_CONNECT_MAX_ATTEMPTS) return;
+
   const comSelect = document.getElementById("comPort");
   if (!comSelect || !comSelect.options.length) return;
-  const rememberedKey = getRememberedPortKey();
-  const rememberedLabel = getRememberedPortLabel();
-  let target = "";
-  if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
-    target = rememberedKey;
-  } else if (rememberedLabel) {
-    const match = Array.from(comSelect.options).find((o) => String(o.text || "") === rememberedLabel);
-    if (match && match.value && match.value !== "__add__") target = match.value;
-  }
+
+  const target = resolveRememberedPortValue(comSelect);
   if (!target) return;
-  window._autoConnectAttempted = true;
+
+  window._autoConnectAttempts += 1;
   comSelect.value = target;
+  restoreRememberedBaud();
+
+  try {
+    if (localStorage.getItem("gcs.autoLoadParams") !== "0") {
+      window._pendingParamRequest = true;
+    }
+  } catch (_) {
+    window._pendingParamRequest = true;
+  }
+
+  const hint = getRememberedDeviceId() || comSelect.options[comSelect.selectedIndex]?.text || target;
+  setConnectSerialHint(`正在自动重连 ${hint}…`);
+
   setTimeout(() => {
+    if (window._gcsConnState === "connected" || window._gcsConnState === "connecting") return;
     if (typeof window.connect === "function") {
       try { window.connect(); } catch (_) { /* ignore */ }
     }
-  }, 180);
+  }, 220);
+}
+
+function scheduleAutoReconnectAfterRefresh() {
+  if (!shouldAutoReconnectOnLoad()) return;
+  const delays = [0, 600, 1800, 4000];
+  delays.forEach((ms) => {
+    setTimeout(() => {
+      if (window._gcsConnState === "connected" || window._gcsConnState === "connecting") return;
+      refreshPorts({ probeBridge: ms > 0 })
+        .then(() => tryAutoConnect())
+        .catch(() => {});
+    }, ms);
+  });
 }
 
 async function refreshPorts(opts = {}) {
@@ -216,7 +397,11 @@ async function requestAllPortsInteractive() {
 }
 
 function initComPortAutoRefresh() {
-  window.addEventListener("load", () => refreshPorts({ probeBridge: true }));
+  window.addEventListener("load", () => {
+    refreshPorts({ probeBridge: true })
+      .then(() => scheduleAutoReconnectAfterRefresh())
+      .catch(() => scheduleAutoReconnectAfterRefresh());
+  });
 
   if (!window._comBridgeFocusHooked) {
     window._comBridgeFocusHooked = true;
@@ -241,12 +426,16 @@ function initComPortAutoRefresh() {
   window._comBridgeSlowProbeTimer = setInterval(() => refreshPorts({ probeBridge: true }), 60000);
 }
 
+window.ensureComBridgeRunning = ensureComBridgeRunning;
 window.fetchSystemComPorts = fetchSystemComPorts;
 window.refreshPorts = refreshPorts;
 window.requestAndRefreshPort = requestAndRefreshPort;
 window.requestAllPortsInteractive = requestAllPortsInteractive;
 window.initComPortAutoRefresh = initComPortAutoRefresh;
 window.rememberSelectedPort = rememberSelectedPort;
+window.markGcsSessionConnected = markGcsSessionConnected;
+window.markGcsSessionDisconnected = markGcsSessionDisconnected;
+window.tryAutoConnect = tryAutoConnect;
 
 window.initSerialAutoRefresh = initComPortAutoRefresh;
 initComPortAutoRefresh();

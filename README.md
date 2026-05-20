@@ -55,17 +55,40 @@ gcs-project/
 
 注意：Web Serial 需要安全上下文 (localhost 或 HTTPS)。
 
-### 方式 1: Python HTTP 服务器
-```bash
-# 在 gcs-project/ 目录下
-python3 -m http.server 8080
-# 浏览器打开 http://localhost:8080
+### 客户安装（交付）
+
+在目标电脑上**只需安装一次**：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install-gcs-desktop.ps1
 ```
 
-### 方式 2: 使用 COM 桥接（可选，显示真实 COM 名）
-```bash
-# 启动桥接服务
-python3 tools/com-bridge/server.py
+会在桌面与开始菜单创建 **「GCS」** 快捷方式。之后日常使用：**双击桌面「GCS」图标**即可（内部调用根目录 `GCS.cmd`，静默拉起 watchdog / 运行时并打开浏览器）。
+
+可选：登录时仅后台启动 watchdog（加快首次打开，不弹浏览器）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install-gcs-desktop.ps1 -WatchdogStartup
+```
+
+### 自动启动架构
+
+```
+8767  gcs_watchdog   POST /launch  → 按需拉起运行时
+8766  gcs-runtime    静态页面 + POST /__gcs/ensure-bridge
+8765  com-bridge     COM 枚举 / SLCAN / MAVLink 串口桥
+```
+
+- 页面 **`JS/core/gcs-auto-start.js`** 最先执行：若不在 8766（含错误书签），在 watchdog 在线时会请求 launcher 启动运行时并跳转到 canonical URL。
+- **`com-bridge.js`** 通过 `ensureGcsStackReady()` / `ensureComBridgeRunning()` 保证桥接在线。
+- 运行时退出后由 **watchdog / supervisor** 在下次 `/launch` 或页面探测时恢复。
+
+### 开发调试
+
+```bat
+Start-GCS.bat                   # 与 GCS.cmd 相同流程，可显示错误
+python tools/gcs_watchdog.py    # 仅 launcher
+python tools/gcs-runtime.py     # UI + 桥接（阻塞前台）
 ```
 
 ## 技术栈

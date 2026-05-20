@@ -11,6 +11,9 @@ window._bridgeMode = window._bridgeMode || "auto";
 window._bridgeConnActive = window._bridgeConnActive || false;
 
 async function bridgeFetch(path, body = null) {
+  if (typeof window.ensureComBridgeRunning === "function") {
+    await window.ensureComBridgeRunning();
+  }
   const opts = body ? {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -185,6 +188,9 @@ async function disconnectSerial() {
   } finally {
     setConnectionUI("disconnected");
   }
+  if (typeof window.markGcsSessionDisconnected === "function") {
+    window.markGcsSessionDisconnected();
+  }
   log("🔌 已取消连接（串口已释放）");
   try { await refreshPorts(); } catch (_) { /* ignore */ }
 }
@@ -243,6 +249,9 @@ async function connect() {
             selectedValue,
             comSelect.options[comSelect.selectedIndex]?.text || selectedValue
           );
+        }
+        if (typeof window.markGcsSessionConnected === "function") {
+          window.markGcsSessionConnected();
         }
         schedulePostConnectMavlinkInfoRequests();
         if (typeof window.applyConnectionTelemetrySetup === "function") {
@@ -368,6 +377,9 @@ async function connect() {
         comSelect.value || selectedValue,
         comSelect.options[comSelect.selectedIndex]?.text || selectedValue
       );
+    }
+    if (typeof window.markGcsSessionConnected === "function") {
+      window.markGcsSessionConnected();
     }
     schedulePostConnectMavlinkInfoRequests();
     if (typeof window.applyConnectionTelemetrySetup === "function") {
