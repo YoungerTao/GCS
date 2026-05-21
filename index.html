@@ -2,6 +2,18 @@
 <html>
 <head>
 <meta charset="utf-8">
+<script>
+/* Cursor「Open in Browser」为 file:// → 跳到 Live Server 端口（须先 Open with Live Server 一次） */
+(function () {
+  if (location.protocol !== "file:") return;
+  var q = location.search || "";
+  var h = location.hash || "";
+  try {
+    fetch("http://127.0.0.1:8767/launch", { method: "POST", mode: "cors", cache: "no-store" }).catch(function () {});
+  } catch (e) { /* ignore */ }
+  location.replace("http://127.0.0.1:5501/index.html" + q + h);
+})();
+</script>
 <title>GCS HUD + MAP + PARAM</title>
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -804,9 +816,9 @@
 <script src="JS/core/mavlink-helpers.js" defer></script>
 <script src="JS/core/ardupilot-telemetry.js" defer></script>
 <script src="JS/core/gcs-mission-debug.js" defer></script>
-<script src="JS/core/gcs-auto-start.js?v=2"></script>
+<script src="JS/core/gcs-auto-start.js?v=5"></script>
 <script src="JS/services/serial.js" defer></script>
-<script src="JS/services/com-bridge.js?v=3" defer></script>
+<script src="JS/services/com-bridge.js?v=6" defer></script>
 <script src="JS/services/param-loader.js" defer></script>
 <script src="JS/core/ardupilot-sensor-detect.js" defer></script>
 <script src="JS/core/dronecan-decode.js?v=2" defer></script>

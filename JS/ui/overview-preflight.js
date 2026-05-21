@@ -116,9 +116,92 @@
     warn.textContent = `${issues.join("，")}，禁止起飞`;
   }
 
+  const FRAME_CLASS_LABELS = {
+    1: "四旋翼", 2: "六旋翼", 3: "八旋翼", 4: "共轴八轴", 5: "Y6",
+    6: "传统直升机", 7: "三旋翼", 8: "单旋翼", 9: "共轴双桨", 10: "双旋翼",
+    11: "双旋翼直升机", 12: "十二轴", 13: "直升机四轴", 14: "十旋翼",
+    15: "脚本矩阵", 16: "6DoF 脚本", 17: "动态脚本矩阵",
+  };
+  const FRAME_TYPE_LABELS = {
+    0: "Plus", 1: "X", 2: "V", 3: "H", 4: "V-Tail", 5: "A-Tail",
+    10: "Y6B", 11: "Y6F", 12: "BetaFlightX", 13: "DJIX", 14: "ClockwiseX",
+    15: "I", 18: "BetaFlightXReversed", 19: "Y4",
+  };
+
+  let frameParamProbeAt = 0;
+
+  function maybeRequestFrameParams() {
+    const st = (window._gcsConnState || "").toLowerCase();
+    if (st !== "connected" || frameParamKeys()) return;
+    const now = Date.now();
+    if (now - frameParamProbeAt < 4000) return;
+    frameParamProbeAt = now;
+    const names = ["FRAME_CLASS", "FRAME_TYPE", "Q_FRAME_CLASS", "Q_FRAME_TYPE"];
+    names.forEach((n, i) => {
+      setTimeout(() => {
+        if (typeof window.requestParamByName === "function") {
+          window.requestParamByName(n).catch(() => {});
+        }
+      }, i * 120);
+    });
+  }
+
+  function updateOverviewAirframeType() {
+    const ovEl = document.getElementById("ov-airframe-type");
+    if (!ovEl) return;
+
+    const st = (window._gcsConnState || "disconnected").toLowerCase();
+    if (st !== "connected") {
+      ovEl.textContent = "未连接或未收到机架参数";
+      ovEl.className = "muted";
+      ovEl.title = "由飞控通过 MAVLink 参数 FRAME_CLASS / FRAME_TYPE（或 VTOL 的 Q_*）下发";
+      return;
+    }
+
+    const keys = frameParamKeys();
+    if (!keys) {
+      const pmap = window.params;
+      if (pmap instanceof Map && pmap.size > 0) {
+        ovEl.textContent = "已连接，参数表无 FRAME_CLASS（可能未收全或非 Copter）";
+        ovEl.className = "warn";
+      } else {
+        ovEl.textContent = "已连接，等待机架参数…";
+        ovEl.className = "warn";
+      }
+      maybeRequestFrameParams();
+      return;
+    }
+
+    const fc = getp(keys.classKey);
+    const ft = getp(keys.typeKey);
+    if (fc == null) {
+      ovEl.textContent = "等待飞控 FRAME_CLASS / FRAME_TYPE…";
+      ovEl.className = "warn";
+      maybeRequestFrameParams();
+      return;
+    }
+
+    const map =
+      typeof window.getMotorMapByFrame === "function"
+        ? window.getMotorMapByFrame(fc, ft ?? 1)
+        : null;
+    if (map && map.name) {
+      ovEl.textContent = `${map.name}（飞控）`;
+      ovEl.className = "ok";
+    } else {
+      const cl = FRAME_CLASS_LABELS[fc] || `CLASS ${fc}`;
+      const tl =
+        ft != null ? ` / ${FRAME_TYPE_LABELS[ft] || `TYPE ${ft}`}` : "";
+      ovEl.textContent = `${cl}${tl}`;
+      ovEl.className = "ok";
+    }
+    ovEl.title = `${keys.classKey}=${fc}, ${keys.typeKey}=${ft ?? "—"}`;
+  }
+
   function refresh() {
     updateLinkStatus();
     updateGlobalWarning();
+    updateOverviewAirframeType();
   }
 
   function onPrearmStatustext(text) {

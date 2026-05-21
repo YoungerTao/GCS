@@ -9,23 +9,23 @@
 
   /** ArduCopter FRAME_CLASS（与飞控参数说明一致） */
   const FRAME_CLASS_OPTIONS = [
-    { id: 1, name: "Quad", label: "四旋�?, icon: "4" },
-    { id: 2, name: "Hexa", label: "六旋�?, icon: "6" },
-    { id: 3, name: "Octa", label: "八旋�?, icon: "8" },
+    { id: 1, name: "Quad", label: "四旋翼", icon: "4" },
+    { id: 2, name: "Hexa", label: "六旋翼", icon: "6" },
+    { id: 3, name: "Octa", label: "八旋翼", icon: "8" },
     { id: 4, name: "OctaQuad", label: "共轴八轴", icon: "8×2" },
     { id: 5, name: "Y6", label: "Y6", icon: "Y6" },
-    { id: 6, name: "Heli", label: "传统直升�?, icon: "H" },
-    { id: 7, name: "Tri", label: "三旋�?, icon: "3" },
-    { id: 8, name: "SingleCopter", label: "单旋�?, icon: "1" },
-    { id: 9, name: "CoaxCopter", label: "共轴双桨", icon: "�? },
-    { id: 10, name: "BiCopter", label: "双旋�?, icon: "2" },
+    { id: 6, name: "Heli", label: "传统直升机", icon: "H" },
+    { id: 7, name: "Tri", label: "三旋翼", icon: "3" },
+    { id: 8, name: "SingleCopter", label: "单旋翼", icon: "1" },
+    { id: 9, name: "CoaxCopter", label: "共轴双桨", icon: "⊕" },
+    { id: 10, name: "BiCopter", label: "双旋翼", icon: "2" },
     { id: 11, name: "Heli_Dual", label: "双旋翼直升机", icon: "H×2" },
-    { id: 12, name: "DodecaHexa", label: "十二�?, icon: "12" },
-    { id: 13, name: "HeliQuad", label: "直升机四�?, icon: "HQ" },
-    { id: 14, name: "Deca", label: "十旋�?, icon: "10" },
-    { id: 15, name: "Scripting Matrix", label: "脚本矩阵", icon: "�? },
+    { id: 12, name: "DodecaHexa", label: "十二轴", icon: "12" },
+    { id: 13, name: "HeliQuad", label: "直升机四轴", icon: "HQ" },
+    { id: 14, name: "Deca", label: "十旋翼", icon: "10" },
+    { id: 15, name: "Scripting Matrix", label: "脚本矩阵", icon: "⌗" },
     { id: 16, name: "6DoF Scripting", label: "6DoF 脚本", icon: "6D" },
-    { id: 17, name: "Dynamic Scripting", label: "动态脚本矩�?, icon: "�? },
+    { id: 17, name: "Dynamic Scripting", label: "动态脚本矩阵", icon: "∿" },
   ];
 
   const FRAME_TYPE_NAMES = {
@@ -45,93 +45,98 @@
     19: "Y4",
   };
 
-  /** �������Ϳ�Ƭʾ��ͼ������ SVG��viewBox 80��56�� */
+  /** 机架类型卡片示意图（内联 SVG，viewBox 80×56） */
   function buildFrameClassIconSvg(classId) {
     const cx = 40;
-    const cy = 28;
-    const blue = "#38bdf8";
-    const green = "#34d399";
-    const gray = "#64748b";
-    const arm = (angle, len, color = "#5b6b8f", width = 2) => {
-      const rad = (angle * Math.PI) / 180;
+    const cy = 30;
+    const hub = `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#64748b"/>`;
+    const arm = (a1, len, w = 1.2) => {
+      const rad = (a1 * Math.PI) / 180;
       const x2 = cx + len * Math.sin(rad);
       const y2 = cy - len * Math.cos(rad);
-      return `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${width}" stroke-linecap="round"/>`;
+      return `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="#5b6b8f" stroke-width="${w}"/>`;
     };
-    const prop = (angle, len, r = 5, color = blue) => {
-      const rad = (angle * Math.PI) / 180;
+    const prop = (a1, len, r = 4.5, fill = "#38bdf8") => {
+      const rad = (a1 * Math.PI) / 180;
       const px = cx + len * Math.sin(rad);
       const py = cy - len * Math.cos(rad);
-      return `${arm(angle, len)}<circle cx="${px}" cy="${py}" r="${r}" fill="${color}" fill-opacity="0.16" stroke="${color}" stroke-width="1.5"/>`;
+      return `${arm(a1, len)}<circle cx="${px}" cy="${py}" r="${r}" fill="${fill}" fill-opacity="0.35" stroke="${fill}" stroke-width="1.4"/>`;
     };
-    const coax = (angle, len) => {
-      const rad = (angle * Math.PI) / 180;
+    const ring = (count, len, offset = 0) => {
+      const step = 360 / count;
+      let s = "";
+      for (let i = 0; i < count; i += 1) s += prop(offset + i * step, len, 4, "#38bdf8");
+      return s;
+    };
+    const coaxProp = (a1, len) => {
+      const rad = (a1 * Math.PI) / 180;
       const px = cx + len * Math.sin(rad);
       const py = cy - len * Math.cos(rad);
-      return `${arm(angle, len)}<circle cx="${px}" cy="${py - 4}" r="4" fill="${blue}" fill-opacity="0.16" stroke="${blue}" stroke-width="1.2"/><circle cx="${px}" cy="${py + 4}" r="4" fill="${green}" fill-opacity="0.16" stroke="${green}" stroke-width="1.2"/>`;
+      return `${arm(a1, len)}<circle cx="${px}" cy="${py - 5}" r="3.8" fill="#38bdf8" fill-opacity="0.25" stroke="#38bdf8" stroke-width="1.2"/><circle cx="${px}" cy="${py + 5}" r="3.8" fill="#34d399" fill-opacity="0.25" stroke="#34d399" stroke-width="1.2"/>`;
     };
-    const hub = `<circle cx="${cx}" cy="${cy}" r="4" fill="${gray}"/><circle cx="${cx}" cy="${cy}" r="9" fill="none" stroke="#334155" stroke-width="1"/>`;
-    const fuselage = `<rect x="34" y="18" width="12" height="20" rx="4" fill="#334155" stroke="#475569" stroke-width="1"/>`;
-    const tailBoom = `<line x1="40" y1="18" x2="40" y2="8" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>`;
-    const tailBar = `<line x1="40" y1="8" x2="52" y2="8" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>`;
-    const skids = `<line x1="30" y1="38" x2="50" y2="38" stroke="#64748b" stroke-width="1.6" stroke-linecap="round"/><line x1="34" y1="38" x2="32" y2="45" stroke="#64748b" stroke-width="1.4" stroke-linecap="round"/><line x1="46" y1="38" x2="48" y2="45" stroke="#64748b" stroke-width="1.4" stroke-linecap="round"/>`;
-    const ring = (count, len, offset = 0) => Array.from({ length: count }, (_, i) => prop(offset + i * (360 / count), len)).join("");
 
     let body = "";
     switch (classId) {
       case 1:
-        body = `${hub}${arm(45, 18)}${arm(135, 18)}${arm(225, 18)}${arm(315, 18)}${prop(45, 19)}${prop(135, 19)}${prop(225, 19)}${prop(315, 19)}`;
+        body = ring(4, 20, 45);
         break;
       case 2:
-        body = `${hub}${ring(6, 20)}`;
+        body = ring(6, 20);
         break;
       case 3:
-        body = `${hub}${ring(8, 20)}`;
+        body = ring(8, 20);
         break;
       case 4:
-        body = `${hub}${coax(45, 18)}${coax(135, 18)}${coax(225, 18)}${coax(315, 18)}`;
+        body = [0, 90, 180, 270].map((a) => coaxProp(a, 20)).join("");
         break;
       case 5:
-        body = `${hub}${coax(0, 18)}${coax(120, 18)}${coax(240, 18)}`;
+        body = `${prop(0, 20)}${prop(135, 18)}${prop(225, 18)}${prop(135, 12, 3.2)}${prop(225, 12, 3.2)}${prop(0, 12, 3.2, "#34d399")}`;
         break;
       case 6:
-        body = `<circle cx="40" cy="28" r="11" fill="#1f2937" stroke="#475569" stroke-width="1"/>${tailBoom}${tailBar}<circle cx="40" cy="8" r="10" fill="none" stroke="${blue}" stroke-width="1.8"/><line x1="32" y1="8" x2="48" y2="8" stroke="${blue}" stroke-width="1.2"/><line x1="40" y1="0" x2="40" y2="16" stroke="${blue}" stroke-width="1.2"/><circle cx="52" cy="8" r="4" fill="none" stroke="${green}" stroke-width="1.2"/>${skids}`;
+        body = `<rect x="34" y="32" width="12" height="16" rx="2" fill="#475569"/><line x1="40" y1="32" x2="40" y2="14" stroke="#94a3b8" stroke-width="1.2"/><circle cx="40" cy="10" r="8" fill="none" stroke="#38bdf8" stroke-width="1.6"/><line x1="32" y1="10" x2="48" y2="10" stroke="#38bdf8" stroke-width="1.2"/><line x1="40" y1="2" x2="40" y2="18" stroke="#38bdf8" stroke-width="1.2"/>`;
         break;
       case 7:
-        body = `${hub}${prop(0, 18)}${prop(135, 18)}${prop(225, 18)}<line x1="40" y1="28" x2="40" y2="45" stroke="#5b6b8f" stroke-width="2" stroke-linecap="round"/>`;
+        body = ring(3, 20, 0);
         break;
       case 8:
-        body = `<circle cx="40" cy="18" r="10" fill="none" stroke="${blue}" stroke-width="1.6"/><rect x="35" y="28" width="10" height="14" rx="2" fill="#475569"/>`;
+        body = `<circle cx="40" cy="18" r="11" fill="none" stroke="#38bdf8" stroke-width="1.6"/><rect x="36" y="28" width="8" height="14" rx="2" fill="#475569"/>`;
         break;
       case 9:
-        body = `<circle cx="40" cy="20" r="7" fill="none" stroke="${blue}" stroke-width="1.5"/><circle cx="40" cy="33" r="7" fill="none" stroke="${green}" stroke-width="1.5"/><rect x="37" y="38" width="6" height="8" rx="1" fill="#475569"/>`;
+        body = `<circle cx="40" cy="22" r="7" fill="none" stroke="#38bdf8" stroke-width="1.4"/><circle cx="40" cy="34" r="7" fill="none" stroke="#34d399" stroke-width="1.4"/><rect x="37" y="38" width="6" height="10" rx="1" fill="#475569"/>`;
         break;
       case 10:
-        body = `<circle cx="28" cy="28" r="9" fill="none" stroke="${blue}" stroke-width="1.5"/><circle cx="52" cy="28" r="9" fill="none" stroke="${green}" stroke-width="1.5"/><rect x="34" y="22" width="12" height="12" rx="4" fill="#334155"/>`;
+        body = `<circle cx="26" cy="30" r="9" fill="none" stroke="#38bdf8" stroke-width="1.4"/><circle cx="54" cy="30" r="9" fill="none" stroke="#34d399" stroke-width="1.4"/>`;
         break;
       case 11:
-        body = `<circle cx="28" cy="15" r="6" fill="none" stroke="${blue}" stroke-width="1.2"/><rect x="26" y="21" width="4" height="12" rx="1" fill="#475569"/><circle cx="52" cy="15" r="6" fill="none" stroke="${green}" stroke-width="1.2"/><rect x="50" y="21" width="4" height="12" rx="1" fill="#475569"/><rect x="34" y="24" width="12" height="10" rx="4" fill="#334155"/>${skids}`;
+        body = `<g transform="translate(-10,0)">${`<circle cx="28" cy="16" r="6" fill="none" stroke="#38bdf8" stroke-width="1.2"/><rect x="26" y="22" width="4" height="10" fill="#475569"/>`}</g><g transform="translate(10,0)">${`<circle cx="52" cy="16" r="6" fill="none" stroke="#34d399" stroke-width="1.2"/><rect x="50" y="22" width="4" height="10" fill="#475569"/>`}</g>`;
         break;
       case 12:
-        body = `${hub}${ring(12, 20)}`;
+        body = ring(12, 20);
         break;
       case 13:
-        body = `${hub}${arm(45, 17)}${arm(135, 17)}${arm(225, 17)}${arm(315, 17)}<circle cx="40" cy="28" r="8" fill="none" stroke="#f59e0b" stroke-width="1.4"/>${skids}`;
+        body = `${ring(4, 18, 45)}<circle cx="40" cy="30" r="5" fill="none" stroke="#f59e0b" stroke-width="1.2"/>`;
         break;
       case 14:
-        body = `${hub}${ring(10, 20)}`;
+        body = ring(10, 20);
         break;
       case 15:
-        body = `<rect x="24" y="14" width="32" height="20" rx="3" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2"/>${Array.from({ length: 6 }, (_, i) => `<rect x="${28 + (i % 3) * 10}" y="${18 + Math.floor(i / 3) * 8}" width="5" height="5" rx="1" fill="#38bdf8" fill-opacity="0.55"/>`).join("")}`;
+        body = Array.from({ length: 9 }, (_, i) => {
+          const col = i % 3;
+          const row = Math.floor(i / 3);
+          return `<rect x="${24 + col * 12}" y="${14 + row * 10}" width="8" height="6" rx="1" fill="#38bdf8" fill-opacity="0.35" stroke="#38bdf8" stroke-width="0.8"/>`;
+        }).join("");
         break;
       case 16:
-        body = `<polygon points="40,10 54,20 54,36 40,46 26,36 26,20" fill="#1e293b" stroke="#a78bfa" stroke-width="1.2"/><circle cx="40" cy="28" r="6" fill="none" stroke="#a78bfa" stroke-width="1.2"/>${[[0,-14],[12,-7],[12,7],[0,14],[-12,7],[-12,-7]].map(([dx, dy]) => `<line x1="40" y1="28" x2="${40 + dx}" y2="${28 + dy}" stroke="#a78bfa" stroke-width="1"/>`).join("")}`;
+        body = `<circle cx="40" cy="30" r="10" fill="none" stroke="#a78bfa" stroke-width="1.2"/>${[[1,0],[-1,0],[0,1],[0,-1],[0.7,0.7],[-0.7,0.7]].map(([dx, dy]) => `<line x1="40" y1="30" x2="${40 + dx * 14}" y2="${30 - dy * 14}" stroke="#a78bfa" stroke-width="1"/>`).join("")}`;
         break;
       case 17:
-        body = `<path d="M22 36 C30 24, 50 24, 58 36" fill="none" stroke="#f472b6" stroke-width="1.4"/><path d="M22 20 C30 32, 50 32, 58 20" fill="none" stroke="${blue}" stroke-width="1.4"/>${ring(8, 14, 22.5)}`;
+        body = `<path d="M22 38 Q40 18 58 38" fill="none" stroke="#f472b6" stroke-width="1.2"/><path d="M22 22 Q40 42 58 22" fill="none" stroke="#38bdf8" stroke-width="1.2"/>${ring(4, 14, 45)}`;
         break;
       default:
         body = hub;
+    }
+    if (![6, 8, 9, 10, 11, 15, 16, 17].includes(classId)) {
+      body = hub + body;
     }
     return `<svg class="af-class-fig-svg" viewBox="0 0 80 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${body}</svg>`;
   }
@@ -151,7 +156,7 @@
   };
 
   const state = {
-    firmware: { kind: "unknown", copterUi: false, title: "等待连接飞控�?, hint: "" },
+    firmware: { kind: "unknown", copterUi: false, title: "等待连接飞控…", hint: "" },
     frameClass: null,
     frameType: null,
     frameMap: null,
@@ -205,7 +210,7 @@
         kind: "copter",
         copterUi: true,
         icon: "🛸",
-        title: fwText && !/等待|�?.test(fwText) ? fwText : "ArduCopter · 多旋翼固�?,
+        title: fwText && !/等待|…/.test(fwText) ? fwText : "ArduCopter · 多旋翼固件",
         hint: "",
       };
     }
@@ -213,9 +218,9 @@
       return {
         kind: hasQ ? "vtol" : "plane",
         copterUi: false,
-        icon: hasQ ? "✈️" : "🛩�?,
+        icon: hasQ ? "✈️" : "🛩️",
         title: fwText || (hasQ ? "ArduPlane VTOL" : "ArduPlane"),
-        hint: "当前固件�?ArduCopter，机架参数请使用 Q_FRAME_* 或在 Mission Planner 中配�?,
+        hint: "当前固件非 ArduCopter，机架参数请使用 Q_FRAME_* 或在 Mission Planner 中配置",
       };
     }
     if (/rover|boat|sub/i.test(fwText)) {
@@ -233,15 +238,15 @@
         copterUi: true,
         icon: "🛸",
         title: "ArduCopter（推断）",
-        hint: "已检测到 FRAME_CLASS 参数，按多旋翼固件配置机�?,
+        hint: "已检测到 FRAME_CLASS 参数，按多旋翼固件配置机架",
       };
     }
     return {
       kind: "unknown",
       copterUi: false,
       icon: "🔌",
-      title: "等待连接飞控�?,
-      hint: "连接并加载参数后，将自动识别 ArduCopter 等固件类�?,
+      title: "等待连接飞控…",
+      hint: "连接并加载参数后，将自动识别 ArduCopter 等固件类型",
     };
   }
 
@@ -291,8 +296,8 @@
     if (!btn) return;
     btn.classList.toggle("pending", state.dirty);
     btn.textContent = state.dirty
-      ? "有未写入修改，请点击保存并重启飞�?
-      : "写入并重启飞�?(Write & Reboot)";
+      ? "有未写入修改，请点击保存并重启飞控"
+      : "写入并重启飞控 (Write & Reboot)";
   }
 
   function orientByValue(v) {
@@ -365,7 +370,7 @@
     if (!state.firmware.copterUi) {
       const msg = document.createElement("p");
       msg.className = "af-empty-msg";
-      msg.textContent = "连接 ArduCopter 飞控并加载参数后可选择机架类型�?;
+      msg.textContent = "连接 ArduCopter 飞控并加载参数后可选择机架类型。";
       root.appendChild(msg);
       return;
     }
@@ -405,14 +410,14 @@
     if (HELICOPTER_CLASSES.has(fc)) {
       root.innerHTML = "";
       note.textContent =
-        "选择 Heli / Heli_Dual 后仅需写入 FRAME_CLASS；旋翼机械与 RSC 参数请在「电机」或全部参数页配置�?;
+        "选择 Heli / Heli_Dual 后仅需写入 FRAME_CLASS；旋翼机械与 RSC 参数请在「电机」或全部参数页配置。";
       note.classList.remove("hidden");
       return;
     }
 
     if (SCRIPTING_CLASSES.has(fc)) {
       root.innerHTML = "";
-      note.textContent = "Scripting 机架无需选择 FRAME_TYPE；保存时将只写入 FRAME_CLASS�?;
+      note.textContent = "Scripting 机架无需选择 FRAME_TYPE；保存时将只写入 FRAME_CLASS。";
       note.classList.remove("hidden");
       return;
     }
@@ -422,7 +427,7 @@
     note.classList.add("hidden");
 
     if (!opts.length) {
-      note.textContent = "暂无可用布局；请确认 FRAME_CLASS 或查�?ArduPilot 文档�?;
+      note.textContent = "暂无可用布局；请确认 FRAME_CLASS 或查阅 ArduPilot 文档。";
       note.classList.remove("hidden");
       return;
     }
@@ -454,7 +459,7 @@
       frameEl.textContent = `${state.frameMap.name}`;
       frameStateEl.textContent = `CLASS ${fc} · TYPE ${ft}`;
       frameStateEl.className = "af-chip af-chip-ok";
-      mixerEl.textContent = "已加�?;
+      mixerEl.textContent = "已加载";
     } else if (fc != null) {
       const tl = ft != null && usesFrameType(fc) ? ` · ${typeLabel(ft)}` : "";
       frameEl.textContent = `${classLabel(fc)}${tl}`;
@@ -463,9 +468,9 @@
       mixerEl.textContent = HELICOPTER_CLASSES.has(fc) ? "直升机（无矩阵混控）" : "无匹配混控图";
     } else {
       frameEl.textContent = "飞控尚未下发机架参数";
-      frameStateEl.textContent = "无参�?;
+      frameStateEl.textContent = "无参数";
       frameStateEl.className = "af-chip af-chip-danger";
-      mixerEl.textContent = "未加�?;
+      mixerEl.textContent = "未加载";
     }
 
     orientEl.textContent = orientByValue(state.ahrsOrient).key;
@@ -488,7 +493,7 @@
       } else {
         ovEl.textContent = "等待飞控 FRAME_CLASS / FRAME_TYPE";
         ovEl.className = "danger pulse";
-        ovEl.title = "连接飞控并加载参数列�?;
+        ovEl.title = "连接飞控并加载参数列表";
       }
     }
   }
@@ -510,7 +515,7 @@
     return el;
   }
 
-  /** 在电机中�?(0,0) 原地旋转虚线环；避免 CSS transform 导致�?SVG 原点公转 */
+  /** 在电机中心 (0,0) 原地旋转虚线环；避免 CSS transform 导致绕 SVG 原点公转 */
   function attachMotorSpinAnim(circle, clockwise) {
     const anim = document.createElementNS("http://www.w3.org/2000/svg", "animateTransform");
     anim.setAttribute("attributeName", "transform");
@@ -546,11 +551,11 @@
         "font-size": 14,
       });
       if (HELICOPTER_CLASSES.has(state.frameClass)) {
-        t.textContent = "传统直升机无矩阵电机拓扑示意，请使用电机测试�?;
+        t.textContent = "传统直升机无矩阵电机拓扑示意，请使用电机测试页";
       } else if (SCRIPTING_CLASSES.has(state.frameClass)) {
         t.textContent = "Scripting 机架混控由脚本定义，无固定拓扑图";
       } else if (state.frameClass != null) {
-        t.textContent = "当前 CLASS/TYPE 暂无拓扑图，仍可将参数写入飞�?;
+        t.textContent = "当前 CLASS/TYPE 暂无拓扑图，仍可将参数写入飞控";
       } else {
         t.textContent = "请选择机架类型与混控布局";
       }
@@ -687,12 +692,12 @@
 
   async function writeConfig() {
     if (typeof window.sendParamSet !== "function") {
-      log("⚠️ 当前不可写参数：sendParamSet 未就�?, "af-write");
+      log("⚠️ 当前不可写参数：sendParamSet 未就绪", "af-write");
       return;
     }
     const keys = getFrameParamKeys();
     if (!keys) {
-      log("⚠️ 未找�?FRAME_CLASS / FRAME_TYPE 参数", "af-write");
+      log("⚠️ 未找到 FRAME_CLASS / FRAME_TYPE 参数", "af-write");
       return;
     }
     let sent = 0;
@@ -706,14 +711,14 @@
     }
     if (await window.sendParamSet("AHRS_ORIENT", state.ahrsOrient)) sent += 1;
     if (sent > 0) {
-      log(`�?机架配置已写�?(${sent} 条参�?`, "af-write");
+      log(`✅ 机架配置已写入 (${sent} 条参数)`, "af-write");
     } else {
-      log("⚠️ 参数写入未成功，请检查连�?, "af-write");
+      log("⚠️ 参数写入未成功，请检查连接", "af-write");
       return;
     }
     if (typeof window.sendCommandLong === "function") {
       await window.sendCommandLong(246, 1, 0, 0, 0, 0, 0, 0);
-      log("🔁 已发送飞控重启命�?, "af-write");
+      log("🔁 已发送飞控重启命令", "af-write");
     }
     setDirty(false);
   }

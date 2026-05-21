@@ -2,6 +2,7 @@ import base64
 import json
 import re
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,7 +20,26 @@ except Exception:
     mavlink2 = None
 
 
-def read_ports():
+def _classify_port_item(item):
+    name = str(item.get("name", "")).lower()
+    dev = str(item.get("deviceId", "")).lower()
+    if "slcan" in name or "slcan" in dev:
+        return "slcan"
+    if "mavlink" in name:
+        return "mavlink"
+    return "serial"
+
+
+def _finalize_port_list(data):
+    if not isinstance(data, list):
+        return []
+    for item in data:
+        item["role"] = _classify_port_item(item)
+        item["isSlcanAdapter"] = item["role"] == "slcan"
+    return data
+
+
+def _read_ports_windows():
     ps_script = r"""
 $ports = Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Name, PNPDeviceID
 $result = @()
@@ -54,24 +74,11 @@ $result | ConvertTo-Json -Depth 3
         data = json.loads(out)
         if isinstance(data, dict):
             data = [data]
-        if not isinstance(data, list):
-            return []
-
-        def classify(item):
-            name = str(item.get("name", "")).lower()
-            if "slcan" in name:
-                return "slcan"
-            if "mavlink" in name:
-                return "mavlink"
-            return "serial"
+        data = _finalize_port_list(data)
 
         def com_key(item):
             m = re.match(r"COM(\d+)", str(item.get("deviceId", "")).upper())
             return int(m.group(1)) if m else 10**9
-
-        for item in data:
-            item["role"] = classify(item)
-            item["isSlcanAdapter"] = item["role"] == "slcan"
 
         data.sort(key=com_key)
         return data
@@ -79,9 +86,352 @@ $result | ConvertTo-Json -Depth 3
         return []
 
 
+def _read_ports_unix():
+    if serial is None:
+        return []
+    data = []
+    try:
+        from serial.tools import list_ports
+
+        for p in list_ports.comports():
+            device = str(p.device or "").strip()
+            if not device:
+                continue
+            vid = p.vid
+            pid = p.pid
+            desc = (p.description or p.name or device).strip()
+            item = {
+                "deviceId": device,
+                "name": desc,
+                "usbVendorId": vid if isinstance(vid, int) else None,
+                "usbProductId": pid if isinstance(pid, int) else None,
+            }
+            data.append(item)
+    except Exception:
+        return []
+
+    data = _finalize_port_list(data)
+
+    def _port_rank(item):
+        dev = str(item.get("deviceId", "")).lower()
+        name = str(item.get("name", "")).lower()
+        if any(x in dev for x in ("bluetooth", "incoming-port", "debug-console")):
+            return (2, dev)
+        if any(x in name for x in ("bluetooth", "debug", "incoming")):
+            return (2, dev)
+        if any(x in dev for x in ("usbmodem", "usbserial", "ttyacm", "cu.usb")):
+            return (0, dev)
+        return (1, dev)
+
+    data.sort(key=_port_rank)
+    return data
+
+
+def read_ports():
+    if sys.platform == "win32":
+        return _read_ports_windows()
+    return _read_ports_unix()
+
+
+_PORT_PROBE_CACHE = {"at": 0.0, "ports": []}
+_PORT_PROBE_LOCK = threading.Lock()
+
+
+def _should_probe_port(item):
+    dev = str(item.get("deviceId", "")).lower()
+    if any(x in dev for x in ("bluetooth", "incoming-port", "debug-console")):
+        return False
+    return any(x in dev for x in ("usbmodem", "usbserial", "ttyacm", "cu.", "com"))
+
+
+def _count_mavlink_frames(data, max_frames=32):
+    """Mission Planner 思路：用 MAVLink 解析器统计有效帧（优先 HEARTBEAT）。"""
+    if not data or mavlink2 is None:
+        return 0, False, 0
+    parser = mavlink2.MAVLink(None)
+    frames = 0
+    heartbeat = False
+    stx_hits = 0
+    for byte in data:
+        if byte in (0xFD, 0xFE):
+            stx_hits += 1
+        try:
+            msg = parser.parse_char(bytes([byte]))
+        except Exception:
+            msg = None
+        if msg is None:
+            continue
+        frames += 1
+        try:
+            if msg.get_type() == "HEARTBEAT":
+                heartbeat = True
+        except Exception:
+            pass
+        if frames >= max_frames:
+            break
+    return frames, heartbeat, stx_hits
+
+
+def _count_slcan_lines(data):
+    text = data.decode("ascii", errors="ignore")
+    lines = 0
+    lawicel = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        low = line.lower()
+        if "lawicel" in low or "slcan" in low:
+            lawicel = True
+        if line[0] in ("T", "t", "R", "r") and len(line) >= 5:
+            tail = line[1:]
+            if all(c in "0123456789ABCDEFabcdef" for c in tail[: min(8, len(tail))]):
+                lines += 1
+    return lines, lawicel
+
+
+def _printable_ratio(data):
+    if not data:
+        return 0.0
+    printable = sum(1 for b in data if b in (9, 10, 13) or 32 <= b <= 126)
+    return printable / max(1, len(data))
+
+
+def _collect_port_sample(port, baudrate=115200):
+    """短暂打开端口采样：先被动听 MAVLink，再发 SLCAN 初始化命令观察响应。"""
+    if serial is None or not port:
+        return b""
+    hub = SerialHub("probe")
+    buf = bytearray()
+    try:
+        hub.open(port, baudrate)
+        time.sleep(0.42)
+        buf.extend(hub.read_buffer(131072))
+        for cmd in (b"C\r", b"S8\r", b"O\r", b"V\r"):
+            try:
+                hub.write(cmd)
+            except Exception:
+                pass
+            time.sleep(0.05)
+        time.sleep(0.22)
+        buf.extend(hub.read_buffer(131072))
+    except Exception:
+        return b""
+    finally:
+        try:
+            hub.close()
+        except Exception:
+            pass
+    return bytes(buf)
+
+
+def _analyze_port_sample(data):
+    mav_frames, heartbeat, stx_hits = _count_mavlink_frames(data)
+    slcan_lines, lawicel = _count_slcan_lines(data)
+    printable = _printable_ratio(data)
+    detail_parts = [
+        f"mav={mav_frames}",
+        f"hb={1 if heartbeat else 0}",
+        f"stx={stx_hits}",
+        f"slcan={slcan_lines}",
+        f"ascii={printable:.2f}",
+    ]
+    detail = ",".join(detail_parts)
+
+    if heartbeat or mav_frames >= 4:
+        return {
+            "probeRole": "mavlink",
+            "probeConfidence": "high",
+            "probeDetail": detail + (",heartbeat" if heartbeat else ""),
+            "probeMavlinkFrames": mav_frames,
+            "probeSlcanLines": slcan_lines,
+        }
+    if mav_frames >= 2 and slcan_lines == 0 and stx_hits >= 6:
+        return {
+            "probeRole": "mavlink",
+            "probeConfidence": "high",
+            "probeDetail": detail,
+            "probeMavlinkFrames": mav_frames,
+            "probeSlcanLines": slcan_lines,
+        }
+    if slcan_lines >= 1 and mav_frames == 0 and stx_hits < 3:
+        return {
+            "probeRole": "slcan",
+            "probeConfidence": "high",
+            "probeDetail": detail + ",t-frames",
+            "probeMavlinkFrames": mav_frames,
+            "probeSlcanLines": slcan_lines,
+        }
+    if lawicel and mav_frames == 0:
+        return {
+            "probeRole": "slcan",
+            "probeConfidence": "medium",
+            "probeDetail": detail + ",lawicel",
+            "probeMavlinkFrames": mav_frames,
+            "probeSlcanLines": slcan_lines,
+        }
+    if stx_hits >= 3 and mav_frames >= 1:
+        return {
+            "probeRole": "mavlink",
+            "probeConfidence": "medium",
+            "probeDetail": detail,
+            "probeMavlinkFrames": mav_frames,
+            "probeSlcanLines": slcan_lines,
+        }
+    return {
+        "probeRole": "unknown",
+        "probeConfidence": "low",
+        "probeDetail": detail,
+        "probeMavlinkFrames": mav_frames,
+        "probeSlcanLines": slcan_lines,
+    }
+
+
+def _apply_probe_analysis(item, analysis):
+    item.update(analysis)
+    role = str(analysis.get("probeRole", "unknown"))
+    if role in ("mavlink", "slcan"):
+        item["role"] = role
+        item["isSlcanAdapter"] = role == "slcan"
+    else:
+        item["role"] = _classify_port_item(item)
+        item["isSlcanAdapter"] = item["role"] == "slcan"
+    return item
+
+
+def _resolve_probe_group(group, baudrate=115200):
+    """同 VID/PID 双口对比判定（与 MP 里两路分别打开对比一致）。"""
+    if not group:
+        return group
+    candidates = [x for x in group if _should_probe_port(x)]
+    if not candidates:
+        return group
+
+    scored = []
+    for item in candidates:
+        sample = _collect_port_sample(item.get("deviceId"), baudrate)
+        analysis = _analyze_port_sample(sample)
+        _apply_probe_analysis(item, analysis)
+        scored.append(
+            (
+                item,
+                int(analysis.get("probeMavlinkFrames") or 0),
+                str(analysis.get("probeRole")),
+                str(analysis.get("probeConfidence")),
+            )
+        )
+
+    if len(scored) < 2:
+        return group
+
+    scored.sort(key=lambda row: row[1], reverse=True)
+    best_mav = scored[0]
+    second = scored[1]
+
+    if best_mav[1] >= 2 and second[1] == 0:
+        _apply_probe_analysis(
+            best_mav[0],
+            {
+                "probeRole": "mavlink",
+                "probeConfidence": "high",
+                "probeDetail": f"pair-win,mav={best_mav[1]}",
+                "probeMavlinkFrames": best_mav[1],
+                "probeSlcanLines": 0,
+            },
+        )
+        _apply_probe_analysis(
+            second[0],
+            {
+                "probeRole": "slcan",
+                "probeConfidence": "high" if second[3] in ("medium", "high") else "medium",
+                "probeDetail": "pair-other",
+                "probeMavlinkFrames": second[1],
+                "probeSlcanLines": int(second[0].get("probeSlcanLines") or 0),
+            },
+        )
+        return group
+
+    ordered = sorted(candidates, key=lambda x: str(x.get("deviceId", "")).lower())
+    if ordered[0].get("probeRole") == "unknown" and ordered[1].get("probeRole") == "unknown":
+        ordered[0]["probeRole"] = "mavlink"
+        ordered[0]["probeConfidence"] = "heuristic"
+        ordered[0]["probeDetail"] = "order-first"
+        ordered[1]["probeRole"] = "slcan"
+        ordered[1]["probeConfidence"] = "heuristic"
+        ordered[1]["probeDetail"] = "order-second"
+        for item in ordered:
+            _sync_port_role_fields(item)
+    return group
+
+
+def _sync_port_role_fields(item):
+    role = str(item.get("probeRole", "unknown"))
+    if role in ("mavlink", "slcan"):
+        item["role"] = role
+        item["isSlcanAdapter"] = role == "slcan"
+    return item
+
+
+def probe_serial_role(port, baudrate=115200):
+    analysis = _analyze_port_sample(_collect_port_sample(port, baudrate))
+    return str(analysis.get("probeRole", "unknown"))
+
+
+def _apply_port_role_probes(ports, baudrate=115200):
+    if not ports:
+        return []
+    out = []
+    groups = {}
+    for raw in ports:
+        item = dict(raw)
+        if not _should_probe_port(item):
+            item["probeRole"] = _classify_port_item(item)
+            item["probeConfidence"] = "n/a"
+            item["probeDetail"] = "skip"
+            _sync_port_role_fields(item)
+            out.append(item)
+            continue
+        out.append(item)
+        vid = item.get("usbVendorId")
+        pid = item.get("usbProductId")
+        if isinstance(vid, int) and isinstance(pid, int):
+            groups.setdefault((vid, pid), []).append(item)
+
+    for group in groups.values():
+        if len(group) >= 2 and all(_should_probe_port(x) for x in group):
+            _resolve_probe_group(group, baudrate)
+            continue
+        for item in group:
+            if item.get("probeRole") in ("mavlink", "slcan"):
+                continue
+            analysis = _analyze_port_sample(_collect_port_sample(item.get("deviceId"), baudrate))
+            _apply_probe_analysis(item, analysis)
+
+    for item in out:
+        if item.get("probeRole") not in ("mavlink", "slcan"):
+            _sync_port_role_fields(item)
+    return out
+
+
+def read_ports_with_roles(force=False, baudrate=115200):
+    global _PORT_PROBE_CACHE
+    with _PORT_PROBE_LOCK:
+        now = time.time()
+        if (
+            not force
+            and _PORT_PROBE_CACHE.get("ports")
+            and (now - float(_PORT_PROBE_CACHE.get("at") or 0)) < 12.0
+        ):
+            return list(_PORT_PROBE_CACHE["ports"])
+        base = read_ports()
+        probed = _apply_port_role_probes(base, baudrate)
+        _PORT_PROBE_CACHE = {"at": now, "ports": probed}
+        return probed
+
+
 def detect_slcan_port():
-    for item in read_ports():
-        if item.get("isSlcanAdapter"):
+    for item in read_ports_with_roles():
+        if item.get("probeRole") == "slcan" or item.get("isSlcanAdapter"):
             return item.get("deviceId")
     return None
 
@@ -158,7 +508,7 @@ class SerialHub:
                 if data:
                     with self.lock:
                         self.rx_buffer.extend(data)
-                    if self.label == "slcan":
+                    if self.label in ("slcan", "bridge"):
                         SLCAN_MONITOR.feed(data)
             except Exception:
                 return
@@ -513,8 +863,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             send_json(self, 200, {"ok": True, "service": "com-bridge"})
             return
-        if self.path == "/com-ports":
-            send_json(self, 200, {"ports": read_ports()})
+        if self.path.startswith("/com-ports"):
+            try:
+                probe = "probe=1" in self.path or "probe=true" in self.path
+                baud = 115200
+                if "baud=" in self.path:
+                    m = re.search(r"baud=(\d+)", self.path)
+                    if m:
+                        baud = int(m.group(1))
+                ports = read_ports_with_roles(force=probe, baudrate=baud)
+                send_json(self, 200, {"ports": ports, "probed": True})
+            except Exception as exc:
+                send_json(self, 500, {"ports": [], "ok": False, "error": str(exc)})
             return
         if self.path == "/bridge-status":
             send_json(self, 200, MAVLINK_HUB.status())
@@ -603,8 +963,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.path == "/slcan-forward-enable":
                 bus = int(payload.get("bus") or 1)
-                result = SLCAN_MONITOR.enable_forward(SLCAN_HUB, bus=bus)
-                send_json(self, 200, {"ok": True, **result})
+                mav_open = MAVLINK_HUB.status().get("open")
+                slcan_open = SLCAN_HUB.status().get("open")
+                if mav_open:
+                    hub = MAVLINK_HUB
+                    transport = "mavlink-bridge"
+                elif slcan_open:
+                    hub = SLCAN_HUB
+                    transport = "slcan"
+                else:
+                    raise RuntimeError(
+                        "open GCS serial first (connect flight controller), or plug in a USB-CAN SLCAN adapter"
+                    )
+                result = SLCAN_MONITOR.enable_forward(hub, bus=bus)
+                send_json(self, 200, {"ok": True, "transport": transport, **result})
                 return
             if self.path == "/slcan-write":
                 b64 = payload.get("data") or ""

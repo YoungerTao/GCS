@@ -15,7 +15,7 @@ TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from gcs_supervisor import ensure_bridge_process, bridge_healthy  # noqa: E402
+from gcs_supervisor import ensure_bridge_process, bridge_healthy, gcs_python  # noqa: E402
 
 REPO_ROOT = TOOLS_DIR.parent
 RUNTIME_SCRIPT = TOOLS_DIR / "gcs-runtime.py"
@@ -44,7 +44,7 @@ def _spawn_runtime_locked() -> None:
     if sys.platform == "win32":
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     _runtime_proc = subprocess.Popen(
-        [sys.executable, str(RUNTIME_SCRIPT), "--no-browser"],
+        [gcs_python(), str(RUNTIME_SCRIPT), "--no-browser"],
         cwd=str(REPO_ROOT),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -58,7 +58,7 @@ def launch_runtime(wait_s: float = 20.0) -> bool:
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if runtime_healthy():
-            ensure_bridge_process(wait_s=10.0)
+            ensure_bridge_process(wait_s=10.0, force_restart=True)
             return True
         time.sleep(0.3)
     return runtime_healthy()

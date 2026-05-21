@@ -25,6 +25,8 @@ yarn-error.log*
 *.key
 *.pem
 
+.venv/
+
 # Local-only
 .DS_Store?
 ._*

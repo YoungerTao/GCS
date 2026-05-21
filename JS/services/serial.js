@@ -10,16 +10,16 @@ window._pendingParamRequest = false;
 window._bridgeMode = window._bridgeMode || "auto";
 window._bridgeConnActive = window._bridgeConnActive || false;
 
-async function bridgeFetch(path, body = null) {
-  if (typeof window.ensureComBridgeRunning === "function") {
+async function bridgeFetch(path, body = null, bridgeOpts = {}) {
+  if (!bridgeOpts.skipEnsure && typeof window.ensureComBridgeRunning === "function") {
     await window.ensureComBridgeRunning();
   }
-  const opts = body ? {
+  const fetchOpts = body ? {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   } : { method: "GET" };
-  const resp = await fetch(`http://127.0.0.1:8765${path}`, opts);
+  const resp = await fetch(`http://127.0.0.1:8765${path}`, fetchOpts);
   const text = await resp.text();
   let data = {};
   try { data = JSON.parse(text); } catch (_) {}
@@ -48,17 +48,100 @@ async function bridgeWriteBytes(bytes) {
   await bridgeFetch("/bridge-write", { data: bridgeBytesToBase64(arr) });
 }
 
+function resolveBridgeDeviceId(selectedValue, optionMeta, comSelect) {
+  const sp = optionMeta?.systemPort;
+  if (sp?.deviceId) return String(sp.deviceId).trim().split(" ")[0];
+  if (selectedValue.startsWith("sys:")) {
+    return selectedValue.replace(/^sys:/, "").trim().split(" ")[0];
+  }
+  const label = comSelect?.options?.[comSelect.selectedIndex]?.text || "";
+  return String(label).trim().split(" ")[0];
+}
+
+function getDuplicateVidPidSiblingPorts(deviceId) {
+  const ports = Array.isArray(window._systemComPorts) ? window._systemComPorts : [];
+  const current = ports.find((p) => p.deviceId === deviceId);
+  if (!current || typeof current.usbVendorId !== "number" || typeof current.usbProductId !== "number") {
+    return [];
+  }
+  return ports.filter(
+    (p) =>
+      p.deviceId &&
+      p.deviceId !== deviceId &&
+      p.usbVendorId === current.usbVendorId &&
+      p.usbProductId === current.usbProductId
+  );
+}
+
+async function probeBridgePortActivity(port, baudRate, dwellMs = 500) {
+  try {
+    await bridgeFetch("/bridge-close", {});
+  } catch (_) { /* ignore */ }
+  await bridgeFetch("/bridge-open", { port, baudrate: baudRate });
+  await new Promise((r) => setTimeout(r, dwellMs));
+  const resp = await bridgeFetch("/bridge-read");
+  const chunk = bridgeBase64ToBytes(resp?.data || "");
+  try {
+    await bridgeFetch("/bridge-close", {});
+  } catch (_) { /* ignore */ }
+  return chunk.length;
+}
+
+async function pickActiveBridgePort(deviceId, baudRate, opts = {}) {
+  const exclude = new Set(
+    (opts.excludeDeviceIds || []).filter((id) => typeof id === "string" && id)
+  );
+  if (typeof window.getSlcanDeviceId === "function") {
+    const slcanId = window.getSlcanDeviceId();
+    if (slcanId) exclude.add(slcanId);
+  }
+  const siblings = getDuplicateVidPidSiblingPorts(deviceId).filter((p) => !exclude.has(p.deviceId));
+  if (!siblings.length) return deviceId;
+
+  const candidates = [deviceId, ...siblings.map((p) => p.deviceId)].filter((id) => !exclude.has(id));
+  if (!candidates.length) return deviceId;
+  if (candidates.length === 1) return candidates[0];
+  let best = deviceId;
+  let bestScore = -1;
+  for (const port of candidates) {
+    let score = 0;
+    try {
+      score = await probeBridgePortActivity(port, baudRate);
+    } catch (_) { /* ignore */ }
+    if (score > bestScore) {
+      bestScore = score;
+      best = port;
+    }
+  }
+  if (best !== deviceId && bestScore > 0) {
+    log(`💡 检测到同 VID/PID 多串口，已自动选用数据更活跃的 ${best}`);
+  }
+  return best;
+}
+
 async function bridgeReadLoop() {
   while (window._bridgeConnActive) {
     try {
-      const resp = await bridgeFetch("/bridge-read");
-      const chunk = bridgeBase64ToBytes(resp?.data || "");
-      if (chunk.length) {
-        for (let i = 0; i < chunk.length; i++) buf.push(chunk[i]);
-        parse();
-      } else {
-        await new Promise((r) => setTimeout(r, 80));
+      let bursts = 0;
+      const maxBursts = window._paramLoadActive ? 64 : 24;
+      while (window._bridgeConnActive && bursts < maxBursts) {
+        const resp = await bridgeFetch("/bridge-read", null, { skipEnsure: true });
+        const chunk = bridgeBase64ToBytes(resp?.data || "");
+        if (!chunk.length) break;
+        bursts += 1;
+        const rx = window.buf;
+        for (let i = 0; i < chunk.length; i++) rx.push(chunk[i]);
+        if (typeof parse === "function") {
+          parse();
+          let drain = 0;
+          while (rx.length > 2048 && drain < 16 && typeof parse === "function") {
+            parse();
+            drain += 1;
+          }
+        }
       }
+      const waitMs = window._paramLoadActive ? (bursts ? 8 : 5) : (bursts ? 15 : 45);
+      await new Promise((r) => setTimeout(r, waitMs));
     } catch (e) {
       const msg = e?.message || String(e);
       log(`桥接读失败: ${msg}`);
@@ -198,16 +281,50 @@ window.disconnectSerial = disconnectSerial;
 
 async function connect() {
   const comSelect = document.getElementById("comPort");
+  if (!comSelect) {
+    log("❌ 页面未就绪：找不到串口下拉框");
+    return;
+  }
   let selectedValue = comSelect.value;
 
+  if (window._gcsConnState === "connecting") {
+    log("⚠️ 正在连接中，请稍候…");
+    return;
+  }
+
   try {
-    if (!("serial" in navigator)) {
-      log("❌ 当前浏览器不支持 Web Serial，请改用 Chrome/Edge（桌面版）");
+    const canWebSerial = typeof window.hasWebSerialApi === "function"
+      ? window.hasWebSerialApi()
+      : !!(navigator.serial && window.isSecureContext);
+
+    if (!window.isSecureContext) {
+      log("❌ 当前页面不是安全上下文，请通过 localhost 或 https 打开");
       setConnectionUI("error");
       return;
     }
-    if (!window.isSecureContext) {
-      log("❌ 当前页面不是安全上下文，请通过 localhost 或 https 打开");
+
+    if (selectedValue === "__refresh_bridge__") {
+      setConnectionUI("connecting");
+      if (typeof window.refreshPorts === "function") {
+        await window.refreshPorts({ probeBridge: true });
+      }
+      setConnectionUI("disconnected");
+      log("↻ 已刷新 COM 列表，请从下拉选择端口后点击「连接串口」");
+      return;
+    }
+
+    if (!canWebSerial) {
+      window._bridgeMode = "bridge";
+      if (typeof window.ensureComBridgeRunning === "function") {
+        const bridgeOk = await window.ensureComBridgeRunning();
+        if (!bridgeOk) {
+          log("❌ COM 桥未就绪：请先 Open with Live Server，或确认 Python 服务已启动");
+          setConnectionUI("error");
+          return;
+        }
+      }
+    } else if (!("serial" in navigator)) {
+      log("❌ 当前浏览器不支持 Web Serial，请改用 Chrome/Edge（桌面版）");
       setConnectionUI("error");
       return;
     }
@@ -219,17 +336,45 @@ async function connect() {
 
     await closeSerialResources();
 
-    if ((window._bridgeMode === "auto" || window._bridgeMode === "bridge") && selectedValue) {
+    if ((window._bridgeMode === "auto" || window._bridgeMode === "bridge" || !canWebSerial) && selectedValue) {
       try {
         const baudRate = getSelectedBaudRate();
         const optionMeta = window._comOptionMap?.get(selectedValue);
-        const systemPort = optionMeta?.systemPort || null;
-        const portName = selectedValue.startsWith("auth:")
-          ? (comSelect.options[comSelect.selectedIndex]?.text || selectedValue)
-          : (systemPort?.deviceId || selectedValue.replace(/^sys:/, ""));
+        if (optionMeta?.systemPort && typeof window.isNoiseSerialPort === "function" && window.isNoiseSerialPort(optionMeta.systemPort)) {
+          log("❌ 当前选中的是蓝牙/调试口，无法连接飞控。请在下拉中选择 CUAV/Pixhawk 的 usbmodem 口");
+          setConnectionUI("error");
+          return;
+        }
+        let portName = resolveBridgeDeviceId(selectedValue, optionMeta, comSelect);
         if (!portName) throw new Error("missing bridge port name");
+        const portRole =
+          typeof window.getPortProbeRole === "function"
+            ? window.getPortProbeRole(optionMeta?.systemPort)
+            : "";
+        const slcanPort =
+          typeof window.getSlcanDeviceId === "function" ? window.getSlcanDeviceId() : "";
+        const mavlinkPort =
+          typeof window.getMavlinkDeviceId === "function" ? window.getMavlinkDeviceId() : "";
+        if (portRole === "slcan" || (slcanPort && portName === slcanPort)) {
+          if (mavlinkPort) {
+            log(`💡 当前选中 SLCAN 口，已改连 MAVLink 口：${mavlinkPort}`);
+            portName = mavlinkPort;
+          } else {
+            log("❌ 探测为 SLCAN 口，不能用于 MAVLink 连接。请选 [MAVLink] 口");
+            setConnectionUI("error");
+            return;
+          }
+        } else if (!portRole && mavlinkPort) {
+          portName = mavlinkPort;
+        }
         setConnectionUI("connecting");
-        const opened = await bridgeFetch("/bridge-open", { port: portName.split(" ")[0], baudrate: baudRate });
+        if (!portRole && !mavlinkPort) {
+          const siblings = getDuplicateVidPidSiblingPorts(portName);
+          if (siblings.length) {
+            portName = await pickActiveBridgePort(portName, baudRate, { excludeDeviceIds: [slcanPort] });
+          }
+        }
+        const opened = await bridgeFetch("/bridge-open", { port: portName, baudrate: baudRate });
         window._bridgeConnActive = true;
         window.port = { bridge: true, close: async () => { await bridgeFetch("/bridge-close", {}); } };
         writer = { write: async (bytes) => bridgeWriteBytes(bytes) };
@@ -271,22 +416,44 @@ async function connect() {
         }
         return;
       } catch (bridgeErr) {
-        log(`⚠️ 桥接模式失败，回退 Web Serial：${bridgeErr?.message || bridgeErr}`);
         window._bridgeConnActive = false;
+        if (!canWebSerial) {
+          log(`❌ COM 桥连接失败：${bridgeErr?.message || bridgeErr}`);
+          setConnectionUI("error");
+          return;
+        }
+        log(`⚠️ 桥接模式失败，回退 Web Serial：${bridgeErr?.message || bridgeErr}`);
       }
+    }
+
+    if (!canWebSerial) {
+      log("❌ 内置浏览器请从顶部下拉选择 COM 口后连接（无 Web Serial 弹窗）");
+      setConnectionUI("error");
+      return;
     }
 
     if (selectedValue === "__add__") {
       setConnectionUI("connecting");
       const ok = await requestAndRefreshPort();
       setConnectionUI("disconnected");
-      if (ok) log("✅ 已添加串口授权，请在下拉框选择对应 COM/设备后再次点击「连接串口」");
-      else log("⚠️ 未添加新串口（已取消选择）");
+      if (ok) {
+        log(canWebSerial
+          ? "✅ 已添加串口授权，请在下拉框选择对应 COM/设备后再次点击「连接串口」"
+          : "✅ 已刷新 COM 列表，请从下拉选择端口后点击「连接串口」");
+      } else {
+        log(canWebSerial ? "⚠️ 未添加新串口（已取消选择）" : "⚠️ 未发现 COM 口，请确认飞控已插入且 COM 桥已启动");
+      }
+      return;
+    }
+
+    if (!canWebSerial && (!selectedValue || selectedValue === "__refresh_bridge__")) {
+      log("❌ 请先从顶部下拉选择 COM 口（内置浏览器不支持浏览器选串口弹窗）");
+      setConnectionUI("error");
       return;
     }
 
     if (!selectedValue) {
-      const portsNow = await navigator.serial.getPorts();
+      const portsNow = canWebSerial ? await navigator.serial.getPorts() : [];
       if (!portsNow.length) {
         setConnectionUI("connecting");
         const added = await requestAllPortsInteractive();
@@ -562,6 +729,46 @@ function startTelemetryRequests() {
 
 // ========== 参数加载（保留引用 param-loader.js） ==========
 
+async function requestParamReadByIndex(index) {
+  const idx = Number(index);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 65534) return false;
+  const payload = [...new Array(16).fill(0), idx & 0xff, (idx >> 8) & 0xff, window.sysid || 1, window.compid || 1];
+  await send_v2(20, payload, 214);
+  return true;
+}
+
+async function requestParamByName(name) {
+  const id = String(name || "").slice(0, 16);
+  if (!id || !(window.writer || writer)) return false;
+  const bytes = Array.from(new TextEncoder().encode(id));
+  while (bytes.length < 16) bytes.push(0);
+  bytes.push(0xff, 0xff, window.sysid || 1, window.compid || 1);
+  await send_v2(20, bytes, 214);
+  return true;
+}
+window.requestParamByName = requestParamByName;
+
+async function requestMissingParamBatch() {
+  const count = Number(window._paramCount);
+  const seen = window._paramRxIndices;
+  if (!window._paramLoadActive || !count || !seen || !(window.writer || writer)) return;
+  const missing = [];
+  for (let i = 0; i < count && missing.length < 72; i += 1) {
+    if (!seen.has(i)) missing.push(i);
+  }
+  if (!missing.length) return;
+  if (typeof log === "function") {
+    log(`↻ 补拉缺失参数 ${missing.length} 项（已收 ${seen.size}/${count}）`, "param-load");
+  }
+  for (const idx of missing) {
+    try {
+      await requestParamReadByIndex(idx);
+    } catch (_) { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 3));
+  }
+}
+window.requestMissingParamBatch = requestMissingParamBatch;
+
 async function loadParams() {
   if (!(window.writer || writer)) {
     window._pendingParamRequest = true;
@@ -573,9 +780,37 @@ async function loadParams() {
     return;
   }
   window._pendingParamRequest = false;
+  const requestParamList = () => {
+    send_v2(21, [window.sysid || 1, window.compid || 1], 159).catch((err) => {
+      if (typeof window.endParamLoadingUI === "function") window.endParamLoadingUI(false, "send-fail");
+      log(`⚠️ PARAM_REQUEST_LIST 发送失败：${err?.message || err}`);
+    });
+  };
   try {
     log("发送 PARAM_REQUEST_LIST");
-    setTimeout(() => send_v2(21, [window.sysid || 1, window.compid || 1], 159), 300);
+    setTimeout(requestParamList, 300);
+    if (window._paramListRetryTimer) clearTimeout(window._paramListRetryTimer);
+    window._paramListRetryTimer = setTimeout(() => {
+      window._paramListRetryTimer = null;
+      if (!window._paramLoadActive) return;
+      const total = Number(window._paramCount);
+      const got = window._paramRxIndices ? window._paramRxIndices.size : (window.params?.size || 0);
+      const staleRx = !window._lastMavlinkRxMs || Date.now() - window._lastMavlinkRxMs > 2500;
+      if (staleRx && got === 0) {
+        log("⚠️ 仍未收到 MAVLink 数据：请确认波特率与飞控一致，或换一个 CUAV 串口后重连", "param-load");
+        return;
+      }
+      if (total > 0 && got > 0 && got < total) {
+        if (typeof window.requestMissingParamBatch === "function") {
+          window.requestMissingParamBatch();
+        }
+        return;
+      }
+      if (got === 0) {
+        log("↻ 仍未收到参数，重发 PARAM_REQUEST_LIST", "param-load");
+        requestParamList();
+      }
+    }, 4000);
   } catch (e) {
     if (typeof window.endParamLoadingUI === "function") window.endParamLoadingUI(false, "send-fail");
     window._pendingParamRequest = true;
@@ -591,7 +826,8 @@ async function readLoop() {
     try {
       const { value } = await reader.read();
       if (!value) continue;
-      for (let i = 0; i < value.length; i++) buf.push(value[i]);
+      const rx = window.buf;
+      for (let i = 0; i < value.length; i++) rx.push(value[i]);
       parse();
     } catch (e) {
       const msg = String(e?.message || e || "");

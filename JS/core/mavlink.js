@@ -88,6 +88,7 @@ window.parseMagCalReportPayload = parseMagCalReportPayload;
 
 /** 单次 parse 最多解多少帧，剩余交给 microtask，避免 PARAM 洪峰等长时间占满主线程 */
 const PARSE_MAX_FRAMES_PER_SLICE = 160;
+const PARSE_MAX_FRAMES_PARAM_LOAD = 320;
 const PARSE_MAX_RESYNC_BYTES = 8192;
 
 function logCrcOnce(msgid) {
@@ -155,7 +156,8 @@ function parse(parseDepth) {
   const rxBuf = window.buf;
   if (!rxBuf || !rxBuf.length) return;
 
-  while (rxBuf.length > 6 && frames < PARSE_MAX_FRAMES_PER_SLICE) {
+  const frameBudget = window._paramLoadActive ? PARSE_MAX_FRAMES_PARAM_LOAD : PARSE_MAX_FRAMES_PER_SLICE;
+  while (rxBuf.length > 6 && frames < frameBudget) {
     if (rxBuf[0] === 0xfe) {
       const len = rxBuf[1];
       const full = 6 + len + 2;
@@ -823,6 +825,10 @@ function parseParam(p){ /* 保持不变 */
   pmap.set(name,val);
   window._paramCount = count;
   window._paramLastIndex = index;
+  if (!window._paramRxIndices) window._paramRxIndices = new Set();
+  if (Number.isFinite(index) && index >= 0 && index < 65535) {
+    window._paramRxIndices.add(index);
+  }
 
   if (window._missionUploadActive) {
     return;
@@ -830,13 +836,14 @@ function parseParam(p){ /* 保持不变 */
 
   if (window._paramLoadActive) {
     const totalKnown = Number.isFinite(count) && count > 0 ? count : NaN;
+    const rxCount = window._paramRxIndices ? window._paramRxIndices.size : pmap.size;
     if (typeof window.updateParamLoadProgress === "function") {
-      window.updateParamLoadProgress(pmap.size, totalKnown);
+      window.updateParamLoadProgress(rxCount, totalKnown);
     }
     if (
       !window._paramLoadCancel &&
       Number.isFinite(count) && count > 0 &&
-      pmap.size >= count &&
+      rxCount >= count &&
       typeof window.endParamLoadingUI === "function"
     ) {
       window.endParamLoadingUI(true, "complete");

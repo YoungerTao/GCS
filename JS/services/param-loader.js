@@ -4,6 +4,40 @@
  */
 
 const PARAM_LOAD_WATCHDOG_MS = 120000;
+const PARAM_LOAD_STALL_MS = 1800;
+
+function stopParamLoadStallWatcher() {
+  if (window._paramStallInterval) {
+    clearInterval(window._paramStallInterval);
+    window._paramStallInterval = null;
+  }
+}
+
+function startParamLoadStallWatcher() {
+  stopParamLoadStallWatcher();
+  window._paramStallLastProgress = -1;
+  window._paramStallRetries = 0;
+  window._paramStallInterval = setInterval(() => {
+    if (!window._paramLoadActive) {
+      stopParamLoadStallWatcher();
+      return;
+    }
+    const total = Number(window._paramCount);
+    const got = window._paramRxIndices ? window._paramRxIndices.size : (window.params?.size || 0);
+    if (!total || got >= total) return;
+    if (got === window._paramStallLastProgress) {
+      window._paramStallRetries += 1;
+      if (window._paramStallRetries <= 12 && typeof window.requestMissingParamBatch === "function") {
+        window.requestMissingParamBatch();
+      } else if (window._paramStallRetries === 13 && typeof log === "function") {
+        log(`⚠️ 参数加载停滞在 ${got}/${total}，继续等待或点「取消」`, "param-load");
+      }
+    } else {
+      window._paramStallRetries = 0;
+    }
+    window._paramStallLastProgress = got;
+  }, PARAM_LOAD_STALL_MS);
+}
 
 function wireParamLoadCancelOnce() {
   const btn = document.getElementById("param-load-cancel");
@@ -44,6 +78,8 @@ window.beginParamLoadingUI = function beginParamLoadingUI() {
   window._paramLoadCancel = false;
   try { window.params.clear(); } catch (_) { /* ignore */ }
   window._paramCount = undefined;
+  window._paramRxIndices = new Set();
+  startParamLoadStallWatcher();
 
   const paramsEl = document.getElementById("params");
   if (paramsEl) paramsEl.innerHTML = '<span class="muted">参数表加载中…</span>';
@@ -62,6 +98,10 @@ window.beginParamLoadingUI = function beginParamLoadingUI() {
 
   document.body.classList.add("param-loading");
 
+  if (window._paramListRetryTimer) {
+    clearTimeout(window._paramListRetryTimer);
+    window._paramListRetryTimer = null;
+  }
   if (window._paramLoadWatchdog) clearTimeout(window._paramLoadWatchdog);
   window._paramLoadWatchdog = setTimeout(() => {
     if (!window._paramLoadActive) return;
@@ -83,6 +123,11 @@ window.endParamLoadingUI = function endParamLoadingUI(ok, reason) {
   window._paramLoadActive = false;
   window._paramLoadCancel = false;
 
+  if (window._paramListRetryTimer) {
+    clearTimeout(window._paramListRetryTimer);
+    window._paramListRetryTimer = null;
+  }
+  stopParamLoadStallWatcher();
   if (window._paramLoadWatchdog) {
     clearTimeout(window._paramLoadWatchdog);
     window._paramLoadWatchdog = null;

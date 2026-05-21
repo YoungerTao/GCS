@@ -6,11 +6,79 @@ const AUTO_CONNECT_MAX_ATTEMPTS = 6;
 const BRIDGE_API = "http://127.0.0.1:8765";
 let ensureBridgePromise = null;
 
+function hasWebSerialApi() {
+  return !!(typeof navigator !== "undefined" && navigator.serial && window.isSecureContext);
+}
+
+window.hasWebSerialApi = hasWebSerialApi;
+
+/** 蓝牙/调试等非飞控口（内置浏览器默认项常误选这些） */
+function isNoiseSerialPort(sp) {
+  const dev = String(sp?.deviceId || "").toLowerCase();
+  const name = String(sp?.name || "").toLowerCase();
+  if (!dev && !name) return true;
+  if (/bluetooth|incoming-port|debug-console|wlan|iphone|android/i.test(dev)) return true;
+  if (/bluetooth|debug console|incoming|phone link/i.test(name)) return true;
+  return false;
+}
+
+function rankSerialPort(sp) {
+  if (!sp || isNoiseSerialPort(sp)) return 1000;
+  let score = 400;
+  const dev = String(sp.deviceId || "").toLowerCase();
+  const name = String(sp.name || "").toLowerCase();
+  if (/usbmodem|usbserial|acm\d|cu\.usb|ttyusb|ttyacm/i.test(dev)) score -= 250;
+  if (typeof sp.usbVendorId === "number" && typeof sp.usbProductId === "number") score -= 120;
+  const vid = sp.usbVendorId;
+  if ([0x26ac, 0x1209, 0x2dae, 0x3162, 0x0483].includes(vid)) score -= 100;
+  if (/cuav|pixhawk|ardupilot|mavlink|fmuv|cube|holybro|px4/i.test(name)) score -= 80;
+  return score;
+}
+
+function sortSystemPortsForPicker(ports) {
+  return ports.slice().sort((a, b) => {
+    const d = rankSerialPort(a) - rankSerialPort(b);
+    if (d !== 0) return d;
+    return String(a.deviceId || "").localeCompare(String(b.deviceId || ""), "en");
+  });
+}
+
+function pickPreferredPortValue(comSelect) {
+  if (!comSelect) return "";
+  for (const opt of comSelect.options) {
+    if (!opt.value || opt.value.startsWith("__")) continue;
+    const meta = window._comOptionMap?.get(opt.value);
+    if (getPortProbeRole(meta?.systemPort) === "mavlink") return opt.value;
+  }
+  let bestVal = "";
+  let bestRank = Infinity;
+  for (const opt of comSelect.options) {
+    if (!opt.value || opt.value.startsWith("__")) continue;
+    const meta = window._comOptionMap?.get(opt.value);
+    if (getPortProbeRole(meta?.systemPort) === "slcan") continue;
+    const rank = meta?.systemPort ? rankSerialPort(meta.systemPort) : 900;
+    if (rank < bestRank) {
+      bestRank = rank;
+      bestVal = opt.value;
+    }
+  }
+  return bestRank < 900 ? bestVal : "";
+}
+
+window.isNoiseSerialPort = isNoiseSerialPort;
+window.rankSerialPort = rankSerialPort;
+
 async function probeBridgeHealth() {
+  if (window.__gcsStackBootstrapping) return false;
+  if (typeof window._comBridgeProbeBackoffUntil === "number" && Date.now() < window._comBridgeProbeBackoffUntil) {
+    return false;
+  }
   try {
     const resp = await fetch(`${BRIDGE_API}/health`, { cache: "no-store" });
+    window._comBridgeProbeBackoffUntil = 0;
     return resp.ok;
   } catch (_) {
+    window._comBridgeProbeBackoffUntil = Date.now() + 2000;
     return false;
   }
 }
@@ -40,18 +108,24 @@ async function requestBridgeStartup() {
 }
 
 async function ensureComBridgeRunning() {
+  const liveDev = !!window.__gcsLiveServerDev;
   if (typeof window.ensureGcsStackReady === "function") {
-    await window.ensureGcsStackReady();
+    if (liveDev) {
+      window.ensureGcsStackReady().catch(() => {});
+    } else {
+      await window.ensureGcsStackReady();
+    }
   }
   if (await probeBridgeHealth()) {
     window._comBridgeOnline = true;
     window._comBridgeBackoffUntil = 0;
     return true;
   }
+  const waitAttempts = liveDev ? 40 : 32;
   if (!ensureBridgePromise) {
     ensureBridgePromise = (async () => {
       await requestBridgeStartup();
-      for (let i = 0; i < 32; i += 1) {
+      for (let i = 0; i < waitAttempts; i += 1) {
         if (await probeBridgeHealth()) {
           window._comBridgeOnline = true;
           window._comBridgeBackoffUntil = 0;
@@ -75,14 +149,37 @@ async function ensureComBridgeRunning() {
   return ensureBridgePromise;
 }
 
-async function fetchSystemComPortsImpl() {
+function getPortProbeRole(sp) {
+  if (!sp) return "";
+  const role = String(sp.probeRole || sp.role || "").toLowerCase();
+  if (role === "mavlink" || role === "slcan") return role;
+  return "";
+}
+
+function findPortByProbeRole(role) {
+  const want = String(role || "").toLowerCase();
+  if (!want) return null;
+  return systemComPorts().find((p) => getPortProbeRole(p) === want) || null;
+}
+
+window.getPortProbeRole = getPortProbeRole;
+
+async function fetchSystemComPortsImpl(opts = {}) {
   const now = Date.now();
-  if (typeof window._comBridgeBackoffUntil === "number" && now < window._comBridgeBackoffUntil) {
+  const forceProbe = opts.probe !== false;
+  if (
+    !forceProbe &&
+    typeof window._comBridgeBackoffUntil === "number" &&
+    now < window._comBridgeBackoffUntil
+  ) {
     return Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : [];
   }
   await ensureComBridgeRunning();
   try {
-    const resp = await fetch(`${BRIDGE_API}/com-ports`, { cache: "no-store" });
+    const baudEl = document.getElementById("serialBaud");
+    const baud = baudEl ? parseInt(String(baudEl.value || "115200"), 10) : 115200;
+    const baudQ = Number.isFinite(baud) && baud > 0 ? baud : 115200;
+    const resp = await fetch(`${BRIDGE_API}/com-ports?probe=1&baud=${baudQ}`, { cache: "no-store" });
     if (!resp.ok) throw new Error(`bridge list failed (${resp.status})`);
     const data = await resp.json();
     const ports = Array.isArray(data.ports) ? data.ports : [];
@@ -157,30 +254,119 @@ function restoreRememberedBaud() {
 
 function resolveRememberedPortValue(comSelect) {
   if (!comSelect) return "";
-  const rememberedKey = getRememberedPortKey();
-  if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
-    return rememberedKey;
+
+  const mavProbed = findPortByProbeRole("mavlink");
+  if (mavProbed?.deviceId) {
+    for (const [val, meta] of window._comOptionMap.entries()) {
+      if (val.startsWith("__")) continue;
+      if (meta?.systemPort?.deviceId === mavProbed.deviceId) return val;
+    }
   }
+
   const deviceId = getRememberedDeviceId();
   if (deviceId) {
     for (const [val, meta] of window._comOptionMap.entries()) {
-      if (val === "__add__") continue;
+      if (val.startsWith("__")) continue;
       if (meta?.systemPort?.deviceId && String(meta.systemPort.deviceId).toUpperCase() === deviceId) {
-        return val;
+        if (!isNoiseSerialPort(meta.systemPort)) return val;
       }
     }
     const byDev = Array.from(comSelect.options).find(
-      (o) => o.value !== "__add__" && String(o.text || "").toUpperCase().includes(deviceId)
+      (o) =>
+        !o.value.startsWith("__") &&
+        String(o.text || "").toUpperCase().includes(deviceId) &&
+        !isNoiseSerialPort(window._comOptionMap?.get(o.value)?.systemPort)
     );
     if (byDev) return byDev.value;
   }
+
+  const rememberedKey = getRememberedPortKey();
+  if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
+    const meta = window._comOptionMap.get(rememberedKey);
+    if (!meta?.systemPort || !isNoiseSerialPort(meta.systemPort)) {
+      return rememberedKey;
+    }
+  }
+
   const rememberedLabel = getRememberedPortLabel();
   if (rememberedLabel) {
     const match = Array.from(comSelect.options).find((o) => String(o.text || "") === rememberedLabel);
-    if (match && match.value && match.value !== "__add__") return match.value;
+    if (match && match.value && !match.value.startsWith("__")) {
+      const meta = window._comOptionMap.get(match.value);
+      if (!meta?.systemPort || !isNoiseSerialPort(meta.systemPort)) return match.value;
+    }
   }
   return "";
 }
+
+function findCuavSiblingPort(mavlinkDeviceId) {
+  const ports = systemComPorts();
+  const current = ports.find((p) => p?.deviceId === mavlinkDeviceId);
+  if (!current || typeof current.usbVendorId !== "number" || typeof current.usbProductId !== "number") {
+    return "";
+  }
+  const siblings = ports.filter(
+    (p) =>
+      p?.deviceId &&
+      p.deviceId !== mavlinkDeviceId &&
+      !isNoiseSerialPort(p) &&
+      p.usbVendorId === current.usbVendorId &&
+      p.usbProductId === current.usbProductId
+  );
+  if (siblings.length === 1) return siblings[0].deviceId;
+  return "";
+}
+
+function assignSlcanSiblingFromMavlink(mavlinkDeviceId) {
+  if (!mavlinkDeviceId) return;
+  try {
+    const manual = localStorage.getItem("gcs.slcanDeviceIdManual");
+    if (manual === "1") return;
+    const sibling = findCuavSiblingPort(mavlinkDeviceId);
+    if (sibling) localStorage.setItem("gcs.slcanDeviceId", sibling);
+  } catch (_) { /* ignore */ }
+}
+
+function getSlcanDeviceId() {
+  const probed = findPortByProbeRole("slcan");
+  if (probed?.deviceId) return probed.deviceId;
+  try {
+    const manual = localStorage.getItem("gcs.slcanDeviceIdManual") === "1";
+    const saved = localStorage.getItem("gcs.slcanDeviceId") || "";
+    if (manual && saved && systemComPorts().some((p) => p?.deviceId === saved)) return saved;
+  } catch (_) { /* ignore */ }
+  const mavDev = getMavlinkDeviceId();
+  if (mavDev) {
+    const sibling = findCuavSiblingPort(mavDev);
+    if (sibling) return sibling;
+  }
+  const hit = systemComPorts().find((p) => p && (p.isSlcanAdapter || /slcan/i.test(String(p.name || ""))));
+  return hit?.deviceId || "";
+}
+
+function getMavlinkDeviceId() {
+  const probed = findPortByProbeRole("mavlink");
+  if (probed?.deviceId) return probed.deviceId;
+  try {
+    const id = localStorage.getItem("gcs.mavlinkDeviceId") || getRememberedDeviceId() || "";
+    if (id && systemComPorts().some((p) => p?.deviceId && String(p.deviceId).toUpperCase() === id.toUpperCase())) {
+      return id;
+    }
+  } catch (_) { /* ignore */ }
+  return getRememberedDeviceId();
+}
+
+function portRoleSuffix(sp) {
+  const role = getPortProbeRole(sp);
+  if (role === "slcan") return " [SLCAN]";
+  if (role === "mavlink") return " [MAVLink]";
+  if (!sp?.deviceId) return "";
+  return "";
+}
+
+window.getSlcanDeviceId = getSlcanDeviceId;
+window.getMavlinkDeviceId = getMavlinkDeviceId;
+window.findCuavSiblingPort = findCuavSiblingPort;
 
 function rememberSelectedPort(value, label) {
   try {
@@ -188,7 +374,18 @@ function rememberSelectedPort(value, label) {
     if (label) localStorage.setItem("gcs.lastPortLabel", label);
     const meta = window._comOptionMap?.get(value);
     const deviceId = meta?.systemPort?.deviceId || extractComDeviceId(label);
-    if (deviceId) localStorage.setItem("gcs.lastDeviceId", String(deviceId).toUpperCase());
+    if (deviceId) {
+      const dev = String(deviceId);
+      const role = getPortProbeRole(meta?.systemPort);
+      if (role === "slcan") {
+        localStorage.setItem("gcs.slcanDeviceId", dev);
+        localStorage.setItem("gcs.slcanDeviceIdManual", "1");
+      } else {
+        localStorage.setItem("gcs.lastDeviceId", dev.toUpperCase());
+        localStorage.setItem("gcs.mavlinkDeviceId", dev);
+        assignSlcanSiblingFromMavlink(dev);
+      }
+    }
     const baudEl = document.getElementById("serialBaud");
     if (baudEl) localStorage.setItem("gcs.lastBaud", String(baudEl.value || "115200"));
   } catch (_) { /* ignore */ }
@@ -219,8 +416,19 @@ async function tryAutoConnect() {
   const comSelect = document.getElementById("comPort");
   if (!comSelect || !comSelect.options.length) return;
 
-  const target = resolveRememberedPortValue(comSelect);
+  let target = resolveRememberedPortValue(comSelect);
+  if (!target) target = pickPreferredPortValue(comSelect);
   if (!target) return;
+
+  const targetMeta = window._comOptionMap.get(target);
+  if (targetMeta?.systemPort && isNoiseSerialPort(targetMeta.systemPort)) {
+    const alt = pickPreferredPortValue(comSelect);
+    if (!alt) return;
+    target = alt;
+    if (typeof window.log === "function") {
+      window.log("内置浏览器：已跳过蓝牙/调试口，改用飞控 USB 串口", "info");
+    }
+  }
 
   window._autoConnectAttempts += 1;
   comSelect.value = target;
@@ -263,8 +471,9 @@ async function refreshPorts(opts = {}) {
   const comSelect = document.getElementById("comPort");
   if (!comSelect) return;
 
+  const canWebSerial = hasWebSerialApi();
   let ports = [];
-  if ("serial" in navigator && window.isSecureContext) {
+  if (canWebSerial) {
     try { ports = await navigator.serial.getPorts(); } catch (_) { ports = []; }
   }
   const systemPorts = probeBridge
@@ -278,8 +487,16 @@ async function refreshPorts(opts = {}) {
   comSelect.innerHTML = "";
 
   if (systemPorts.length > 0) {
+    const sortedPorts = sortSystemPortsForPicker(systemPorts);
+    const vidPidCounts = new Map();
+    sortedPorts.forEach((sp) => {
+      if (typeof sp.usbVendorId === "number" && typeof sp.usbProductId === "number") {
+        const key = `${sp.usbVendorId}:${sp.usbProductId}`;
+        vidPidCounts.set(key, (vidPidCounts.get(key) || 0) + 1);
+      }
+    });
     const usedAuth = new Set();
-    systemPorts.forEach((sp, i) => {
+    sortedPorts.forEach((sp, i) => {
       let authIndex = -1;
       for (let j = 0; j < ports.length; j += 1) {
         if (usedAuth.has(j)) continue;
@@ -297,36 +514,74 @@ async function refreshPorts(opts = {}) {
       }
       const option = document.createElement("option");
       option.value = authIndex >= 0 ? `auth:${authIndex}` : `sys:${sp.deviceId || i}`;
+      const label = sp.deviceId || sp.name || "Unknown";
+      const dupHint =
+        typeof sp.usbVendorId === "number" &&
+        typeof sp.usbProductId === "number" &&
+        (vidPidCounts.get(`${sp.usbVendorId}:${sp.usbProductId}`) || 0) > 1
+          ? " · 多接口"
+          : "";
+      const noise = isNoiseSerialPort(sp);
+      const roleTag = noise ? "" : portRoleSuffix(sp);
       option.text = authIndex >= 0
-        ? `${sp.deviceId} (${sp.name || "Unknown"})`
-        : `${sp.deviceId} (${sp.name || "Unknown"}) [未授权]`;
+        ? `${label} (${sp.name || "Unknown"})${dupHint}${roleTag}${noise ? " [非飞控]" : ""}`
+        : `${label} (${sp.name || "Unknown"}) [桥接]${dupHint}${roleTag}${noise ? " [非飞控]" : ""}`;
+      if (noise) option.disabled = true;
       comSelect.appendChild(option);
       window._comOptionMap.set(option.value, { authIndex, systemPort: sp });
     });
 
-    const rememberedKey = getRememberedPortKey();
-    const rememberedLabel = getRememberedPortLabel();
-    if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
-      comSelect.value = rememberedKey;
-    } else if (rememberedLabel) {
-      const remembered = Array.from(comSelect.options).find((o) => String(o.text || "") === rememberedLabel);
-      if (remembered) comSelect.value = remembered.value;
+    const resolved = resolveRememberedPortValue(comSelect);
+    if (resolved) {
+      comSelect.value = resolved;
     } else if (currentValue && window._comOptionMap.has(currentValue)) {
-      comSelect.value = currentValue;
-    } else if (comSelect.options.length) {
-      comSelect.value = comSelect.options[0].value;
+      const curMeta = window._comOptionMap.get(currentValue);
+      if (!curMeta?.systemPort || !isNoiseSerialPort(curMeta.systemPort)) {
+        comSelect.value = currentValue;
+      }
+    }
+    if (!comSelect.value || comSelect.value.startsWith("__")) {
+      const preferred = pickPreferredPortValue(comSelect);
+      if (preferred) comSelect.value = preferred;
     }
 
-    const addOpt = document.createElement("option");
-    addOpt.value = "__add__";
-    addOpt.text = "＋ 添加/重新选择串口设备…";
-    comSelect.appendChild(addOpt);
-    setConnectSerialHint("");
+    appendPortPickerExtras(comSelect, canWebSerial);
+    setConnectSerialHint(
+      canWebSerial
+        ? "已自动探测各口协议；顶部连 [MAVLink]，DroneCAN 用 [SLCAN]"
+        : "已自动探测协议；顶部 [MAVLink][桥接] 连飞控，DroneCAN 用 [SLCAN]"
+    );
+    const probed = window._systemComPorts.filter((p) => getPortProbeRole(p));
+    if (probed.length && typeof window.log === "function") {
+      const summary = probed
+        .map((p) => {
+          const short = String(p.deviceId || "").split("/").pop();
+          const role = getPortProbeRole(p).toUpperCase();
+          const conf = String(p.probeConfidence || "").trim();
+          const detail = String(p.probeDetail || "").trim();
+          const tag = conf && conf !== "n/a" ? `·${conf}` : "";
+          const extra = detail ? ` (${detail})` : "";
+          return `${short}→${role}${tag}${extra}`;
+        })
+        .join("，");
+      window.log(`🔍 串口协议探测：${summary}`, "port-probe");
+    }
     tryAutoConnect().catch(() => {});
     return;
   }
 
   if (ports.length === 0) {
+    if (!canWebSerial) {
+      const waitOpt = document.createElement("option");
+      waitOpt.value = "";
+      waitOpt.text = systemPorts.length ? "请选择 COM 口" : "等待 COM 桥（请先 Open with Live Server）";
+      waitOpt.disabled = true;
+      comSelect.appendChild(waitOpt);
+      appendPortPickerExtras(comSelect, false);
+      comSelect.value = "__refresh_bridge__";
+      setConnectSerialHint("内置浏览器无 Web Serial 弹窗；先 Open with Live Server，再选 COM 连接");
+      return;
+    }
     const addOnly = document.createElement("option");
     addOnly.value = "__add__";
     addOnly.text = "＋ 选择飞控 USB 串口（首次连接）…";
@@ -347,10 +602,7 @@ async function refreshPorts(opts = {}) {
     window._comOptionMap.set(option.value, { authIndex: index, systemPort: null });
   });
 
-  const addOpt = document.createElement("option");
-  addOpt.value = "__add__";
-  addOpt.text = "＋ 添加/重新选择串口设备…";
-  comSelect.appendChild(addOpt);
+  appendPortPickerExtras(comSelect, canWebSerial);
 
   const rememberedKey = getRememberedPortKey();
   const rememberedLabel = getRememberedPortLabel();
@@ -369,7 +621,24 @@ async function refreshPorts(opts = {}) {
   tryAutoConnect().catch(() => {});
 }
 
+function appendPortPickerExtras(comSelect, canWebSerial) {
+  const refreshOpt = document.createElement("option");
+  refreshOpt.value = "__refresh_bridge__";
+  refreshOpt.text = "↻ 刷新 COM 列表";
+  comSelect.appendChild(refreshOpt);
+  if (canWebSerial) {
+    const addOpt = document.createElement("option");
+    addOpt.value = "__add__";
+    addOpt.text = "＋ 添加/重新选择串口设备…";
+    comSelect.appendChild(addOpt);
+  }
+}
+
 async function requestAndRefreshPort() {
+  if (!hasWebSerialApi()) {
+    await refreshPorts({ probeBridge: true });
+    return (window._systemComPorts || []).length > 0;
+  }
   try {
     await navigator.serial.requestPort();
     await refreshPorts();
@@ -381,6 +650,10 @@ async function requestAndRefreshPort() {
 }
 
 async function requestAllPortsInteractive() {
+  if (!hasWebSerialApi()) {
+    await refreshPorts({ probeBridge: true });
+    return (window._systemComPorts || []).length;
+  }
   let added = 0;
   while (true) {
     try {
@@ -398,9 +671,25 @@ async function requestAllPortsInteractive() {
 
 function initComPortAutoRefresh() {
   window.addEventListener("load", () => {
-    refreshPorts({ probeBridge: true })
-      .then(() => scheduleAutoReconnectAfterRefresh())
-      .catch(() => scheduleAutoReconnectAfterRefresh());
+    const startRefresh = () => {
+      refreshPorts({ probeBridge: true })
+        .then(() => scheduleAutoReconnectAfterRefresh())
+        .catch(() => scheduleAutoReconnectAfterRefresh());
+    };
+    if (window.__gcsBootstrapPromise) {
+      window.__gcsBootstrapPromise.then(startRefresh).catch(startRefresh);
+    } else {
+      startRefresh();
+    }
+    if (!hasWebSerialApi()) {
+      window._bridgeMode = "bridge";
+      [800, 2000, 4000].forEach((ms) => {
+        setTimeout(() => refreshPorts({ probeBridge: true }).catch(() => {}), ms);
+      });
+      if (typeof window.log === "function") {
+        window.log("内置浏览器：无 Web Serial，已启用 COM 桥接；请选飞控 USB 口（勿选蓝牙）", "info");
+      }
+    }
   });
 
   if (!window._comBridgeFocusHooked) {

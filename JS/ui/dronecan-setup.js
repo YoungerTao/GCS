@@ -98,15 +98,80 @@
   }
 
   function detectSlcanAdapterPort() {
+    if (typeof window.getSlcanDeviceId === "function") {
+      const saved = window.getSlcanDeviceId();
+      if (saved) {
+        slcanPortLostAt = 0;
+        return saved;
+      }
+    }
     const ports = systemComPorts();
     const hit = ports.find((p) => p && (p.isSlcanAdapter || /slcan/i.test(String(p.name || ""))));
     const found = hit?.deviceId || "";
-    if (!found && slcanBoundPort) {
+    if (!found && slcanBoundPort && slcanBoundPort !== "mavlink") {
       slcanPortLostAt = slcanPortLostAt || Date.now();
       return slcanBoundPort;
     }
     if (found) slcanPortLostAt = 0;
     return found;
+  }
+
+  function isGcsSerialConnected() {
+    return (window._gcsConnState || "").toLowerCase() === "connected" && !!(window.writer || window.port);
+  }
+
+  function preferMavlinkCanTransport() {
+    return !detectSlcanAdapterPort() && isGcsSerialConnected();
+  }
+
+  function wireSlcanPortPicker() {
+    const sel = document.getElementById("sc-dc-slcan-port");
+    if (!sel || sel.dataset.wired === "1") return;
+    sel.dataset.wired = "1";
+    const fill = () => {
+      const ports = systemComPorts().filter(
+        (p) => p?.deviceId && !(typeof window.isNoiseSerialPort === "function" && window.isNoiseSerialPort(p))
+      );
+      const cur = detectSlcanAdapterPort();
+      const mav =
+        typeof window.getMavlinkDeviceId === "function" ? window.getMavlinkDeviceId() : "";
+      sel.innerHTML = "";
+      const auto = document.createElement("option");
+      auto.value = "";
+      auto.text = "自动（与 MAVLink 配对的另一 USB 口）";
+      sel.appendChild(auto);
+      ports.forEach((p) => {
+        const o = document.createElement("option");
+        o.value = p.deviceId;
+        const role =
+          typeof window.getPortProbeRole === "function" ? window.getPortProbeRole(p) : "";
+        const roleTag = role === "slcan" ? " [探测:SLCAN]" : role === "mavlink" ? " [探测:MAVLink]" : "";
+        o.text = `${p.deviceId} (${p.name || "USB"})${roleTag}`;
+        sel.appendChild(o);
+      });
+      if (cur && Array.from(sel.options).some((o) => o.value === cur)) sel.value = cur;
+    };
+    sel.addEventListener("change", () => {
+      try {
+        if (sel.value) {
+          localStorage.setItem("gcs.slcanDeviceId", sel.value);
+          localStorage.setItem("gcs.slcanDeviceIdManual", "1");
+        } else {
+          localStorage.removeItem("gcs.slcanDeviceIdManual");
+          const mav =
+            typeof window.getMavlinkDeviceId === "function" ? window.getMavlinkDeviceId() : "";
+          if (mav && typeof window.findCuavSiblingPort === "function") {
+            const sib = window.findCuavSiblingPort(mav);
+            if (sib) localStorage.setItem("gcs.slcanDeviceId", sib);
+          }
+        }
+        slcanBoundPort = "";
+        slcanInitDone = false;
+        ensureSlcanDirectSession().then(() => tick()).catch(() => tick());
+      } catch (_) { /* ignore */ }
+    });
+    fill();
+    window._fillSlcanPortPicker = fill;
   }
 
   function num(v, fallback = 0) {
@@ -251,6 +316,10 @@
   async function pollSlcanTraffic() {
     if (isInspectorDemoMode()) return;
     if (!slcanSessionReady && !isSlcanAutotestMode()) return;
+    if (slcanBoundPort === "mavlink" && !isGcsSerialConnected()) {
+      slcanSessionReady = false;
+      return;
+    }
     const status = await bridgeJson("/slcan-nodes");
     slcanRuntime.framesPerSecond = Number(status?.framesPerSecond || 0);
     slcanRuntime.errorFrames = Number(status?.errorCount || 0);
@@ -390,6 +459,9 @@
           <button type="button" class="sc-dc-mode-tab" data-dc-mode="stats">Stats</button>
         </div>
         <div class="sc-dc-toolbar-right">
+          <label class="sc-dc-slcan-port-label">SLCAN 口
+            <select id="sc-dc-slcan-port" class="sc-dc-slcan-port-select" title="CUAV 双 USB：选飞控 SERIALx=SLCAN 对应的那一路"></select>
+          </label>
           <label class="sc-dc-check"><input type="checkbox" id="sc-dc-exit-slcan" checked> Exit SLCAN on leave?</label>
           <label class="sc-dc-check"><input type="checkbox" id="sc-dc-log"> Log</label>
         </div>
@@ -1132,6 +1204,43 @@
     renderLogTable();
   }
 
+  async function ensureMavlinkCanForward(bus = 1) {
+    if (!isGcsSerialConnected()) return false;
+    try {
+      const resp = await bridgeJson("/slcan-forward-enable", { bus });
+      slcanSessionReady = true;
+      slcanBoundPort = "mavlink";
+      slcanInitDone = true;
+      slcanPortLostAt = 0;
+      const transport = resp?.transport || "mavlink";
+      if ($("sc-dc-transport-badge")) {
+        $("sc-dc-transport-badge").textContent = transport === "mavlink-bridge" ? "MAVLink CAN1" : "MAVLink CAN";
+      }
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent =
+          "经飞控 USB 转发 DroneCAN（CUAV 等无独立 SLCAN 口）。若仍为 0 帧/s，请在飞控启用 CAN1 DroneCAN 并确认 CAN_D1 接线。";
+      }
+      return true;
+    } catch (e) {
+      if (typeof window.sendCommandLong === "function") {
+        try {
+          await window.sendCommandLong(183, bus, 0, 0, 0, 0, 0, 0, 0);
+          slcanSessionReady = true;
+          slcanBoundPort = "mavlink";
+          if ($("sc-dc-hint")) {
+            $("sc-dc-hint").textContent = "已发送 CAN_FORWARD；节点数据经当前串口 MAVLink 解析。";
+          }
+          return true;
+        } catch (_) { /* ignore */ }
+      }
+      slcanSessionReady = false;
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent = `MAVLink CAN 转发失败: ${e?.message || e}`;
+      }
+      return false;
+    }
+  }
+
   async function ensureSlcanDirectSession() {
     if (!isDronecanPanelActive()) return;
     if (isSlcanAutotestMode()) {
@@ -1140,9 +1249,21 @@
       if ($("sc-dc-hint")) $("sc-dc-hint").textContent = "SLCAN autotest: frames from /slcan-inject (no hardware).";
       return;
     }
-    const adapterPort = detectSlcanAdapterPort() || slcanBoundPort;
+    if (preferMavlinkCanTransport() && currentMode !== "slcan") {
+      await ensureMavlinkCanForward(currentMode === "can2" ? 2 : 1);
+      return;
+    }
+    const adapterPort = detectSlcanAdapterPort() || (slcanBoundPort !== "mavlink" ? slcanBoundPort : "");
     if (!adapterPort) {
-      if (slcanBoundPort && slcanPortLostAt && (Date.now() - slcanPortLostAt) < 30000) {
+      if (isGcsSerialConnected()) {
+        await ensureMavlinkCanForward(1);
+        if (currentMode === "slcan" && $("sc-dc-hint")) {
+          $("sc-dc-hint").textContent +=
+            " 提示：未检测到 USB-CAN 适配器，已改用飞控 MAVLink。请点「MAVLink-CAN1」查看节点。";
+        }
+        return;
+      }
+      if (slcanBoundPort && slcanBoundPort !== "mavlink" && slcanPortLostAt && (Date.now() - slcanPortLostAt) < 30000) {
         return;
       }
       slcanSessionReady = false;
@@ -1150,7 +1271,10 @@
       slcanBoundPort = "";
       slcanRuntime.nodes.clear();
       slcanRuntime.framesPerSecond = 0;
-      if ($("sc-dc-hint")) $("sc-dc-hint").textContent = "SLCAN adapter port not found.";
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent =
+          "未找到 SLCAN 口：请在上方下拉指定 SLCAN 虚拟口，或先在顶部用 [MAVLink] 口连接（会自动配对另一路为 SLCAN）。";
+      }
       return;
     }
     slcanPortLostAt = 0;
@@ -1191,7 +1315,14 @@
     currentMode = mode;
     document.querySelectorAll(".sc-dc-mode-tab").forEach((btn) => btn.classList.toggle("active", btn.dataset.dcMode === mode));
     document.querySelectorAll(".sc-dc-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.dcPanel === mode));
-    if ($("sc-dc-transport-badge")) $("sc-dc-transport-badge").textContent = mode === "slcan" ? "SLCAN Direct" : mode.toUpperCase();
+    if ($("sc-dc-transport-badge")) {
+      $("sc-dc-transport-badge").textContent =
+        mode === "slcan" ? "SLCAN Direct" : mode === "can1" ? "MAVLink CAN1" : mode === "can2" ? "MAVLink CAN2" : mode.toUpperCase();
+    }
+    if (mode === "can1" || mode === "can2") {
+      ensureMavlinkCanForward(mode === "can2" ? 2 : 1).then(() => tick()).catch(() => tick());
+      return;
+    }
     ensureSlcanDirectSession().then(() => tick()).catch(() => tick());
   }
 
@@ -1332,7 +1463,10 @@
       }
       refreshDroneCanModel();
       selectCanNode(selectedCanId || canNodes[0]?.nodeId || 0);
-      setMode(currentMode);
+      wireSlcanPortPicker();
+      if (typeof window._fillSlcanPortPicker === "function") window._fillSlcanPortPicker();
+      const initialMode = detectSlcanAdapterPort() ? "slcan" : preferMavlinkCanTransport() ? "can1" : currentMode;
+      setMode(initialMode);
       startDcTelemetry();
     } else if (!active && dronecanPanelWasActive) {
       dronecanPanelWasActive = false;
@@ -1374,7 +1508,17 @@
         window.requestAnimationFrame(syncDronecanPanel);
       });
     });
-    document.addEventListener("gcs-connection", () => window.requestAnimationFrame(syncDronecanPanel));
+    document.addEventListener("gcs-connection", () => {
+      if (typeof window._fillSlcanPortPicker === "function") window._fillSlcanPortPicker();
+      if (isDronecanPanelActive()) {
+        if (detectSlcanAdapterPort()) {
+          ensureSlcanDirectSession().catch(() => {});
+        } else if (preferMavlinkCanTransport()) {
+          ensureMavlinkCanForward(1).catch(() => {});
+        }
+      }
+      window.requestAnimationFrame(syncDronecanPanel);
+    });
     document.addEventListener("gcs-airframe-params-changed", () => window.requestAnimationFrame(syncDronecanPanel));
     window.requestAnimationFrame(syncDronecanPanel);
   }

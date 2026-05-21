@@ -12,6 +12,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER_SCRIPT = REPO_ROOT / "tools" / "com-bridge" / "server.py"
 BRIDGE_API = "http://127.0.0.1:8765/health"
 
+
+def gcs_python() -> str:
+    """Prefer repo .venv (has pyserial) when present."""
+    for rel in (".venv/bin/python", ".venv/Scripts/python.exe"):
+        candidate = REPO_ROOT / rel
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
 _lock = threading.Lock()
 _proc: subprocess.Popen | None = None
 
@@ -51,7 +60,7 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
 
         if _proc is None or _proc.poll() is not None:
             _proc = subprocess.Popen(
-                [sys.executable, str(SERVER_SCRIPT)],
+                [gcs_python(), str(SERVER_SCRIPT)],
                 cwd=str(SERVER_SCRIPT.parent),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
