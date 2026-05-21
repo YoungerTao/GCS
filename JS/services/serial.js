@@ -54,8 +54,18 @@ function resolveBridgeDeviceId(selectedValue, optionMeta, comSelect) {
   if (selectedValue.startsWith("sys:")) {
     return selectedValue.replace(/^sys:/, "").trim().split(" ")[0];
   }
-  const label = comSelect?.options?.[comSelect.selectedIndex]?.text || "";
-  return String(label).trim().split(" ")[0];
+  return "";
+}
+
+/** 仅对 COM 桥枚举口（sys: / deviceId）走桥接；auth: 为 Web Serial 授权项 */
+function shouldUseBridgeForSelection(selectedValue, optionMeta) {
+  if (!selectedValue || selectedValue.startsWith("__")) return false;
+  if (window._bridgeMode === "bridge") return true;
+  if (window._bridgeMode !== "auto") return false;
+  if (selectedValue.startsWith("auth:")) return false;
+  const sp = optionMeta?.systemPort;
+  if (sp?.deviceId) return true;
+  return selectedValue.startsWith("sys:");
 }
 
 function getDuplicateVidPidSiblingPorts(deviceId) {
@@ -215,7 +225,7 @@ async function closeSerialResources() {
   } catch (_) { /* ignore */ }
   window.port = null;
   try {
-    await bridgeFetch("/bridge-close", {});
+    await bridgeFetch("/bridge-close", {}, { skipEnsure: true });
   } catch (_) { /* ignore */ }
 }
 
@@ -262,6 +272,28 @@ function getSelectedBaudRate() {
   return Number.isFinite(n) && n > 0 ? n : 115200;
 }
 
+function scheduleRefreshPorts(opts = {}) {
+  if (typeof window.refreshPorts !== "function") return;
+  window.refreshPorts(opts).catch(() => {});
+}
+
+async function openSerialPortWithTimeout(port, options, timeoutMs = 15000) {
+  let timer = null;
+  try {
+    await Promise.race([
+      port.open(options),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("串口打开超时（15s），请关闭 Mission Planner/QGC 后重试")),
+          timeoutMs
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function disconnectSerial() {
   if (window._gcsConnState !== "connected") return;
   try {
@@ -275,7 +307,7 @@ async function disconnectSerial() {
     window.markGcsSessionDisconnected();
   }
   log("🔌 已取消连接（串口已释放）");
-  try { await refreshPorts(); } catch (_) { /* ignore */ }
+  scheduleRefreshPorts({ probeBridge: false });
 }
 window.disconnectSerial = disconnectSerial;
 
@@ -334,19 +366,29 @@ async function connect() {
       return;
     }
 
+    setConnectionUI("connecting");
+
     await closeSerialResources();
 
-    if ((window._bridgeMode === "auto" || window._bridgeMode === "bridge" || !canWebSerial) && selectedValue) {
+    const optionMetaEarly = window._comOptionMap?.get(selectedValue);
+    const useBridge =
+      !canWebSerial
+        ? !!selectedValue && !selectedValue.startsWith("__")
+        : shouldUseBridgeForSelection(selectedValue, optionMetaEarly);
+
+    if (useBridge && selectedValue) {
       try {
         const baudRate = getSelectedBaudRate();
-        const optionMeta = window._comOptionMap?.get(selectedValue);
+        const optionMeta = optionMetaEarly || window._comOptionMap?.get(selectedValue);
         if (optionMeta?.systemPort && typeof window.isNoiseSerialPort === "function" && window.isNoiseSerialPort(optionMeta.systemPort)) {
           log("❌ 当前选中的是蓝牙/调试口，无法连接飞控。请在下拉中选择 CUAV/Pixhawk 的 usbmodem 口");
           setConnectionUI("error");
           return;
         }
         let portName = resolveBridgeDeviceId(selectedValue, optionMeta, comSelect);
-        if (!portName) throw new Error("missing bridge port name");
+        if (!portName) {
+          throw new Error("未识别到 COM 口名称，请在下拉中点击「↻ 刷新 COM 列表」并选择带 [桥接] 的端口");
+        }
         const portRole =
           typeof window.getPortProbeRole === "function"
             ? window.getPortProbeRole(optionMeta?.systemPort)
@@ -367,7 +409,6 @@ async function connect() {
         } else if (!portRole && mavlinkPort) {
           portName = mavlinkPort;
         }
-        setConnectionUI("connecting");
         if (!portRole && !mavlinkPort) {
           const siblings = getDuplicateVidPidSiblingPorts(portName);
           if (siblings.length) {
@@ -433,17 +474,23 @@ async function connect() {
     }
 
     if (selectedValue === "__add__") {
-      setConnectionUI("connecting");
       const ok = await requestAndRefreshPort();
-      setConnectionUI("disconnected");
-      if (ok) {
-        log(canWebSerial
-          ? "✅ 已添加串口授权，请在下拉框选择对应 COM/设备后再次点击「连接串口」"
-          : "✅ 已刷新 COM 列表，请从下拉选择端口后点击「连接串口」");
-      } else {
-        log(canWebSerial ? "⚠️ 未添加新串口（已取消选择）" : "⚠️ 未发现 COM 口，请确认飞控已插入且 COM 桥已启动");
+      if (!ok) {
+        log(canWebSerial ? "⚠️ 未选择飞控串口（已取消）" : "⚠️ 未发现 COM 口，请确认飞控已插入且 COM 桥已启动");
+        setConnectionUI("disconnected");
+        return;
       }
-      return;
+      selectedValue = comSelect.value;
+      if (!selectedValue || selectedValue === "__add__" || selectedValue.startsWith("__")) {
+        const portsNow = await navigator.serial.getPorts();
+        if (portsNow.length) selectedValue = "auth:0";
+        else {
+          log("⚠️ 未找到已授权串口，请重试");
+          setConnectionUI("disconnected");
+          return;
+        }
+      }
+      log("🔌 已授权串口，正在连接…");
     }
 
     if (!canWebSerial && (!selectedValue || selectedValue === "__refresh_bridge__")) {
@@ -461,32 +508,32 @@ async function connect() {
         await refreshPorts();
         selectedValue = comSelect.value;
       } else {
-        await refreshPorts();
-        selectedValue = comSelect.value;
+        selectedValue = comSelect.value || selectedValue;
       }
       if (!selectedValue) { log("❌ 请先在下拉框中选择串口"); setConnectionUI("error"); return; }
     }
 
-    setConnectionUI("connecting");
+    log("🔌 正在通过 Web Serial 连接…");
 
     let ports = await navigator.serial.getPorts();
     window._knownPorts = ports;
 
     if (!ports.length && selectedValue.startsWith("auth:")) {
+      log("⚠️ 浏览器未找到已授权串口，请在弹窗中重新选择飞控 USB 口");
       const added = await requestAllPortsInteractive();
       if (!added) { log("⚠️ 未授权任何串口"); setConnectionUI("error"); return; }
       ports = await navigator.serial.getPorts();
       window._knownPorts = ports;
-      await refreshPorts();
-      selectedValue = comSelect.value;
+      scheduleRefreshPorts({ probeBridge: true });
+      selectedValue = comSelect.value || `auth:0`;
     }
 
     let selectedPort = null;
     if (selectedValue.startsWith("auth:")) {
       const idx = Number(selectedValue.slice(5));
       if (Number.isNaN(idx) || idx < 0 || idx >= ports.length) {
-        await refreshPorts();
-        log("⚠️ 串口列表已变化，请重新选择");
+        scheduleRefreshPorts({ probeBridge: true });
+        log("⚠️ 串口列表已变化，请重新选择后连接");
         setConnectionUI("disconnected");
         return;
       }
@@ -516,10 +563,23 @@ async function connect() {
     const port = selectedPort;
     if (!port) throw new Error("未获取到串口端口对象");
     const baudRate = getSelectedBaudRate();
-    await port.open({
-      baudRate, dataBits: 8, stopBits: 1, parity: "none",
-      flowControl: "none", bufferSize: 8192,
-    });
+    try {
+      await openSerialPortWithTimeout(port, {
+        baudRate, dataBits: 8, stopBits: 1, parity: "none",
+        flowControl: "none", bufferSize: 8192,
+      });
+    } catch (openErr) {
+      const om = openErr?.message || String(openErr);
+      if (/InvalidStateError|already open/i.test(om)) {
+        try { await port.close(); } catch (_) { /* ignore */ }
+        await openSerialPortWithTimeout(port, {
+          baudRate, dataBits: 8, stopBits: 1, parity: "none",
+          flowControl: "none", bufferSize: 8192,
+        });
+      } else {
+        throw openErr;
+      }
+    }
 
     window.port = port;
     reader = port.readable.getReader();
@@ -537,8 +597,8 @@ async function connect() {
     readLoop();
     startTelemetryRequests();
 
-    try { await refreshPorts(); } catch (e) { /* ignore */ }
     setConnectionUI("connected");
+    scheduleRefreshPorts({ probeBridge: false });
     if (typeof window.rememberSelectedPort === "function") {
       window.rememberSelectedPort(
         comSelect.value || selectedValue,

@@ -11,6 +11,8 @@ if (-not (Test-Path -LiteralPath $Launcher)) {
     throw "GCS.cmd not found at repo root: $Launcher"
 }
 
+$IconIco = Join-Path $Root "assets\gcs-dog.ico"
+
 function New-GcsShortcut {
     param([string]$ShortcutPath)
     $Wsh = New-Object -ComObject WScript.Shell
@@ -19,6 +21,9 @@ function New-GcsShortcut {
     $Sc.WorkingDirectory = $Root
     $Sc.WindowStyle = 7
     $Sc.Description = "GCS"
+    if (Test-Path -LiteralPath $IconIco) {
+        $Sc.IconLocation = "$IconIco,0"
+    }
     $Sc.Save()
 }
 
@@ -38,8 +43,9 @@ Write-Host "Daily use: double-click the desktop GCS icon."
 if ($WatchdogStartup) {
     $Watchdog = Join-Path $Root "tools\gcs_watchdog.py"
     $PyCmd = Get-Command pythonw -ErrorAction SilentlyContinue
-    if (-not $PyCmd) { $PyCmd = Get-Command python -ErrorAction SilentlyContinue }
-    if (-not $PyCmd) { throw "Python not found. Install Python 3 and retry." }
+    if (-not $PyCmd) {
+        throw "pythonw not found. Install Python 3 (with pythonw) before enabling -WatchdogStartup."
+    }
     $Py = $PyCmd.Source
 
     $Startup = [Environment]::GetFolderPath("Startup")

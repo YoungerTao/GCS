@@ -38,14 +38,20 @@
     {
       key: "dronecan_gnss",
       match(node) {
+        const GNSS_TYPE_IDS = new Set([1060, 1061, 1062, 1063, 20002, 20003, 20005, 20006]);
+        const counts = node?.frameIdCounts || {};
+        for (const canId of Object.keys(counts)) {
+          const id = global.DRONECAN_DECODE?.parseCanIdValue?.(canId);
+          if (id && GNSS_TYPE_IDS.has(id.dataTypeId)) return true;
+        }
         const text = [node?.displayName, node?.name, node?.rawName].join(" ").toLowerCase();
-        return text.includes("gnss") || text.includes("gps");
+        return text.includes("gnss") || text.includes("gps") || text.includes("rtk");
       },
       info: {
-        name: "org.dronecan.gnss",
-        displayName: "DroneCAN GNSS",
-        deviceHint: "GNSS",
-        hardwareVersion: "DroneCAN GNSS",
+        name: "org.uavcan.equipment.gnss",
+        displayName: "DroneCAN GNSS / RTK",
+        deviceHint: "GNSS receiver",
+        hardwareVersion: "UAVCAN GNSS",
       },
     },
     {
@@ -130,11 +136,17 @@
       dataTypeId: parsed.dataTypeId ?? null,
     };
 
+    const shortName = standard?.shortName || byCanId?.shortName || fallback.shortName;
+    const fullName = standard?.fullName || byCanId?.fullName || fallback.fullName;
+    const category = standard?.category || byCanId?.category || fallback.category;
+    const labelZh = global.DRONECAN_LABELS_ZH?.lookup?.(shortName, fullName) || "";
+
     return {
       canId: key,
-      shortName: standard?.shortName || byCanId?.shortName || fallback.shortName,
-      fullName: standard?.fullName || byCanId?.fullName || fallback.fullName,
-      category: standard?.category || byCanId?.category || fallback.category,
+      shortName,
+      fullName,
+      category,
+      labelZh,
       dataTypeId: parsed.dataTypeId ?? byCanId?.dataTypeId ?? null,
       priority: parsed.priority,
       sourceNodeId: parsed.sourceNodeId,

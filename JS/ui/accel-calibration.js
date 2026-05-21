@@ -636,15 +636,17 @@
     quad(rudBotBack_L, rudTopBack_L, rudTopBack_R, rudBotBack_R, 200, 45, 52, MAT.RED);
 
     // —— 水平尾翼：梯形平面（前边展宽大、后边略窄 + 后掠），与机身无缝连接，与机尾对齐 ——
-    const yStLE = -75.0; // 水平尾翼前缘位置（向前移动，与垂尾根部协调）
-    const yStTE = -96.0; // 水平尾翼后缘位置（与机尾末端对齐）
+    const tailPlaneYShift = -2.8; // 稍微后移，避开机身遮挡
+    const tailPlaneZLift = 3.2; // 稍微抬高，让水平尾翼从校准视角里可见
+    const yStLE = -75.0 + tailPlaneYShift; // 水平尾翼前缘位置
+    const yStTE = -96.0 + tailPlaneYShift; // 水平尾翼后缘位置
     const stabDz = 0.1;
     const stabT = 0.38;
     const stabSpanLE = 42;
     const stabSpanTE = 34;
     
     function stabZTop(y) {
-      return topZAt(y) + stabDz;
+      return topZAt(y) + stabDz + tailPlaneZLift;
     }
     
     // 获取机身在水平尾翼安装位置的宽度

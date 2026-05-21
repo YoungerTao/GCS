@@ -105,7 +105,9 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 |------|------|
 | `GCS.cmd` | Windows 桌面快捷方式入口 |
 | `Start-GCS.bat` | Windows 调试，同 `GCS.cmd` |
-| `tools/install-gcs-desktop.ps1` | 安装桌面「GCS」图标 |
+| `assets/gcs-dog.ico` | 桌面「GCS」快捷方式图标（狗） |
+| `tools/install-gcs-desktop.ps1` | 安装桌面「GCS」快捷方式（带狗图标） |
+| `tools/build-gcs-icon.py` | 从 `assets/gcs-dog.svg` 重新生成 `.ico` |
 
 日常开发只用 Live Server，上述文件保留在仓库即可，不必运行。
 

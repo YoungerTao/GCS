@@ -39,6 +39,22 @@ def _finalize_port_list(data):
     return data
 
 
+def _subprocess_no_window_kwargs():
+    if sys.platform != "win32":
+        return {}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if not flags:
+        return {}
+    kwargs = {"creationflags": flags}
+    si = getattr(subprocess, "STARTUPINFO", None)
+    if si is not None:
+      startupinfo = subprocess.STARTUPINFO()
+      startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+      startupinfo.wShowWindow = 0
+      kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
 def _read_ports_windows():
     ps_script = r"""
 $ports = Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Name, PNPDeviceID
@@ -58,12 +74,22 @@ foreach ($p in $ports) {
 $result | ConvertTo-Json -Depth 3
 """
     proc = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", ps_script],
+        [
+            "powershell",
+            "-NoLogo",
+            "-NonInteractive",
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            ps_script,
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="ignore",
         timeout=6,
+        **_subprocess_no_window_kwargs(),
     )
     if proc.returncode != 0:
         return []
@@ -129,7 +155,12 @@ def _read_ports_unix():
 
 def read_ports():
     if sys.platform == "win32":
-        return _read_ports_windows()
+        if serial is not None:
+            try:
+                return _read_ports_unix()
+            except Exception:
+                return []
+        return []
     return _read_ports_unix()
 
 
@@ -429,11 +460,22 @@ def read_ports_with_roles(force=False, baudrate=115200):
         return probed
 
 
-def detect_slcan_port():
+_SLCAN_DETECT_CACHE = {"at": 0.0, "port": None}
+_SLCAN_DETECT_TTL_S = 30.0
+
+
+def detect_slcan_port(force=False):
+    now = time.time()
+    if not force and (now - float(_SLCAN_DETECT_CACHE.get("at") or 0)) < _SLCAN_DETECT_TTL_S:
+        return _SLCAN_DETECT_CACHE.get("port")
+    port = None
     for item in read_ports_with_roles():
         if item.get("probeRole") == "slcan" or item.get("isSlcanAdapter"):
-            return item.get("deviceId")
-    return None
+            port = item.get("deviceId")
+            break
+    _SLCAN_DETECT_CACHE["at"] = now
+    _SLCAN_DETECT_CACHE["port"] = port
+    return port
 
 
 class SerialHub:
@@ -540,6 +582,26 @@ def init_slcan_adapter(hub, bitrate_kbps=1000):
     for cmd in (b"C\r", f"S{code}\r".encode("ascii"), b"O\r"):
         hub.write(cmd)
         time.sleep(0.08)
+
+
+def _parse_can_id(frame_id):
+    raw = int(frame_id) & 0x1FFFFFFF
+    return {
+        "raw": raw,
+        "priority": (raw >> 24) & 0x1F,
+        "dataTypeId": (raw >> 8) & 0xFFFF,
+        "isService": bool((raw >> 7) & 1),
+        "sourceNodeId": raw & 0x7F,
+    }
+
+
+def _decode_node_status_uptime(frame_id, data_bytes):
+    parsed = _parse_can_id(frame_id)
+    if parsed["isService"] or parsed["dataTypeId"] != 341:
+        return None
+    if len(data_bytes) < 4:
+        return None
+    return int.from_bytes(data_bytes[:4], "little", signed=False)
 
 
 class SlcanMavlinkMonitor:
@@ -683,6 +745,9 @@ class SlcanMavlinkMonitor:
             node["lastCanId"] = f"0x{frame_id:X}"
             node["lastDlc"] = int(dlc)
             node["lastDataHex"] = data_bytes.hex().upper()
+            uptime_sec = _decode_node_status_uptime(frame_id, data_bytes)
+            if uptime_sec is not None:
+                node["uptimeSec"] = uptime_sec
             recent = self.node_recent_frames.get(node_id, [])
             recent.append({
                 "ts": int(now * 1000),
@@ -783,6 +848,7 @@ class SlcanMavlinkMonitor:
                             "status": "online",
                             "source": node.get("source", "MAVLink CAN_FRAME"),
                             "rxCount": node.get("rxCount", 0),
+                            "uptimeSec": node.get("uptimeSec"),
                             "lastCanId": node.get("lastCanId", ""),
                             "lastDataHex": node.get("lastDataHex", ""),
                             "lastDlc": node.get("lastDlc", 0),
@@ -884,8 +950,9 @@ class Handler(BaseHTTPRequestHandler):
             send_json(self, 200, {"data": base64.b64encode(data).decode("ascii")})
             return
         if self.path == "/slcan-status":
-            port = detect_slcan_port()
-            send_json(self, 200, {"adapterPort": port, **SLCAN_HUB.status()})
+            st = SLCAN_HUB.status()
+            port = st.get("port") if st.get("open") else detect_slcan_port()
+            send_json(self, 200, {"adapterPort": port, **st})
             return
         if self.path == "/slcan-nodes":
             send_json(self, 200, SLCAN_MONITOR.status())
@@ -931,16 +998,19 @@ class Handler(BaseHTTPRequestHandler):
                 bitrate_kbps = int(payload.get("bitrate_kbps") or 1000)
                 if not port:
                     raise RuntimeError("slcan adapter port not found")
-                SLCAN_MONITOR.reset()
-                status = SLCAN_HUB.open(port, baudrate)
-                init_slcan_adapter(SLCAN_HUB, bitrate_kbps=bitrate_kbps)
-                send_json(self, 200, {
-                    "ok": True,
-                    "adapterPort": port,
-                    "bitrateKbps": bitrate_kbps,
-                    "slcanInit": True,
-                    **status,
-                })
+                try:
+                    SLCAN_MONITOR.reset()
+                    status = SLCAN_HUB.open(port, baudrate)
+                    init_slcan_adapter(SLCAN_HUB, bitrate_kbps=bitrate_kbps)
+                    send_json(self, 200, {
+                        "ok": True,
+                        "adapterPort": port,
+                        "bitrateKbps": bitrate_kbps,
+                        "slcanInit": True,
+                        **status,
+                    })
+                except Exception as exc:
+                    send_json(self, 200, {"ok": False, "error": str(exc), "adapterPort": port})
                 return
             if self.path == "/slcan-init":
                 bitrate_kbps = int(payload.get("bitrate_kbps") or 1000)
@@ -952,9 +1022,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not force and now - last_init < 30.0:
                     send_json(self, 200, {"ok": True, "skipped": True, "bitrateKbps": bitrate_kbps})
                     return
-                init_slcan_adapter(SLCAN_HUB, bitrate_kbps=bitrate_kbps)
-                SLCAN_HUB._last_slcan_init_at = now
-                send_json(self, 200, {"ok": True, "bitrateKbps": bitrate_kbps, "slcanInit": True})
+                try:
+                    init_slcan_adapter(SLCAN_HUB, bitrate_kbps=bitrate_kbps)
+                    SLCAN_HUB._last_slcan_init_at = now
+                    send_json(self, 200, {"ok": True, "bitrateKbps": bitrate_kbps, "slcanInit": True})
+                except Exception as exc:
+                    send_json(self, 200, {"ok": False, "error": str(exc), "bitrateKbps": bitrate_kbps})
                 return
             if self.path == "/slcan-close":
                 SLCAN_HUB.close()

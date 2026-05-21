@@ -27,7 +27,6 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
@@ -38,7 +37,6 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
             body = json.dumps({"ok": ok, "bridgeReady": ok}).encode("utf-8")
             self.send_response(200 if ok else 503)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -55,7 +53,6 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
             }).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

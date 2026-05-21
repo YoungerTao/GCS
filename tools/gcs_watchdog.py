@@ -95,6 +95,7 @@ class LauncherHandler(BaseHTTPRequestHandler):
             })
             return
         self.send_response(404)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
     def do_POST(self):
@@ -108,6 +109,7 @@ class LauncherHandler(BaseHTTPRequestHandler):
             })
             return
         self.send_response(404)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
     def log_message(self, fmt, *args):
@@ -117,7 +119,8 @@ class LauncherHandler(BaseHTTPRequestHandler):
 def main() -> int:
     ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer(("127.0.0.1", LAUNCHER_PORT), LauncherHandler)
-    print(f"GCS launcher watchdog http://127.0.0.1:{LAUNCHER_PORT}")
+    if sys.stdout is not None and getattr(sys.stdout, "isatty", lambda: False)():
+        print(f"GCS launcher watchdog http://127.0.0.1:{LAUNCHER_PORT}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

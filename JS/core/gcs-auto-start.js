@@ -35,6 +35,21 @@
     return LOCAL_HOSTS.has(u.hostname);
   }
 
+  /** GCS.cmd 内置 UI：http://127.0.0.1:8766 */
+  function isGcsRuntimePage() {
+    const u = pageUrl();
+    if (!u) return false;
+    return LOCAL_HOSTS.has(u.hostname) && String(u.port || "") === "8766";
+  }
+
+  /** Live Server 等第三方本地端口（非 8766） */
+  function isLiveServerDevPage() {
+    const u = pageUrl();
+    if (!u || u.protocol === "file:") return false;
+    if (!LOCAL_HOSTS.has(u.hostname)) return false;
+    return String(u.port || "") !== "8766";
+  }
+
   function hideBootOverlay() {
     const el = document.getElementById("gcs-boot-overlay");
     if (!el) return;
@@ -87,9 +102,10 @@
 
   async function waitForBridge(maxMs) {
     const deadline = Date.now() + maxMs;
+    const interval = global.__gcsLiveServerDev ? 1200 : 600;
     while (Date.now() < deadline) {
       if (await fetchOk(BRIDGE_HEALTH)) return true;
-      await sleep(300);
+      await sleep(interval);
     }
     return fetchOk(BRIDGE_HEALTH);
   }
@@ -101,7 +117,13 @@
       const runtimeOk = await ensureRuntimeStarted();
       if (runtimeOk) {
         await ensureBridgeFromRuntime();
-        await waitForBridge(10000);
+        const bridgeWait = global.__gcsLiveServerDev ? 2500 : 8000;
+        const bridgeOk = await waitForBridge(bridgeWait);
+        if (!bridgeOk) {
+          global._comBridgeBackoffUntil = Date.now() + 45000;
+        }
+      } else if (global.__gcsLiveServerDev) {
+        global._comBridgeBackoffUntil = Date.now() + 45000;
       }
     } finally {
       global.__gcsStackBootstrapping = false;
@@ -111,7 +133,8 @@
   }
 
   global.__gcsLocalDev = isLocalHttpPage();
-  global.__gcsLiveServerDev = global.__gcsLocalDev;
+  global.__gcsRuntimeNative = isGcsRuntimePage();
+  global.__gcsLiveServerDev = isLiveServerDevPage();
 
   global.__gcsBootstrapPromise = bootstrap();
 
@@ -119,7 +142,11 @@
     if (global.__gcsBootstrapPromise) {
       await global.__gcsBootstrapPromise;
     }
+    if (typeof global._comBridgeBackoffUntil === "number" && Date.now() < global._comBridgeBackoffUntil) {
+      return false;
+    }
     if (await fetchOk(BRIDGE_HEALTH)) return true;
+    if (global.__gcsLiveServerDev) return false;
     if (typeof global.ensureComBridgeRunning === "function") {
       return global.ensureComBridgeRunning();
     }

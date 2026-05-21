@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0f2230"/>
+      <stop offset="1" stop-color="#19384a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <!-- ears -->
+  <ellipse cx="20" cy="18" rx="8" ry="11" fill="#c8963a"/>
+  <ellipse cx="44" cy="18" rx="8" ry="11" fill="#c8963a"/>
+  <!-- head -->
+  <ellipse cx="32" cy="30" rx="17" ry="16" fill="#f2c55c"/>
+  <!-- muzzle -->
+  <ellipse cx="32" cy="37" rx="9" ry="7" fill="#f5e6c8"/>
+  <!-- nose -->
+  <ellipse cx="32" cy="36" rx="3.5" ry="3" fill="#2a2320"/>
+  <!-- eyes -->
+  <ellipse cx="25" cy="27" rx="3.2" ry="3.8" fill="#1a2028"/>
+  <ellipse cx="39" cy="27" rx="3.2" ry="3.8" fill="#1a2028"/>
+  <circle cx="26" cy="26" r="1.1" fill="#f4f7fb"/>
+  <circle cx="40" cy="26" r="1.1" fill="#f4f7fb"/>
+  <!-- collar accent (GCS teal) -->
+  <path d="M22 44 Q32 48 42 44" fill="none" stroke="#5ec8e8" stroke-width="3" stroke-linecap="round"/>
+</svg>

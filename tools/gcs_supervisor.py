@@ -14,15 +14,32 @@ BRIDGE_API = "http://127.0.0.1:8765/health"
 
 
 def gcs_python() -> str:
-    """Prefer repo .venv (has pyserial) when present."""
+    """Prefer repo .venv (has pyserial) when present; on Windows prefer pythonw (no console)."""
     for rel in (".venv/bin/python", ".venv/Scripts/python.exe"):
         candidate = REPO_ROOT / rel
         if candidate.is_file():
+            if sys.platform == "win32":
+                pyw = candidate.parent / "pythonw.exe"
+                if pyw.is_file():
+                    return str(pyw)
             return str(candidate)
+    if sys.platform == "win32":
+        exe = Path(sys.executable)
+        if exe.name.lower() == "python.exe":
+            pyw = exe.with_name("pythonw.exe")
+            if pyw.is_file():
+                return str(pyw)
     return sys.executable
 
 _lock = threading.Lock()
 _proc: subprocess.Popen | None = None
+_bridge_fail_streak = 0
+
+
+def _subprocess_flags() -> int:
+    if sys.platform == "win32":
+        return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return 0
 
 
 def bridge_healthy(timeout_s: float = 1.5) -> bool:
@@ -64,6 +81,7 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
                 cwd=str(SERVER_SCRIPT.parent),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=_subprocess_flags(),
             )
 
     deadline = time.time() + wait_s
@@ -78,10 +96,20 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
 
 
 def watchdog_loop(interval_s: float = 5.0) -> None:
+    global _bridge_fail_streak
     while True:
         try:
             if not bridge_healthy(timeout_s=1.0):
-                ensure_bridge_process(force_restart=True, wait_s=15.0)
+                ok = ensure_bridge_process(force_restart=True, wait_s=15.0)
+                if ok:
+                    _bridge_fail_streak = 0
+                else:
+                    _bridge_fail_streak += 1
+            else:
+                _bridge_fail_streak = 0
         except Exception:
-            pass
-        time.sleep(interval_s)
+            _bridge_fail_streak += 1
+        pause = interval_s
+        if _bridge_fail_streak > 2:
+            pause = min(60.0, interval_s * _bridge_fail_streak)
+        time.sleep(pause)

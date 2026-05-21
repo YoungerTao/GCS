@@ -2,6 +2,10 @@ window._knownPorts = window._knownPorts || [];
 window._comOptionMap = window._comOptionMap || new Map();
 window._systemComPorts = window._systemComPorts || [];
 window._autoConnectAttempts = 0;
+
+function systemComPorts() {
+  return Array.isArray(window._systemComPorts) ? window._systemComPorts : [];
+}
 const AUTO_CONNECT_MAX_ATTEMPTS = 6;
 const BRIDGE_API = "http://127.0.0.1:8765";
 let ensureBridgePromise = null;
@@ -68,47 +72,65 @@ function pickPreferredPortValue(comSelect) {
 window.isNoiseSerialPort = isNoiseSerialPort;
 window.rankSerialPort = rankSerialPort;
 
+const BRIDGE_OFFLINE_BACKOFF_MS = 45000;
+const BRIDGE_HEALTH_PROBE_MS = 15000;
+
+function isBridgeBackoffActive() {
+  return typeof window._comBridgeBackoffUntil === "number" && Date.now() < window._comBridgeBackoffUntil;
+}
+
 async function probeBridgeHealth() {
   if (window.__gcsStackBootstrapping) return false;
+  if (isBridgeBackoffActive()) return false;
   if (typeof window._comBridgeProbeBackoffUntil === "number" && Date.now() < window._comBridgeProbeBackoffUntil) {
     return false;
   }
   try {
     const resp = await fetch(`${BRIDGE_API}/health`, { cache: "no-store" });
     window._comBridgeProbeBackoffUntil = 0;
+    if (resp.ok) {
+      window._comBridgeOnline = true;
+      window._comBridgeBackoffUntil = 0;
+    }
     return resp.ok;
   } catch (_) {
-    window._comBridgeProbeBackoffUntil = Date.now() + 2000;
+    window._comBridgeProbeBackoffUntil = Date.now() + BRIDGE_HEALTH_PROBE_MS;
     return false;
   }
 }
 
 async function requestBridgeStartup() {
-  const bases = [
-    "http://127.0.0.1:8766",
-    (typeof location !== "undefined" && String(location.origin || "").startsWith("http"))
-      ? location.origin
-      : "",
-  ].filter(Boolean);
-  const seen = new Set();
-  for (const base of bases) {
-    if (seen.has(base)) continue;
-    seen.add(base);
+  const attempts = [
+    { url: "http://127.0.0.1:8766/__gcs/ensure-bridge", method: "POST" },
+    { url: "http://127.0.0.1:8767/launch", method: "POST" },
+  ];
+  for (const { url, method } of attempts) {
     try {
-      const resp = await fetch(`${base}/__gcs/ensure-bridge`, {
-        method: "POST",
-        cache: "no-store",
-      });
+      const resp = await fetch(url, { method, cache: "no-store" });
       if (resp.ok) return true;
     } catch (_) {
-      // Try next runtime origin.
+      // try next launcher/runtime
     }
   }
   return false;
 }
 
+function markBridgeOffline(message) {
+  window._comBridgeOnline = false;
+  window._comBridgeBackoffUntil = Date.now() + BRIDGE_OFFLINE_BACKOFF_MS;
+  if (!window._comBridgeOfflineHintLogged) {
+    window._comBridgeOfflineHintLogged = true;
+    if (typeof window.log === "function" && message) {
+      window.log(message);
+    }
+  }
+}
+
 async function ensureComBridgeRunning() {
   const liveDev = !!window.__gcsLiveServerDev;
+  if (isBridgeBackoffActive()) {
+    return !!window._comBridgeOnline;
+  }
   if (typeof window.ensureGcsStackReady === "function") {
     if (liveDev) {
       window.ensureGcsStackReady().catch(() => {});
@@ -121,7 +143,17 @@ async function ensureComBridgeRunning() {
     window._comBridgeBackoffUntil = 0;
     return true;
   }
-  const waitAttempts = liveDev ? 40 : 32;
+  if (liveDev) {
+    // Live Server 场景只做探测，不主动拉起后台桥接进程，避免弹出系统窗口。
+    markBridgeOffline(
+      hasWebSerialApi()
+        ? "COM 桥未运行，已保留浏览器 Web Serial 路径。"
+        : "COM 桥未运行，请先用桌面 GCS 启动，或改用 Web Serial。"
+    );
+    return false;
+  }
+  if (isBridgeBackoffActive()) return false;
+  const waitAttempts = liveDev ? 8 : 20;
   if (!ensureBridgePromise) {
     ensureBridgePromise = (async () => {
       await requestBridgeStartup();
@@ -132,15 +164,12 @@ async function ensureComBridgeRunning() {
           window._comBridgeOfflineHintLogged = false;
           return true;
         }
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, liveDev ? 400 : 300));
       }
-      window._comBridgeOnline = false;
-      if (!window._comBridgeOfflineHintLogged) {
-        window._comBridgeOfflineHintLogged = true;
-        if (typeof window.log === "function") {
-          window.log("本地 COM 桥接未就绪。请从桌面「GCS」图标打开。");
-        }
-      }
+      const hint = liveDev && hasWebSerialApi()
+        ? "COM 桥 (8765) 未启动：可直接用 Web Serial 连飞控；DroneCAN/协议探测需运行 GCS.cmd"
+        : "本地 COM 桥接未就绪。请从桌面「GCS」图标打开。";
+      markBridgeOffline(hint);
       return false;
     })().finally(() => {
       ensureBridgePromise = null;
@@ -165,40 +194,51 @@ function findPortByProbeRole(role) {
 window.getPortProbeRole = getPortProbeRole;
 
 async function fetchSystemComPortsImpl(opts = {}) {
-  const now = Date.now();
-  const forceProbe = opts.probe !== false;
-  if (
-    !forceProbe &&
-    typeof window._comBridgeBackoffUntil === "number" &&
-    now < window._comBridgeBackoffUntil
-  ) {
-    return Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : [];
+  const forceProbe = opts.forceProbe === true || opts.forceBridgeProbe === true;
+  const cached = Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : [];
+  const lastAt = window._lastFetchedSystemPortsAt || 0;
+  if (!forceProbe && cached.length && Date.now() - lastAt < 12000) {
+    return cached;
   }
-  await ensureComBridgeRunning();
+  if (!forceProbe && isBridgeBackoffActive()) {
+    return cached;
+  }
+  if (hasWebSerialApi() && isBridgeBackoffActive() && !opts.forceBridge) {
+    return cached;
+  }
+  if (!window.__gcsLiveServerDev) {
+    await ensureComBridgeRunning();
+  } else {
+    await probeBridgeHealth();
+  }
+  if (isBridgeBackoffActive() && !window._comBridgeOnline) {
+    return cached;
+  }
   try {
     const baudEl = document.getElementById("serialBaud");
     const baud = baudEl ? parseInt(String(baudEl.value || "115200"), 10) : 115200;
     const baudQ = Number.isFinite(baud) && baud > 0 ? baud : 115200;
-    const resp = await fetch(`${BRIDGE_API}/com-ports?probe=1&baud=${baudQ}`, { cache: "no-store" });
+    const probeQ = forceProbe ? "1" : "0";
+    const resp = await fetch(`${BRIDGE_API}/com-ports?probe=${probeQ}&baud=${baudQ}`, { cache: "no-store" });
     if (!resp.ok) throw new Error(`bridge list failed (${resp.status})`);
     const data = await resp.json();
     const ports = Array.isArray(data.ports) ? data.ports : [];
     window._comBridgeOnline = true;
     window._comBridgeBackoffUntil = 0;
     window._lastFetchedSystemPorts = ports;
+    window._lastFetchedSystemPortsAt = Date.now();
     window._comBridgeOfflineHintLogged = false;
     return ports;
   } catch (_) {
-    window._comBridgeOnline = false;
-    window._comBridgeBackoffUntil = Date.now() + 5000;
+    markBridgeOffline(null);
     window._lastFetchedSystemPorts = window._lastFetchedSystemPorts || [];
     return window._lastFetchedSystemPorts;
   }
 }
 
-async function fetchSystemComPorts() {
+async function fetchSystemComPorts(opts = {}) {
   fetchSystemComPorts._queue = fetchSystemComPorts._queue || Promise.resolve();
-  const run = fetchSystemComPorts._queue.then(() => fetchSystemComPortsImpl());
+  const run = fetchSystemComPorts._queue.then(() => fetchSystemComPortsImpl(opts));
   fetchSystemComPorts._queue = run.catch(() => {});
   return run;
 }
@@ -467,7 +507,10 @@ function scheduleAutoReconnectAfterRefresh() {
 }
 
 async function refreshPorts(opts = {}) {
-  const probeBridge = opts.probeBridge !== false;
+  let probeBridge = opts.probeBridge !== false;
+  if (probeBridge && !opts.forceBridgeProbe && isBridgeBackoffActive()) {
+    probeBridge = false;
+  }
   const comSelect = document.getElementById("comPort");
   if (!comSelect) return;
 
@@ -477,7 +520,10 @@ async function refreshPorts(opts = {}) {
     try { ports = await navigator.serial.getPorts(); } catch (_) { ports = []; }
   }
   const systemPorts = probeBridge
-    ? await fetchSystemComPorts()
+    ? await fetchSystemComPorts({
+        forceProbe: !!opts.forceBridgeProbe,
+        forceBridge: !!opts.forceBridgeProbe,
+      })
     : (Array.isArray(window._lastFetchedSystemPorts) ? window._lastFetchedSystemPorts : []);
 
   const currentValue = comSelect.value;
@@ -591,15 +637,33 @@ async function refreshPorts(opts = {}) {
     return;
   }
 
+  const authVidPidCounts = new Map();
+  ports.forEach((port) => {
+    const info = port.getInfo ? port.getInfo() : {};
+    if (typeof info.usbVendorId === "number" && typeof info.usbProductId === "number") {
+      const key = `${info.usbVendorId}:${info.usbProductId}`;
+      authVidPidCounts.set(key, (authVidPidCounts.get(key) || 0) + 1);
+    }
+  });
+
   ports.forEach((port, index) => {
     const option = document.createElement("option");
     const info = port.getInfo ? port.getInfo() : {};
     const vid = typeof info.usbVendorId === "number" ? info.usbVendorId.toString(16).toUpperCase().padStart(4, "0") : "----";
     const pid = typeof info.usbProductId === "number" ? info.usbProductId.toString(16).toUpperCase().padStart(4, "0") : "----";
+    const dupKey = typeof info.usbVendorId === "number" && typeof info.usbProductId === "number"
+      ? `${info.usbVendorId}:${info.usbProductId}`
+      : "";
+    const dupHint = (authVidPidCounts.get(dupKey) || 0) > 1 ? ` · 同USB第${index + 1}路` : "";
     option.value = `auth:${index}`;
-    option.text = `串口${index + 1} (VID_${vid}:PID_${pid})`;
+    option.text = `串口${index + 1} (VID_${vid}:PID_${pid})${dupHint}`;
     comSelect.appendChild(option);
-    window._comOptionMap.set(option.value, { authIndex: index, systemPort: null });
+    window._comOptionMap.set(option.value, {
+      authIndex: index,
+      systemPort: null,
+      usbVendorId: info.usbVendorId,
+      usbProductId: info.usbProductId,
+    });
   });
 
   appendPortPickerExtras(comSelect, canWebSerial);
@@ -617,7 +681,12 @@ async function refreshPorts(opts = {}) {
     comSelect.value = comSelect.options[0]?.value || "__add__";
   }
 
-  setConnectSerialHint("");
+  const cuavDual = ports.length >= 2 && authVidPidCounts.size === 1 && (authVidPidCounts.values().next().value || 0) >= 2;
+  setConnectSerialHint(
+    cuavDual
+      ? "CUAV 一根USB两路：顶部连一路 MAVLink；DroneCAN→SLCAN 请在下拉选「浏览器串口2」或先「＋添加串口」授权第二路"
+      : ""
+  );
   tryAutoConnect().catch(() => {});
 }
 
@@ -636,12 +705,12 @@ function appendPortPickerExtras(comSelect, canWebSerial) {
 
 async function requestAndRefreshPort() {
   if (!hasWebSerialApi()) {
-    await refreshPorts({ probeBridge: true });
+    await refreshPorts({ probeBridge: true, forceBridgeProbe: true });
     return (window._systemComPorts || []).length > 0;
   }
   try {
     await navigator.serial.requestPort();
-    await refreshPorts();
+    await refreshPorts({ probeBridge: false });
     return true;
   } catch (e) {
     if (e && e.name === "NotFoundError") return false;
@@ -659,7 +728,7 @@ async function requestAllPortsInteractive() {
     try {
       await navigator.serial.requestPort();
       added += 1;
-      await refreshPorts();
+      await refreshPorts({ probeBridge: false });
       if (!window.confirm("已添加一个串口。是否继续添加下一个串口？")) break;
     } catch (e) {
       if (e && e.name === "NotFoundError") break;
@@ -698,8 +767,9 @@ function initComPortAutoRefresh() {
       const now = Date.now();
       if (window._comBridgeLastFocusProbe && now - window._comBridgeLastFocusProbe < 12000) return;
       window._comBridgeLastFocusProbe = now;
-      window._comBridgeBackoffUntil = 0;
-      refreshPorts({ probeBridge: true }).catch(() => {});
+      if (!isBridgeBackoffActive()) {
+        refreshPorts({ probeBridge: true }).catch(() => {});
+      }
     });
   }
 
@@ -709,13 +779,20 @@ function initComPortAutoRefresh() {
   }
 
   if (window._portAutoRefreshTimer) clearInterval(window._portAutoRefreshTimer);
-  window._portAutoRefreshTimer = setInterval(() => refreshPorts({ probeBridge: false }), 3000);
+  window._portAutoRefreshTimer = setInterval(() => {
+    const probe = !window._comBridgeOnline && !isBridgeBackoffActive();
+    refreshPorts({ probeBridge: probe }).catch(() => {});
+  }, 8000);
 
   if (window._comBridgeSlowProbeTimer) clearInterval(window._comBridgeSlowProbeTimer);
-  window._comBridgeSlowProbeTimer = setInterval(() => refreshPorts({ probeBridge: true }), 60000);
+  window._comBridgeSlowProbeTimer = setInterval(() => {
+    if (isBridgeBackoffActive()) return;
+    refreshPorts({ probeBridge: true, forceBridgeProbe: true }).catch(() => {});
+  }, 90000);
 }
 
 window.ensureComBridgeRunning = ensureComBridgeRunning;
+window.isBridgeBackoffActive = isBridgeBackoffActive;
 window.fetchSystemComPorts = fetchSystemComPorts;
 window.refreshPorts = refreshPorts;
 window.requestAndRefreshPort = requestAndRefreshPort;
