@@ -68,6 +68,12 @@ function pickPreferredPortValue(comSelect) {
 window.isNoiseSerialPort = isNoiseSerialPort;
 window.rankSerialPort = rankSerialPort;
 
+function systemComPorts() {
+  return Array.isArray(window._systemComPorts) ? window._systemComPorts : [];
+}
+
+window.systemComPorts = systemComPorts;
+
 async function probeBridgeHealth() {
   if (window.__gcsStackBootstrapping) return false;
   if (typeof window._comBridgeProbeBackoffUntil === "number" && Date.now() < window._comBridgeProbeBackoffUntil) {
@@ -84,27 +90,15 @@ async function probeBridgeHealth() {
 }
 
 async function requestBridgeStartup() {
-  const bases = [
-    "http://127.0.0.1:8766",
-    (typeof location !== "undefined" && String(location.origin || "").startsWith("http"))
-      ? location.origin
-      : "",
-  ].filter(Boolean);
-  const seen = new Set();
-  for (const base of bases) {
-    if (seen.has(base)) continue;
-    seen.add(base);
-    try {
-      const resp = await fetch(`${base}/__gcs/ensure-bridge`, {
-        method: "POST",
-        cache: "no-store",
-      });
-      if (resp.ok) return true;
-    } catch (_) {
-      // Try next runtime origin.
-    }
+  try {
+    const resp = await fetch("http://127.0.0.1:8766/__gcs/ensure-bridge", {
+      method: "POST",
+      cache: "no-store",
+    });
+    return resp.ok;
+  } catch (_) {
+    return false;
   }
-  return false;
 }
 
 async function ensureComBridgeRunning() {
@@ -434,6 +428,8 @@ async function tryAutoConnect() {
   comSelect.value = target;
   restoreRememberedBaud();
 
+  if (window._paramLoadActive || window._gcsConnState === "connected") return;
+
   try {
     if (localStorage.getItem("gcs.autoLoadParams") !== "0") {
       window._pendingParamRequest = true;
@@ -566,7 +562,9 @@ async function refreshPorts(opts = {}) {
         .join("，");
       window.log(`🔍 串口协议探测：${summary}`, "port-probe");
     }
-    tryAutoConnect().catch(() => {});
+    if (window._gcsConnState !== "connected" && window._gcsConnState !== "connecting") {
+      tryAutoConnect().catch(() => {});
+    }
     return;
   }
 
@@ -618,7 +616,9 @@ async function refreshPorts(opts = {}) {
   }
 
   setConnectSerialHint("");
-  tryAutoConnect().catch(() => {});
+  if (window._gcsConnState !== "connected" && window._gcsConnState !== "connecting") {
+    tryAutoConnect().catch(() => {});
+  }
 }
 
 function appendPortPickerExtras(comSelect, canWebSerial) {

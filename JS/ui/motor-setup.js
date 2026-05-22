@@ -185,19 +185,38 @@
     }
   }
 
+  const FRAME_PROBE_KEYS = ["FRAME_CLASS", "FRAME_TYPE", "Q_FRAME_CLASS", "Q_FRAME_TYPE"];
+
   async function requestAirframeParamsIfNeeded() {
-    if (hasBothFrameParams()) return;
+    if (hasBothFrameParams() || state.frameFromStatustext) return;
+    if (window._motorFrameProbeExhausted) return;
+    if (!isSerialConnected()) return;
+
+    const pmap = window.params;
+    const bulkLoaded = pmap instanceof Map && pmap.size > 80;
+    if (bulkLoaded) {
+      window._motorFrameProbeExhausted = true;
+      return;
+    }
+
     const now = Date.now();
-    if (state.paramProbeRequested && now - state.lastParamProbeAt < 2500) return;
+    if (state.paramProbeRequested && now - state.lastParamProbeAt < 8000) return;
     state.paramProbeRequested = true;
     state.lastParamProbeAt = now;
+
+    const missing = FRAME_PROBE_KEYS.filter((k) => !pmap.has(k));
+    if (!missing.length) return;
+
     try {
-      if (typeof window.loadParams === "function") {
-        await window.loadParams();
-        log("📥 电机页自动拉取机型参数（FRAME_CLASS / FRAME_TYPE）", "motor-param-probe");
+      for (const name of missing) {
+        if (typeof window.requestParamByName === "function") {
+          await window.requestParamByName(name);
+          await new Promise((r) => setTimeout(r, 35));
+        }
       }
+      log(`📥 电机页已按需请求机型参数：${missing.join(", ")}`, "motor-param-probe");
     } catch (e) {
-      log(`⚠️ 自动读取机型参数失败：${e?.message || e}`, "motor-param-probe");
+      log(`⚠️ 读取机型参数失败：${e?.message || e}`, "motor-param-probe");
     }
   }
 
@@ -1063,7 +1082,14 @@
 
     document.addEventListener("gcs-airframe-params-changed", () => refreshLayoutIfChanged());
     document.addEventListener("gcs-frame-statustext", onFrameStatustext);
-    document.addEventListener("gcs-connection", () => refreshLayoutIfChanged());
+    document.addEventListener("gcs-connection", (ev) => {
+      if (ev.detail && ev.detail.state === "disconnected") {
+        state.paramProbeRequested = false;
+        state.lastParamProbeAt = 0;
+        window._motorFrameProbeExhausted = false;
+      }
+      refreshLayoutIfChanged();
+    });
   }
 
   function onFrameStatustext(ev) {

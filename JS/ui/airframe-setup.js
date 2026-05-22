@@ -7,6 +7,10 @@
     { value: 8, key: "ROTATION_ROLL_180", rx: 238, ry: 0, rz: 0 },
   ];
 
+  const MAV_TYPE_FIXED_WING = 1;
+  const MAV_TYPE_VTOL_TYPES = new Set([19, 20, 21]);
+  const MAV_TYPE_COPTER_TYPES = new Set([2, 3, 4, 7, 8, 9, 12, 13, 14, 15, 16, 17]);
+
   /** ArduCopter FRAME_CLASS（与飞控参数说明一致） */
   const FRAME_CLASS_OPTIONS = [
     { id: 1, name: "Quad", label: "四旋翼", icon: "4" },
@@ -166,6 +170,31 @@
     dirty: false,
   };
 
+  function heartbeatFirmwareKind() {
+    const t = Math.round(Number(window.fcMavType));
+    if (t === MAV_TYPE_FIXED_WING) return "plane";
+    if (MAV_TYPE_VTOL_TYPES.has(t)) return "vtol";
+    if (MAV_TYPE_COPTER_TYPES.has(t)) return "copter";
+    return "";
+  }
+
+  function detectFirmwareProfile() {
+    const fwText = (document.getElementById("ov-fw-version")?.textContent || "").trim();
+    const hbKind = heartbeatFirmwareKind();
+    const p = window.params instanceof Map ? window.params : null;
+    const hasFrame = !!(p && p.has("FRAME_CLASS") && p.has("FRAME_TYPE"));
+    const hasQ = !!(p && p.has("Q_FRAME_CLASS") && p.has("Q_FRAME_TYPE"));
+    const fwLow = fwText.toLowerCase();
+    const fwPlane = /plane|arduplane/.test(fwLow);
+    const fwCopter = /copter|arducopter/.test(fwLow);
+    const fwVtol = /vtol|quadplane/.test(fwLow);
+
+    if (hbKind === "vtol" || hasQ || fwVtol) return { kind: "vtol", hasFrame, hasQ, fwText };
+    if (hbKind === "plane" || (fwPlane && !fwVtol)) return { kind: "plane", hasFrame, hasQ, fwText };
+    if (hbKind === "copter" || fwCopter || (hasFrame && !hasQ)) return { kind: "copter", hasFrame, hasQ, fwText };
+    return { kind: "unknown", hasFrame, hasQ, fwText };
+  }
+
   function getFrameParamKeys() {
     const p = window.params;
     if (!(p instanceof Map)) return null;
@@ -200,27 +229,37 @@
   }
 
   function detectFirmware() {
-    const fwText = (document.getElementById("ov-fw-version")?.textContent || "").trim();
-    const keys = getFrameParamKeys();
-    const hasFrame = keys?.classKey === "FRAME_CLASS";
-    const hasQ = keys?.classKey?.startsWith("Q_");
+    const prof = detectFirmwareProfile();
+    const fwText = prof.fwText;
+    const hasFrame = prof.hasFrame;
+    const hasQ = prof.hasQ;
+    const kind = prof.kind;
 
-    if (/copter/i.test(fwText) || (hasFrame && !hasQ)) {
+    if (kind === "plane") {
+      return {
+        kind: "plane",
+        copterUi: false,
+        icon: "🛩️",
+        title: fwText && !/等待|…/.test(fwText) ? fwText : "ArduPlane · 固定翼固件",
+        hint: "固定翼不使用旋翼矩阵；本页仅保留 IMU 朝向。舵面、起飞、巡航和返航参数请在全部参数页或航线页配置。",
+      };
+    }
+    if (kind === "vtol") {
+      return {
+        kind: "vtol",
+        copterUi: false,
+        icon: "✈️",
+        title: fwText || "ArduPlane VTOL",
+        hint: "当前为垂起固定翼；若需配置 Q_FRAME_* 机架，请在参数页或专用机型页处理。",
+      };
+    }
+    if (kind === "copter" || /copter/i.test(fwText) || (hasFrame && !hasQ)) {
       return {
         kind: "copter",
         copterUi: true,
         icon: "🛸",
         title: fwText && !/等待|…/.test(fwText) ? fwText : "ArduCopter · 多旋翼固件",
         hint: "",
-      };
-    }
-    if (/plane|arduplane/i.test(fwText) || hasQ) {
-      return {
-        kind: hasQ ? "vtol" : "plane",
-        copterUi: false,
-        icon: hasQ ? "✈️" : "🛩️",
-        title: fwText || (hasQ ? "ArduPlane VTOL" : "ArduPlane"),
-        hint: "当前固件非 ArduCopter，机架参数请使用 Q_FRAME_* 或在 Mission Planner 中配置",
       };
     }
     if (/rover|boat|sub/i.test(fwText)) {
@@ -295,9 +334,14 @@
     const btn = document.getElementById("af-write-btn");
     if (!btn) return;
     btn.classList.toggle("pending", state.dirty);
+    const planeMode = state.firmware.kind === "plane";
     btn.textContent = state.dirty
-      ? "有未写入修改，请点击保存并重启飞控"
-      : "写入并重启飞控 (Write & Reboot)";
+      ? planeMode
+        ? "有未写入朝向修改，请点击保存并重启"
+        : "有未写入修改，请点击保存并重启飞控"
+      : planeMode
+        ? "保存朝向并重启飞控"
+        : "写入并重启飞控 (Write & Reboot)";
   }
 
   function orientByValue(v) {
@@ -307,7 +351,11 @@
 
   function syncFromParams() {
     const keys = getFrameParamKeys();
-    if (keys) {
+    state.firmware = detectFirmware();
+    if (state.firmware.kind === "plane") {
+      state.frameClass = null;
+      state.frameType = null;
+    } else if (keys) {
       const fc = getParamNum(keys.classKey);
       const ft = getParamNum(keys.typeKey);
       if (fc != null) state.frameClass = Math.round(fc);
@@ -315,7 +363,6 @@
     }
     const orient = getParamNum("AHRS_ORIENT");
     if (orient != null) state.ahrsOrient = Math.round(orient);
-    state.firmware = detectFirmware();
     refreshFrameMap();
   }
 
@@ -367,6 +414,22 @@
     if (!root) return;
     root.innerHTML = "";
 
+    if (state.firmware.kind === "plane") {
+      const msg = document.createElement("div");
+      msg.className = "af-fixedwing-card";
+      msg.innerHTML = `
+        <strong>固定翼模式</strong>
+        <p>当前固件不使用旋翼机架矩阵。本页只保留 IMU 朝向；舵面、起飞、巡航和返航参数请到“全部参数”或“飞行计划”页配置。</p>
+        <ul class="af-fixedwing-list">
+          <li>机体识别: ${state.firmware.title}</li>
+          <li>机架矩阵: 不适用</li>
+          <li>IMU 朝向: 可在本页调整</li>
+        </ul>
+      `;
+      root.appendChild(msg);
+      return;
+    }
+
     if (!state.firmware.copterUi) {
       const msg = document.createElement("p");
       msg.className = "af-empty-msg";
@@ -397,6 +460,15 @@
     const note = document.getElementById("af-type-note");
     if (!root || !block || !note) return;
 
+    if (state.firmware.kind === "plane") {
+      block.classList.add("hidden");
+      root.innerHTML = "";
+      note.textContent = "";
+      note.classList.add("hidden");
+      return;
+    }
+
+    block.classList.remove("hidden");
     const fc = state.frameClass;
     if (!state.firmware.copterUi || fc == null) {
       block.classList.add("af-disabled");
@@ -460,6 +532,11 @@
       frameStateEl.textContent = `CLASS ${fc} · TYPE ${ft}`;
       frameStateEl.className = "af-chip af-chip-ok";
       mixerEl.textContent = "已加载";
+    } else if (state.firmware.kind === "plane") {
+      frameEl.textContent = "固定翼";
+      frameStateEl.textContent = "Plane";
+      frameStateEl.className = "af-chip af-chip-ok";
+      mixerEl.textContent = "不适用";
     } else if (fc != null) {
       const tl = ft != null && usesFrameType(fc) ? ` · ${typeLabel(ft)}` : "";
       frameEl.textContent = `${classLabel(fc)}${tl}`;
@@ -477,6 +554,12 @@
 
     const ovEl = document.getElementById("ov-airframe-type");
     if (ovEl) {
+      if (state.firmware.kind === "plane") {
+        ovEl.textContent = "固定翼（无需旋翼矩阵）";
+        ovEl.className = "ok";
+        ovEl.title = "当前为固定翼固件，机体页仅保留 IMU 朝向";
+        return;
+      }
       if (state.frameMap) {
         ovEl.textContent = `${state.frameMap.name}（飞控）`;
         ovEl.className = "ok";
@@ -541,6 +624,55 @@
     const svg = document.getElementById("af-topology-svg");
     if (!svg) return;
     svg.innerHTML = "";
+
+    if (state.firmware.kind === "plane") {
+      const cx = 320;
+      const cy = 210;
+      svg.appendChild(
+        svgEl("rect", {
+          x: 252,
+          y: 188,
+          width: 136,
+          height: 44,
+          rx: 18,
+          fill: "#203153",
+          stroke: "#6c8fc9",
+          "stroke-width": 1.6,
+        })
+      );
+      svg.appendChild(
+        svgEl("polygon", {
+          points: "320,78 330,102 310,102",
+          fill: "#f59e0b",
+          stroke: "#fde68a",
+          "stroke-width": 1.2,
+        })
+      );
+      svg.appendChild(svgEl("line", { x1: 320, y1: 102, x2: 320, y2: 322, stroke: "#94a3b8", "stroke-width": 2.2 }));
+      svg.appendChild(svgEl("line", { x1: 162, y1: 210, x2: 478, y2: 210, stroke: "#38bdf8", "stroke-width": 3.2 }));
+      svg.appendChild(svgEl("line", { x1: 238, y1: 150, x2: 402, y2: 150, stroke: "#60a5fa", "stroke-width": 2.4 }));
+      svg.appendChild(svgEl("line", { x1: 238, y1: 270, x2: 402, y2: 270, stroke: "#34d399", "stroke-width": 2.4 }));
+      svg.appendChild(
+        svgEl("text", {
+          x: 320,
+          y: 372,
+          "text-anchor": "middle",
+          fill: "#cbd5e1",
+          "font-size": 14,
+          "font-weight": 700,
+        })
+      ).textContent = "固定翼没有旋翼拓扑图";
+      svg.appendChild(
+        svgEl("text", {
+          x: 320,
+          y: 396,
+          "text-anchor": "middle",
+          fill: "#94a3b8",
+          "font-size": 12,
+        })
+      ).textContent = "这里仅保留 IMU 朝向校准";
+      return;
+    }
 
     if (!state.frameMap || !Array.isArray(state.frameMap.motors)) {
       const t = svgEl("text", {
@@ -688,6 +820,7 @@
     renderOrientationOptions();
     updateBoard3d();
     renderTopology();
+    setDirty(state.dirty);
   }
 
   async function writeConfig() {
@@ -695,23 +828,26 @@
       log("⚠️ 当前不可写参数：sendParamSet 未就绪", "af-write");
       return;
     }
+    const planeMode = state.firmware.kind === "plane";
     const keys = getFrameParamKeys();
-    if (!keys) {
+    if (!planeMode && !keys) {
       log("⚠️ 未找到 FRAME_CLASS / FRAME_TYPE 参数", "af-write");
       return;
     }
     let sent = 0;
     const fc = state.frameClass;
     const ft = state.frameType;
-    if (fc != null) {
-      if (await window.sendParamSet(keys.classKey, fc)) sent += 1;
-    }
-    if (fc != null && usesFrameType(fc) && ft != null) {
-      if (await window.sendParamSet(keys.typeKey, ft)) sent += 1;
+    if (!planeMode) {
+      if (fc != null) {
+        if (await window.sendParamSet(keys.classKey, fc)) sent += 1;
+      }
+      if (fc != null && usesFrameType(fc) && ft != null) {
+        if (await window.sendParamSet(keys.typeKey, ft)) sent += 1;
+      }
     }
     if (await window.sendParamSet("AHRS_ORIENT", state.ahrsOrient)) sent += 1;
     if (sent > 0) {
-      log(`✅ 机架配置已写入 (${sent} 条参数)`, "af-write");
+      log(planeMode ? `✅ 固定翼朝向已写入 (${sent} 条参数)` : `✅ 机架配置已写入 (${sent} 条参数)`, "af-write");
     } else {
       log("⚠️ 参数写入未成功，请检查连接", "af-write");
       return;
@@ -743,6 +879,11 @@
 
     document.addEventListener("gcs-airframe-params-changed", (ev) => {
       if (state.dirty && !(ev.detail && ev.detail.bulk)) return;
+      syncFromParams();
+      renderAll();
+    });
+    document.addEventListener("gcs-heartbeat", () => {
+      if (state.dirty) return;
       syncFromParams();
       renderAll();
     });

@@ -5,6 +5,8 @@
 
 const PARAM_LOAD_WATCHDOG_MS = 120000;
 const PARAM_LOAD_STALL_MS = 1800;
+const PARAM_LOAD_SOFT_COMPLETE_MS = 45000;
+const PARAM_LOAD_SOFT_COMPLETE_COVERAGE = 0.985;
 
 function stopParamLoadStallWatcher() {
   if (window._paramStallInterval) {
@@ -29,11 +31,30 @@ function startParamLoadStallWatcher() {
       window._paramStallRetries += 1;
       if (window._paramStallRetries <= 12 && typeof window.requestMissingParamBatch === "function") {
         window.requestMissingParamBatch();
+        if (window._paramStallRetries % 4 === 0 && typeof window.requestParamListOnce === "function") {
+          window.requestParamListOnce("stall-retry").catch(() => {});
+        }
       } else if (window._paramStallRetries === 13 && typeof log === "function") {
         log(`⚠️ 参数加载停滞在 ${got}/${total}，继续等待或点「取消」`, "param-load");
+      } else if (
+        window._paramStallRetries > 13 &&
+        window._paramStallRetries % 6 === 0 &&
+        typeof window.requestParamListOnce === "function"
+      ) {
+        window.requestParamListOnce("stall-retry").catch(() => {});
       }
     } else {
       window._paramStallRetries = 0;
+    }
+    const started = Number(window._paramLoadStartedAt) || 0;
+    const elapsed = started > 0 ? Date.now() - started : 0;
+    const coverage = total > 0 ? got / total : 0;
+    if (elapsed >= PARAM_LOAD_SOFT_COMPLETE_MS && total > 100 && coverage >= PARAM_LOAD_SOFT_COMPLETE_COVERAGE) {
+      if (typeof log === "function") {
+        log(`ℹ️ 参数已收齐大部分（${got}/${total}），先进入可用状态并后台继续补拉`, "param-load");
+      }
+      window.endParamLoadingUI(true, "partial");
+      return;
     }
     window._paramStallLastProgress = got;
   }, PARAM_LOAD_STALL_MS);
@@ -76,6 +97,11 @@ window.beginParamLoadingUI = function beginParamLoadingUI() {
 
   window._paramLoadActive = true;
   window._paramLoadCancel = false;
+  window._paramLoadStartedAt = Date.now();
+  if (window._paramCompleteTimer) {
+    clearTimeout(window._paramCompleteTimer);
+    window._paramCompleteTimer = null;
+  }
   try { window.params.clear(); } catch (_) { /* ignore */ }
   window._paramCount = undefined;
   window._paramRxIndices = new Set();
@@ -127,6 +153,10 @@ window.endParamLoadingUI = function endParamLoadingUI(ok, reason) {
     clearTimeout(window._paramListRetryTimer);
     window._paramListRetryTimer = null;
   }
+  if (window._paramCompleteTimer) {
+    clearTimeout(window._paramCompleteTimer);
+    window._paramCompleteTimer = null;
+  }
   stopParamLoadStallWatcher();
   if (window._paramLoadWatchdog) {
     clearTimeout(window._paramLoadWatchdog);
@@ -155,6 +185,8 @@ window.endParamLoadingUI = function endParamLoadingUI(ok, reason) {
   if (!wasActive) return;
 
   if (ok && reason === "complete") {
+    window._gcsParamsLoadedOnce = true;
+    window._gcsParamsLoadedSessionId = window._gcsConnSessionId;
     if (typeof log === "function") log(`✅ 参数表加载完成（${window.params.size} 项）`, "param-load");
     try {
       document.dispatchEvent(new CustomEvent("gcs-airframe-params-changed", { detail: { bulk: true } }));
@@ -162,6 +194,17 @@ window.endParamLoadingUI = function endParamLoadingUI(ok, reason) {
     // 参数加载完成后，主动请求 AUTOPILOT_VERSION（#148）— 确认链路通畅后重试
     if (typeof window.requestAutopilotVersionFromVehicle === "function") {
       window.requestAutopilotVersionFromVehicle();
+    }
+  } else if (ok && reason === "partial") {
+    window._gcsParamsLoadedOnce = true;
+    window._gcsParamsLoadedSessionId = window._gcsConnSessionId;
+    if (typeof log === "function") log(`✅ 参数表已可用（${window.params.size} 项，后台继续补拉缺失项）`, "param-load");
+    try {
+      document.dispatchEvent(new CustomEvent("gcs-airframe-params-changed", { detail: { bulk: true, partial: true } }));
+    } catch (_) { /* ignore */ }
+    if (typeof window.requestMissingParamBatch === "function") {
+      setTimeout(() => window.requestMissingParamBatch().catch(() => {}), 120);
+      setTimeout(() => window.requestMissingParamBatch().catch(() => {}), 1800);
     }
   } else if (reason === "cancel") {
     if (typeof log === "function") log(`已取消参数加载（已保留已收到的 ${window.params.size} 项）`, "param-load");

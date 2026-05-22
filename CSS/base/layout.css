@@ -1325,6 +1325,39 @@ body {
   line-height: 1.5;
 }
 
+.af-fixedwing-card {
+  border: 1px solid #496aa8;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(24, 39, 70, 0.96) 0%, rgba(14, 21, 39, 0.98) 100%);
+  padding: 12px;
+  color: #dce7fb;
+  line-height: 1.5;
+}
+
+.af-fixedwing-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #eff6ff;
+}
+
+.af-fixedwing-card p {
+  margin: 0 0 10px;
+  color: #9fb4d9;
+  font-size: 12px;
+}
+
+.af-fixedwing-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #c7d2fe;
+  font-size: 12px;
+}
+
+.af-fixedwing-list li + li {
+  margin-top: 4px;
+}
+
 .af-disabled {
   opacity: 0.55;
   pointer-events: none;

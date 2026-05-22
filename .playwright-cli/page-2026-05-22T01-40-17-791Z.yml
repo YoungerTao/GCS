@@ -1,0 +1,190 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - combobox [ref=e3] [cursor=pointer]:
+      - option "/dev/cu.Bluetooth-Incoming-Port (n/a) [桥接] [非飞控]" [disabled]
+      - option "/dev/cu.debug-console (n/a) [桥接] [非飞控]" [disabled]
+      - option "↻ 刷新 COM 列表" [selected]
+    - generic "USB 虚拟串口常可设较高波特率；须与飞控 SERIAL 端口波特率一致" [ref=e4]: 波特率
+    - combobox "波特率" [ref=e5] [cursor=pointer]:
+      - option "57600"
+      - option "115200" [selected]
+      - option "230400"
+      - option "460800"
+      - option "921600"
+      - option "1500000"
+      - option "2000000"
+      - option "3000000"
+    - button "连接串口" [ref=e6] [cursor=pointer]
+    - button "加载参数" [ref=e7] [cursor=pointer]
+    - generic "主功能切换" [ref=e8]:
+      - button "飞行数据" [ref=e9] [cursor=pointer]:
+        - generic [ref=e10]: 飞行数据
+      - button "飞行计划" [ref=e11] [cursor=pointer]:
+        - generic [ref=e12]: 飞行计划
+      - button "初始设置" [active] [ref=e13] [cursor=pointer]:
+        - generic [ref=e14]: 初始设置
+      - button "配置调试" [ref=e15] [cursor=pointer]:
+        - generic [ref=e16]: 配置调试
+  - generic [ref=e77]:
+    - generic [ref=e78]:
+      - generic [ref=e81]: 串口未连接
+      - generic [ref=e82]: 未连接飞控，无法预检
+    - complementary [ref=e83]:
+      - generic [ref=e84]: 工业级重载无人机概览
+      - button "概览" [ref=e85] [cursor=pointer]
+      - button "机体" [ref=e86] [cursor=pointer]
+      - button "遥控器" [ref=e87] [cursor=pointer]
+      - button "飞行模式" [ref=e88] [cursor=pointer]
+      - button "电机" [ref=e89] [cursor=pointer]
+      - button "DroneCAN" [ref=e90] [cursor=pointer]
+      - button "传感器" [ref=e91] [cursor=pointer]
+      - button "电台" [ref=e92] [cursor=pointer]
+      - button "电源" [ref=e93] [cursor=pointer]
+      - button "安全" [ref=e94] [cursor=pointer]
+      - button "参数" [ref=e95] [cursor=pointer]
+      - button "帮助" [ref=e96] [cursor=pointer]
+    - generic [ref=e99]:
+      - generic [ref=e100]:
+        - article [ref=e101]:
+          - heading "载机与固件" [level=4] [ref=e102]
+          - generic [ref=e103]:
+            - generic [ref=e104]:
+              - generic [ref=e105]: 机架类型（飞控参数）
+              - generic "由飞控通过 MAVLink 参数 FRAME_CLASS / FRAME_TYPE（或 VTOL 的 Q_*）下发" [ref=e106]: 未连接或未收到机架参数
+            - generic [ref=e107]:
+              - generic [ref=e108]: 固件版本
+              - generic "MAVLink AUTOPILOT_VERSION.flight_sw_version" [ref=e109]: 等待飞控上报…
+            - generic [ref=e110]:
+              - generic [ref=e111]: 飞控硬件
+              - generic "board_version 高 16 位为 ArduPilot 板型 ID" [ref=e112]: 等待飞控上报…
+            - generic [ref=e113]:
+              - generic [ref=e114]: 设备 ID
+              - generic "uid2 优先，否则 uid" [ref=e115]: 等待飞控上报…
+            - button "🔄 刷新固件/硬件信息" [ref=e117] [cursor=pointer]
+        - article [ref=e118]:
+          - heading "链路与控制" [level=4] [ref=e119]
+          - generic [ref=e120]:
+            - generic [ref=e121]:
+              - generic [ref=e122]: 数传链路
+              - generic [ref=e123]: 已连接 (115200 bps Web Serial / USB)
+            - generic [ref=e124]:
+              - generic [ref=e125]: 遥控链路
+              - generic [ref=e126]: 未连接
+            - generic [ref=e127]:
+              - generic [ref=e128]: 控制信道
+              - generic [ref=e129]: 16 CH (SBUS)
+            - generic [ref=e130]:
+              - generic [ref=e131]: 链路质量 RSSI
+              - generic [ref=e132]: "--"
+        - article [ref=e133]:
+          - heading "高精度定位" [level=4] [ref=e134]
+          - generic [ref=e135]:
+            - generic [ref=e136]:
+              - generic [ref=e137]: 定位状态
+              - generic [ref=e138]: 3D RTK Fixed
+            - generic [ref=e139]:
+              - generic [ref=e140]: 卫星数量
+              - generic [ref=e141]: 28 颗
+            - generic [ref=e142]:
+              - generic [ref=e143]: HDOP
+              - generic [ref=e144]: "0.55"
+            - generic [ref=e145]:
+              - generic [ref=e146]: RTK 基准站
+              - generic [ref=e147]: 千寻 CORS 已连接
+        - article [ref=e148]:
+          - heading "动力与电池" [level=4] [ref=e149]
+          - generic [ref=e150]:
+            - generic [ref=e151]:
+              - generic [ref=e152]: 电池规格
+              - generic [ref=e153]: 12S LiPo (50.4V)
+            - generic [ref=e154]:
+              - generic [ref=e155]: 实时电压
+              - generic [ref=e156]: 49.8 V (单体 4.15 V)
+            - generic [ref=e157]:
+              - generic [ref=e158]: 实时电流
+              - generic [ref=e159]: 0.0 A
+            - generic [ref=e160]:
+              - generic [ref=e161]: 低压保护
+              - generic [ref=e162]: Always RTL
+            - generic "SOC 92%" [ref=e163]
+            - generic [ref=e165]:
+              - generic [ref=e166]: SOC
+              - generic [ref=e167]: 92%
+        - article [ref=e168]:
+          - heading "飞行模式与规划" [level=4] [ref=e169]
+          - generic [ref=e170]:
+            - generic [ref=e171]:
+              - generic [ref=e172]: 当前模式
+              - generic [ref=e173]: Stabilize
+            - generic [ref=e174]:
+              - generic [ref=e175]: 安全高度 RTL
+              - generic [ref=e176]: 150 m (已纠错)
+            - generic [ref=e177]:
+              - generic [ref=e178]: 航点规划
+              - generic [ref=e179]: 未载入航线
+            - generic [ref=e180]:
+              - generic [ref=e181]: Pre-arm Check
+              - generic [ref=e182]: FAILED
+        - article [ref=e183]:
+          - heading "安全与围栏" [level=4] [ref=e184]
+          - generic [ref=e185]:
+            - generic [ref=e186]:
+              - generic [ref=e187]: Geofence
+              - generic [ref=e188]: 已开启 (1000m / 120m)
+            - generic [ref=e189]:
+              - generic [ref=e190]: 失控保护
+              - generic [ref=e191]: RTL
+            - generic [ref=e192]:
+              - generic [ref=e193]: 避障雷达
+              - generic [ref=e194]: 正常 (前/后/下)
+            - generic [ref=e195]:
+              - generic [ref=e196]: 振动监控
+              - generic [ref=e197]: 正常 (< 15 m/s²)
+        - article [ref=e198]:
+          - heading "挂载 / 载荷状态" [level=4] [ref=e199]
+          - generic [ref=e200]:
+            - generic [ref=e201]:
+              - generic [ref=e202]: 挂载设备
+              - generic [ref=e203]: 三轴光电吊舱
+            - generic [ref=e204]:
+              - generic [ref=e205]: 工作状态
+              - generic [ref=e206]: 视频流正常 (1080P)
+            - generic [ref=e207]:
+              - generic [ref=e208]: 抛投/点火逻辑
+              - generic [ref=e209]: 12V 驱动器 - Ready
+            - generic [ref=e210]:
+              - generic [ref=e211]: 温度监控
+              - generic [ref=e212]: 32 °C
+        - article [ref=e213]:
+          - heading "EKF / 导航健康" [level=4] [ref=e214]
+          - generic [ref=e215]:
+            - generic [ref=e216]:
+              - generic [ref=e217]: EKF 状态
+              - generic [ref=e218]: 等待遥测
+            - generic [ref=e219]:
+              - generic [ref=e220]: 位置源
+              - generic [ref=e221]: —
+            - generic [ref=e222]:
+              - generic [ref=e223]: 速度 / 高度融合
+              - generic [ref=e224]: —
+            - generic [ref=e225]:
+              - generic [ref=e226]: 备注
+              - generic [ref=e227]: 可接 SYS_STATUS / 参数扩展
+        - article [ref=e228]:
+          - heading "日志与告警摘要" [level=4] [ref=e229]
+          - generic [ref=e230]:
+            - generic [ref=e231]:
+              - generic [ref=e232]: STATUSTEXT
+              - generic [ref=e233]: 见底部消息区
+            - generic [ref=e234]:
+              - generic [ref=e235]: 严重告警
+              - generic [ref=e236]: 0 条
+            - generic [ref=e237]:
+              - generic [ref=e238]: 参数写入
+              - generic [ref=e239]: —
+            - generic [ref=e240]:
+              - generic [ref=e241]: 备注
+              - generic [ref=e242]: 可接外部日志与统计
+      - article [ref=e244]:
+        - heading "IMU 与传感器（飞控参数 / 遥测）" [level=4] [ref=e245]
+        - generic [ref=e247]: 未连接飞控
