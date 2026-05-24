@@ -10,13 +10,21 @@ window._pendingParamRequest = false;
 window._bridgeMode = window._bridgeMode || "auto";
 window._bridgeConnActive = window._bridgeConnActive || false;
 
+function shouldAutoLoadParams() {
+  try {
+    return localStorage.getItem("gcs.autoLoadParams") !== "0";
+  } catch (_) {
+    return true;
+  }
+}
+
 async function bridgeFetch(path, body = null, bridgeOpts = {}) {
   if (!bridgeOpts.skipEnsure && typeof window.ensureComBridgeRunning === "function") {
     await window.ensureComBridgeRunning();
   }
   const fetchOpts = body ? {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(body),
   } : { method: "GET" };
   const resp = await fetch(`http://127.0.0.1:8765${path}`, fetchOpts);
@@ -188,6 +196,9 @@ async function closeSerialResources() {
   if (typeof window.endParamLoadingUI === "function" && window._paramLoadActive) {
     window.endParamLoadingUI(false, "disconnect");
   }
+  window._gcsParamsLoadedOnce = false;
+  window._gcsParamsLoadedSessionId = null;
+  window._motorFrameProbeExhausted = false;
   if (window.MavlinkMission && window.MavlinkMission.resetMissionSession) {
     window.MavlinkMission.resetMissionSession();
   }
@@ -227,6 +238,12 @@ async function closeSerialResources() {
   try {
     await bridgeFetch("/bridge-close", {}, { skipEnsure: true });
   } catch (_) { /* ignore */ }
+}
+
+function bumpConnectionSession() {
+  window._gcsConnSessionId = (window._gcsConnSessionId || 0) + 1;
+  window._gcsParamsLoadedSessionId = null;
+  window._gcsParamsLoadedOnce = false;
 }
 
 function setConnectionUI(state) {
@@ -429,6 +446,7 @@ async function connect() {
         sendHeartbeat().catch(() => {});
         setTimeout(() => sendHeartbeat().catch(() => {}), 250);
         bridgeReadLoop();
+        bumpConnectionSession();
         setConnectionUI("connected");
         if (typeof window.rememberSelectedPort === "function") {
           window.rememberSelectedPort(
@@ -449,11 +467,12 @@ async function connect() {
             })
             .catch((e) => log(`桥接遥测初始化失败: ${e?.message || e}`));
         }
-        if (window._pendingParamRequest) {
+        if (window._pendingParamRequest || shouldAutoLoadParams()) {
           window._pendingParamRequest = false;
           log("桥接连接成功：开始加载参数表");
-          if (typeof window.beginParamLoadingUI === "function") window.beginParamLoadingUI();
-          setTimeout(() => send_v2(21, [window.sysid || 1, window.compid || 1], 159), 300);
+          if (typeof window.loadParams === "function") {
+            window.loadParams({ force: true }).catch(() => {});
+          }
         }
         return;
       } catch (bridgeErr) {
@@ -596,7 +615,8 @@ async function connect() {
     setTimeout(() => sendHeartbeat().catch(() => {}), 250);
     readLoop();
     startTelemetryRequests();
-
+    try { await refreshPorts(); } catch (e) { /* ignore */ }
+    bumpConnectionSession();
     setConnectionUI("connected");
     scheduleRefreshPorts({ probeBridge: false });
     if (typeof window.rememberSelectedPort === "function") {
@@ -629,11 +649,12 @@ async function connect() {
       });
     }
 
-    if (window._pendingParamRequest) {
+    if (window._pendingParamRequest || shouldAutoLoadParams()) {
       window._pendingParamRequest = false;
       log("📥 连接成功：开始加载参数表（PARAM_REQUEST_LIST）");
-      if (typeof window.beginParamLoadingUI === "function") window.beginParamLoadingUI();
-      setTimeout(() => send_v2(21, [window.sysid || 1, window.compid || 1], 159), 300);
+      if (typeof window.loadParams === "function") {
+        window.loadParams({ force: true }).catch(() => {});
+      }
     }
   } catch (e) {
     const name = e?.name || "Error";
@@ -789,6 +810,33 @@ function startTelemetryRequests() {
 
 // ========== 参数加载（保留引用 param-loader.js） ==========
 
+function getParamLoadProfile() {
+  const info = window.autopilotVersionInfo || {};
+  const boardType = Number(info.boardType);
+  const hwText = String(document.getElementById("ov-board-hardware")?.textContent || "").toLowerCase();
+  const rawName = String(document.getElementById("ov-board-hardware")?.title || "").toLowerCase();
+  const sig = `${hwText} ${rawName}`;
+  const isCubeBlack =
+    boardType === 9 || boardType === 50 ||
+    /cube.?black|pixhawk.?1|fmuv3/.test(sig);
+
+  if (isCubeBlack) {
+    return {
+      name: "cubeblack-safe",
+      batchSize: 36,
+      batchDelayMs: 10,
+      firstRequestDelayMs: 700,
+    };
+  }
+  return {
+    name: "default-fast",
+    batchSize: 72,
+    batchDelayMs: 3,
+    firstRequestDelayMs: 300,
+  };
+}
+window.getParamLoadProfile = getParamLoadProfile;
+
 async function requestParamReadByIndex(index) {
   const idx = Number(index);
   if (!Number.isFinite(idx) || idx < 0 || idx > 65534) return false;
@@ -796,6 +844,16 @@ async function requestParamReadByIndex(index) {
   await send_v2(20, payload, 214);
   return true;
 }
+
+async function requestParamListOnce(reason) {
+  if (!(window.writer || writer)) return false;
+  await send_v2(21, [window.sysid || 1, window.compid || 1], 159);
+  if (typeof log === "function" && reason) {
+    log(`↻ 重发 PARAM_REQUEST_LIST（${reason}）`, "param-load");
+  }
+  return true;
+}
+window.requestParamListOnce = requestParamListOnce;
 
 async function requestParamByName(name) {
   const id = String(name || "").slice(0, 16);
@@ -812,27 +870,43 @@ async function requestMissingParamBatch() {
   const count = Number(window._paramCount);
   const seen = window._paramRxIndices;
   if (!window._paramLoadActive || !count || !seen || !(window.writer || writer)) return;
+  const profile = getParamLoadProfile();
   const missing = [];
-  for (let i = 0; i < count && missing.length < 72; i += 1) {
+  for (let i = 0; i < count && missing.length < profile.batchSize; i += 1) {
     if (!seen.has(i)) missing.push(i);
   }
   if (!missing.length) return;
   if (typeof log === "function") {
-    log(`↻ 补拉缺失参数 ${missing.length} 项（已收 ${seen.size}/${count}）`, "param-load");
+    log(`↻ 补拉缺失参数 ${missing.length} 项（已收 ${seen.size}/${count}，策略=${profile.name}）`, "param-load");
   }
   for (const idx of missing) {
     try {
       await requestParamReadByIndex(idx);
     } catch (_) { /* ignore */ }
-    await new Promise((r) => setTimeout(r, 3));
+    await new Promise((r) => setTimeout(r, profile.batchDelayMs));
   }
 }
 window.requestMissingParamBatch = requestMissingParamBatch;
 
-async function loadParams() {
+async function loadParams(opts) {
+  const force = !!(opts && opts.force);
   if (!(window.writer || writer)) {
     window._pendingParamRequest = true;
     log("⚠️ 当前未连接成功：已缓存参数加载请求（连接成功后自动发送）");
+    return;
+  }
+  const sessionLoaded =
+    window._gcsParamsLoadedSessionId != null &&
+    window._gcsParamsLoadedSessionId === window._gcsConnSessionId;
+  if (
+    !force &&
+    sessionLoaded &&
+    window.params instanceof Map &&
+    window.params.size > 50
+  ) {
+    if (typeof log === "function") {
+      log("ℹ️ 本次连接已加载过参数表，跳过重复拉取（点「加载参数」可强制刷新）", "param-load");
+    }
     return;
   }
   if (typeof window.beginParamLoadingUI !== "function" || !window.beginParamLoadingUI()) {
@@ -840,15 +914,16 @@ async function loadParams() {
     return;
   }
   window._pendingParamRequest = false;
+  const profile = getParamLoadProfile();
   const requestParamList = () => {
-    send_v2(21, [window.sysid || 1, window.compid || 1], 159).catch((err) => {
+    requestParamListOnce("load-start").catch((err) => {
       if (typeof window.endParamLoadingUI === "function") window.endParamLoadingUI(false, "send-fail");
       log(`⚠️ PARAM_REQUEST_LIST 发送失败：${err?.message || err}`);
     });
   };
   try {
-    log("发送 PARAM_REQUEST_LIST");
-    setTimeout(requestParamList, 300);
+    log(`发送 PARAM_REQUEST_LIST（策略=${profile.name}）`);
+    setTimeout(requestParamList, profile.firstRequestDelayMs);
     if (window._paramListRetryTimer) clearTimeout(window._paramListRetryTimer);
     window._paramListRetryTimer = setTimeout(() => {
       window._paramListRetryTimer = null;

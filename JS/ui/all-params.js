@@ -350,7 +350,7 @@
   async function onRefresh() {
     drafts.clear();
     if (typeof window.loadParams === "function") {
-      await window.loadParams();
+      await window.loadParams({ force: true });
     } else if (typeof log === "function") {
       log("⚠️ loadParams 不可用", "all-params");
     }

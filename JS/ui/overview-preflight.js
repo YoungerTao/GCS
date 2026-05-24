@@ -4,6 +4,9 @@
 (function initOverviewPreflight() {
   let lastPrearmHint = "";
   let prearmHintAt = 0;
+  const MAV_TYPE_FIXED_WING = 1;
+  const MAV_TYPE_VTOL_TYPES = new Set([19, 20, 21]);
+  const MAV_TYPE_COPTER_TYPES = new Set([2, 3, 4, 7, 8, 9, 12, 13, 14, 15, 16, 17]);
 
   function getp(key) {
     const p = window.params;
@@ -24,9 +27,36 @@
     return null;
   }
 
+  function heartbeatFirmwareKind() {
+    const t = Math.round(Number(window.fcMavType));
+    if (t === MAV_TYPE_FIXED_WING) return "plane";
+    if (MAV_TYPE_VTOL_TYPES.has(t)) return "vtol";
+    if (MAV_TYPE_COPTER_TYPES.has(t)) return "copter";
+    return "";
+  }
+
+  function detectFirmwareProfile() {
+    const fwText = (document.getElementById("ov-fw-version")?.textContent || "").trim();
+    const p = window.params instanceof Map ? window.params : null;
+    const hasFrame = !!(p && p.has("FRAME_CLASS") && p.has("FRAME_TYPE"));
+    const hasQ = !!(p && p.has("Q_FRAME_CLASS") && p.has("Q_FRAME_TYPE"));
+    const fwLow = fwText.toLowerCase();
+    const fwPlane = /plane|arduplane/.test(fwLow);
+    const fwCopter = /copter|arducopter/.test(fwLow);
+    const fwVtol = /vtol|quadplane/.test(fwLow);
+    const hbKind = heartbeatFirmwareKind();
+
+    if (hbKind === "vtol" || hasQ || fwVtol) return { kind: "vtol", hasFrame, hasQ, fwText };
+    if (hbKind === "plane" || (fwPlane && !fwVtol)) return { kind: "plane", hasFrame, hasQ, fwText };
+    if (hbKind === "copter" || fwCopter || (hasFrame && !hasQ)) return { kind: "copter", hasFrame, hasQ, fwText };
+    return { kind: "unknown", hasFrame, hasQ, fwText };
+  }
+
   function isAirframeConfigured() {
-    const keys = frameParamKeys();
-    if (!keys) return false;
+    const prof = detectFirmwareProfile();
+    if (prof.kind === "plane") return true;
+    const keys = prof.kind === "vtol" ? { classKey: "Q_FRAME_CLASS", typeKey: "Q_FRAME_TYPE" } : frameParamKeys();
+    if (!keys || !(window.params instanceof Map)) return false;
     const fc = getp(keys.classKey);
     const ft = getp(keys.typeKey);
     if (fc == null) return false;
@@ -133,6 +163,7 @@
   function maybeRequestFrameParams() {
     const st = (window._gcsConnState || "").toLowerCase();
     if (st !== "connected" || frameParamKeys()) return;
+    if (detectFirmwareProfile().kind === "plane") return;
     const now = Date.now();
     if (now - frameParamProbeAt < 4000) return;
     frameParamProbeAt = now;
@@ -155,6 +186,28 @@
       ovEl.textContent = "未连接或未收到机架参数";
       ovEl.className = "muted";
       ovEl.title = "由飞控通过 MAVLink 参数 FRAME_CLASS / FRAME_TYPE（或 VTOL 的 Q_*）下发";
+      return;
+    }
+
+    const prof = detectFirmwareProfile();
+    if (prof.kind === "plane") {
+      ovEl.textContent = "固定翼（无需旋翼矩阵）";
+      ovEl.className = "ok";
+      ovEl.title = "MAV_TYPE=FIXED_WING，机架页仅保留 IMU 朝向";
+      return;
+    }
+    if (prof.kind === "vtol") {
+      const qfc = getp("Q_FRAME_CLASS");
+      const qft = getp("Q_FRAME_TYPE");
+      const qftText = qft == null ? "—" : qft;
+      if (qfc == null) {
+        ovEl.textContent = "VTOL（等待 Q_FRAME_* 参数）";
+        ovEl.className = "warn";
+      } else {
+        ovEl.textContent = `VTOL（Q_FRAME_CLASS=${qfc} / Q_FRAME_TYPE=${qftText}）`;
+        ovEl.className = "ok";
+      }
+      ovEl.title = "ArduPlane VTOL / QuadPlane：垂起部分由 Q_FRAME_* 参数定义";
       return;
     }
 

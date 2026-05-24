@@ -1,0 +1,104 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - combobox [ref=e3] [cursor=pointer]:
+      - option "/dev/cu.Bluetooth-Incoming-Port (n/a) [桥接] [非飞控]" [disabled]
+      - option "/dev/cu.debug-console (n/a) [桥接] [非飞控]" [disabled]
+      - option "↻ 刷新 COM 列表" [selected]
+    - generic "USB 虚拟串口常可设较高波特率；须与飞控 SERIAL 端口波特率一致" [ref=e4]: 波特率
+    - combobox "波特率" [ref=e5] [cursor=pointer]:
+      - option "57600"
+      - option "115200" [selected]
+      - option "230400"
+      - option "460800"
+      - option "921600"
+      - option "1500000"
+      - option "2000000"
+      - option "3000000"
+    - button "连接串口" [ref=e6] [cursor=pointer]
+    - button "加载参数" [ref=e7] [cursor=pointer]
+    - generic "主功能切换" [ref=e8]:
+      - button "飞行数据" [ref=e9] [cursor=pointer]:
+        - generic [ref=e10]: 飞行数据
+      - button "飞行计划" [ref=e11] [cursor=pointer]:
+        - generic [ref=e12]: 飞行计划
+      - button "初始设置" [ref=e13] [cursor=pointer]:
+        - generic [ref=e14]: 初始设置
+      - button "配置调试" [ref=e15] [cursor=pointer]:
+        - generic [ref=e16]: 配置调试
+  - generic [ref=e77]:
+    - generic [ref=e78]:
+      - generic [ref=e81]: 串口未连接
+      - generic [ref=e82]: 未连接飞控，无法预检
+    - complementary [ref=e83]:
+      - generic [ref=e84]: 工业级重载无人机概览
+      - button "概览" [ref=e85] [cursor=pointer]
+      - button "机体" [active] [ref=e86] [cursor=pointer]
+      - button "遥控器" [ref=e87] [cursor=pointer]
+      - button "飞行模式" [ref=e88] [cursor=pointer]
+      - button "电机" [ref=e89] [cursor=pointer]
+      - button "DroneCAN" [ref=e90] [cursor=pointer]
+      - button "传感器" [ref=e91] [cursor=pointer]
+      - button "电台" [ref=e92] [cursor=pointer]
+      - button "电源" [ref=e93] [cursor=pointer]
+      - button "安全" [ref=e94] [cursor=pointer]
+      - button "参数" [ref=e95] [cursor=pointer]
+      - button "帮助" [ref=e96] [cursor=pointer]
+    - generic [ref=e249]:
+      - generic [ref=e250]:
+        - generic [ref=e251]:
+          - generic [ref=e252]:
+            - text: "当前机架:"
+            - strong [ref=e253]: 飞控尚未下发机架参数
+            - text: 无参数
+          - generic [ref=e254]:
+            - text: "混控算法:"
+            - strong [ref=e255]: 未加载
+          - generic [ref=e256]:
+            - text: "飞控朝向:"
+            - strong [ref=e257]: ROTATION_NONE
+            - text: 🟢
+        - button "写入并重启飞控 (Write & Reboot)" [ref=e258] [cursor=pointer]
+      - generic [ref=e259]:
+        - generic [ref=e260]:
+          - heading "机体与机架配置" [level=3] [ref=e262]
+          - status [ref=e263]:
+            - generic [ref=e264]: 🔌
+            - generic [ref=e265]:
+              - strong [ref=e266]: 等待连接飞控…
+              - generic [ref=e267]: 连接并加载参数后，将自动识别 ArduCopter 等固件类型
+          - generic [ref=e268]:
+            - generic [ref=e269]:
+              - heading "1. 机架类型 FRAME_CLASS" [level=4] [ref=e270]
+              - paragraph [ref=e272]: 连接 ArduCopter 飞控并加载参数后可选择机架类型。
+            - generic:
+              - heading "2. 混控布局 FRAME_TYPE" [level=4]
+        - generic [ref=e273]:
+          - heading "拓扑示意与 IMU 朝向" [level=3] [ref=e275]
+          - generic [ref=e276]:
+            - heading "机架与转向图" [level=4] [ref=e277]
+            - img "机架与转向图" [ref=e279]: 请选择机架类型与混控布局
+          - generic [ref=e280]:
+            - heading "3. 飞控 / IMU 安装朝向校准" [level=4] [ref=e281]
+            - generic [ref=e282]:
+              - generic [ref=e283]:
+                - generic [ref=e284]:
+                  - generic [ref=e285]: 安装角度
+                  - combobox "安装角度" [ref=e286] [cursor=pointer]:
+                    - option "ROTATION_NONE" [selected]
+                    - option "ROTATION_YAW_90"
+                    - option "ROTATION_YAW_180"
+                    - option "ROTATION_YAW_270"
+                    - option "ROTATION_ROLL_180"
+                - generic [ref=e287]:
+                  - generic [ref=e288]:
+                    - text: "俯仰(Pitch):"
+                    - 'spinbutton "俯仰(Pitch): °" [ref=e289]': "0"
+                    - text: °
+                  - generic [ref=e290]:
+                    - text: "偏航(Yaw):"
+                    - 'spinbutton "偏航(Yaw): °" [ref=e291]': "0"
+                    - text: °
+              - generic [ref=e293]:
+                - generic [ref=e294]: TOP
+                - generic [ref=e295]: FORWARD
+                - generic [ref=e296]: SIDE

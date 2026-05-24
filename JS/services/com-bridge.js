@@ -78,7 +78,7 @@ const BRIDGE_HEALTH_PROBE_MS = 15000;
 function isBridgeBackoffActive() {
   return typeof window._comBridgeBackoffUntil === "number" && Date.now() < window._comBridgeBackoffUntil;
 }
-
+window.systemComPorts = systemComPorts;
 async function probeBridgeHealth() {
   if (window.__gcsStackBootstrapping) return false;
   if (isBridgeBackoffActive()) return false;
@@ -474,6 +474,8 @@ async function tryAutoConnect() {
   comSelect.value = target;
   restoreRememberedBaud();
 
+  if (window._paramLoadActive || window._gcsConnState === "connected") return;
+
   try {
     if (localStorage.getItem("gcs.autoLoadParams") !== "0") {
       window._pendingParamRequest = true;
@@ -612,7 +614,9 @@ async function refreshPorts(opts = {}) {
         .join("，");
       window.log(`🔍 串口协议探测：${summary}`, "port-probe");
     }
-    tryAutoConnect().catch(() => {});
+    if (window._gcsConnState !== "connected" && window._gcsConnState !== "connecting") {
+      tryAutoConnect().catch(() => {});
+    }
     return;
   }
 

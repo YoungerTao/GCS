@@ -1064,6 +1064,15 @@
       .sc-dc-band-label { color:#d9e2f2; }
       .sc-dc-band-value { background:#474747; color:#ffffff; font-family:var(--sc-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .sc-dc-band-span2 { grid-column:span 2; }
+      #sc-dc-node-meta {
+        display:grid;
+        grid-template-columns:minmax(140px, 44%) minmax(0, 1fr);
+        gap:6px 12px;
+        margin:0;
+      }
+      #sc-dc-node-meta dt, #sc-dc-node-meta dd { margin:0; min-height:24px; display:flex; align-items:center; }
+      #sc-dc-node-meta dt { color:#8ea2c8; white-space:nowrap; }
+      #sc-dc-node-meta dd { color:#f2f6ff; font-family:var(--sc-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .sc-dc-log-wrap { margin-top:12px; max-height:180px; }
       .sc-dc-tree { max-height:620px; overflow:auto; padding:4px 0; border:1px solid #2c3550; border-radius:12px; background:#101624; scrollbar-gutter:stable; }
       .sc-dc-tree-list, .sc-dc-tree-branch { list-style:none; margin:0; padding:0; }

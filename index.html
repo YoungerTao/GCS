@@ -57,7 +57,7 @@
     <option value="3000000">3000000</option>
   </select>
   <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
-  <button id="loadParamsBtn" type="button" onclick="loadParams()">加载参数</button>
+  <button id="loadParamsBtn" type="button" onclick="loadParams({ force: true })">加载参数</button>
   <div class="main-tabs" aria-label="主功能切换">
     <button class="main-tab active" data-view="flight-data">
       <img src="assets/icons/tab-flight.svg" alt="">
@@ -827,7 +827,7 @@
 <script src="JS/core/dronecan-labels-zh.js?v=3" defer></script>
 <script src="JS/core/dronecan-registry.js?v=4" defer></script>
 <script src="JS/ui/overview-sensors.js" defer></script>
-<script src="JS/ui/overview-preflight.js" defer></script>
+<script src="JS/ui/overview-preflight.js?v=8" defer></script>
 <script src="JS/ui/hud-map-tabs.js" defer></script>
 <script src="JS/mission/mission-model.js" defer></script>
 <script src="JS/mission/ardupilot-mission-compat.js" defer></script>
@@ -845,8 +845,8 @@
 <script src="JS/ui/splitter.js" defer></script>
 <script src="JS/ui/rc-setup.js" defer></script>
 <script src="JS/ui/motor-maps.js" defer></script>
-<script src="JS/ui/airframe-setup.js" defer></script>
-<script src="JS/ui/motor-setup.js" defer></script>
+<script src="JS/ui/airframe-setup.js?v=8" defer></script>
+<script src="JS/ui/motor-setup.js?v=8" defer></script>
 <script src="JS/ui/power-setup.js" defer></script>
 <script src="https://unpkg.com/three@0.149.0/build/three.min.js" defer></script>
 <script src="JS/ui/accel-calib-three.js" defer></script>

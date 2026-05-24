@@ -904,7 +904,6 @@ def send_json(handler, status, payload):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     handler.send_header("Cache-Control", "no-store")
@@ -920,10 +919,16 @@ def send_json(handler, status, payload):
 class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
+
+    def end_headers(self):
+        headers_buf = getattr(self, "_headers_buffer", [])
+        has_cors = any(b"Access-Control-Allow-Origin:" in chunk for chunk in headers_buf)
+        if not has_cors:
+            self.send_header("Access-Control-Allow-Origin", "*")
+        super().end_headers()
 
     def do_GET(self):
         if self.path == "/health":

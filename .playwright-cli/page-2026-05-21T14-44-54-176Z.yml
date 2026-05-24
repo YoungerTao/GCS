@@ -1,0 +1,77 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - combobox [ref=e3] [cursor=pointer]:
+      - option "＋ 选择飞控 USB 串口（首次连接）…" [selected]
+    - generic "USB 虚拟串口常可设较高波特率；须与飞控 SERIAL 端口波特率一致" [ref=e4]: 波特率
+    - combobox "波特率" [ref=e5] [cursor=pointer]:
+      - option "57600"
+      - option "115200" [selected]
+      - option "230400"
+      - option "460800"
+      - option "921600"
+      - option "1500000"
+      - option "2000000"
+      - option "3000000"
+    - button "连接串口" [ref=e6] [cursor=pointer]
+    - button "加载参数" [ref=e7] [cursor=pointer]
+    - generic "主功能切换" [ref=e8]:
+      - button "飞行数据" [ref=e9] [cursor=pointer]:
+        - generic [ref=e10]: 飞行数据
+      - button "飞行计划" [ref=e11] [cursor=pointer]:
+        - generic [ref=e12]: 飞行计划
+      - button "初始设置" [ref=e13] [cursor=pointer]:
+        - generic [ref=e14]: 初始设置
+      - button "配置调试" [ref=e15] [cursor=pointer]:
+        - generic [ref=e16]: 配置调试
+  - generic [ref=e17]:
+    - generic [ref=e18]:
+      - generic "调整HUD宽度" [ref=e21]
+      - generic [ref=e23]:
+        - button "Marker" [ref=e24] [cursor=pointer]
+        - generic:
+          - generic [ref=e25]:
+            - button "Zoom in" [ref=e26] [cursor=pointer]: +
+            - button "Zoom out" [ref=e27] [cursor=pointer]: −
+          - generic [ref=e29]:
+            - link "Leaflet" [ref=e30] [cursor=pointer]:
+              - /url: https://leafletjs.com
+              - img [ref=e31]
+              - text: Leaflet
+            - text: "| Imagery © Esri, Roads © Esri, Labels © Esri"
+    - generic [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - button "快速" [ref=e38] [cursor=pointer]
+          - button "动作" [ref=e39] [cursor=pointer]
+          - button "消息" [ref=e40] [cursor=pointer]
+          - button "舵机" [ref=e41] [cursor=pointer]
+          - button "日志" [ref=e42] [cursor=pointer]
+        - generic "Quick telemetry grid" [ref=e45]:
+          - generic [ref=e46]:
+            - generic [ref=e47]: 高度
+            - generic [ref=e48]: "--"
+          - generic [ref=e49]:
+            - generic [ref=e50]: 地速
+            - generic [ref=e51]: "--"
+          - generic [ref=e52]:
+            - generic [ref=e53]: 空速
+            - generic [ref=e54]: "--"
+          - generic [ref=e55]:
+            - generic [ref=e56]: 电压
+            - generic [ref=e57]: "--"
+          - generic [ref=e58]:
+            - generic [ref=e59]: 横滚
+            - generic [ref=e60]: "--"
+          - generic [ref=e61]:
+            - generic [ref=e62]: 俯仰
+            - generic [ref=e63]: "--"
+          - generic [ref=e64]:
+            - generic [ref=e65]: 航向
+            - generic [ref=e66]: "--"
+          - generic [ref=e67]:
+            - generic [ref=e68]: 爬升率
+            - generic [ref=e69]: "--"
+          - generic [ref=e70]:
+            - generic [ref=e71]: 距家
+            - generic [ref=e72]: "--"
+      - generic "调整HUD宽度" [ref=e73]
