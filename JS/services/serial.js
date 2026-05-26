@@ -68,9 +68,9 @@ function resolveBridgeDeviceId(selectedValue, optionMeta, comSelect) {
 /** 仅对 COM 桥枚举口（sys: / deviceId）走桥接；auth: 为 Web Serial 授权项 */
 function shouldUseBridgeForSelection(selectedValue, optionMeta) {
   if (!selectedValue || selectedValue.startsWith("__")) return false;
+  if (selectedValue.startsWith("auth:")) return false;
   if (window._bridgeMode === "bridge") return true;
   if (window._bridgeMode !== "auto") return false;
-  if (selectedValue.startsWith("auth:")) return false;
   const sp = optionMeta?.systemPort;
   if (sp?.deviceId) return true;
   return selectedValue.startsWith("sys:");
@@ -328,7 +328,18 @@ async function disconnectSerial() {
 }
 window.disconnectSerial = disconnectSerial;
 
+let _connectInFlight = null;
+
 async function connect() {
+  if (_connectInFlight) return _connectInFlight;
+
+  _connectInFlight = connectImpl().finally(() => {
+    _connectInFlight = null;
+  });
+  return _connectInFlight;
+}
+
+async function connectImpl() {
   const comSelect = document.getElementById("comPort");
   if (!comSelect) {
     log("❌ 页面未就绪：找不到串口下拉框");
@@ -340,6 +351,22 @@ async function connect() {
     log("⚠️ 正在连接中，请稍候…");
     return;
   }
+
+  let connectWatchdog = null;
+  const armConnectWatchdog = () => {
+    if (connectWatchdog) clearTimeout(connectWatchdog);
+    connectWatchdog = setTimeout(() => {
+      if (window._gcsConnState !== "connecting") return;
+      log("❌ 连接超时（25s），已释放串口；请改选带 [MAVLink] 的口或串口1 后重试");
+      closeSerialResources()
+        .catch(() => {})
+        .finally(() => setConnectionUI("error"));
+    }, 25000);
+  };
+  const disarmConnectWatchdog = () => {
+    if (connectWatchdog) clearTimeout(connectWatchdog);
+    connectWatchdog = null;
+  };
 
   try {
     const canWebSerial = typeof window.hasWebSerialApi === "function"
@@ -384,6 +411,7 @@ async function connect() {
     }
 
     setConnectionUI("connecting");
+    armConnectWatchdog();
 
     await closeSerialResources();
 
@@ -394,6 +422,17 @@ async function connect() {
         : shouldUseBridgeForSelection(selectedValue, optionMetaEarly);
 
     if (useBridge && selectedValue) {
+      if (typeof window.ensureComBridgeRunning === "function") {
+        const bridgeOk = await window.ensureComBridgeRunning();
+        if (!bridgeOk) {
+          const msg = window._gcsAutoConnectActive
+            ? "⏳ 自动连接：COM 桥未就绪，稍后将重试"
+            : "❌ COM 桥未就绪：请确认 GCS 后台服务已启动";
+          log(msg);
+          setConnectionUI("disconnected");
+          return;
+        }
+      }
       try {
         const baudRate = getSelectedBaudRate();
         const optionMeta = optionMetaEarly || window._comOptionMap?.get(selectedValue);
@@ -426,7 +465,7 @@ async function connect() {
         } else if (!portRole && mavlinkPort) {
           portName = mavlinkPort;
         }
-        if (!portRole && !mavlinkPort) {
+        if (!portRole && !mavlinkPort && !window._gcsAutoConnectActive) {
           const siblings = getDuplicateVidPidSiblingPorts(portName);
           if (siblings.length) {
             portName = await pickActiveBridgePort(portName, baudRate, { excludeDeviceIds: [slcanPort] });
@@ -457,6 +496,9 @@ async function connect() {
         if (typeof window.markGcsSessionConnected === "function") {
           window.markGcsSessionConnected();
         }
+        if (typeof window.resetAutoConnectAttempts === "function") {
+          window.resetAutoConnectAttempts();
+        }
         schedulePostConnectMavlinkInfoRequests();
         if (typeof window.applyConnectionTelemetrySetup === "function") {
           window.applyConnectionTelemetrySetup()
@@ -474,9 +516,15 @@ async function connect() {
             window.loadParams({ force: true }).catch(() => {});
           }
         }
+        disarmConnectWatchdog();
         return;
       } catch (bridgeErr) {
         window._bridgeConnActive = false;
+        if (window._gcsAutoConnectActive) {
+          log(`⏳ 自动连接：桥接打开失败，将重试（${bridgeErr?.message || bridgeErr}）`);
+          setConnectionUI("disconnected");
+          return;
+        }
         if (!canWebSerial) {
           log(`❌ COM 桥连接失败：${bridgeErr?.message || bridgeErr}`);
           setConnectionUI("error");
@@ -493,6 +541,7 @@ async function connect() {
     }
 
     if (selectedValue === "__add__") {
+      if (window._gcsAutoConnectActive) return;
       const ok = await requestAndRefreshPort();
       if (!ok) {
         log(canWebSerial ? "⚠️ 未选择飞控串口（已取消）" : "⚠️ 未发现 COM 口，请确认飞控已插入且 COM 桥已启动");
@@ -563,6 +612,12 @@ async function connect() {
       const sysPort = optionMeta ? optionMeta.systemPort : null;
       if (selectedValue.startsWith("sys:")) window._desiredSystemCom = selectedValue.slice(4);
 
+      if (window._gcsAutoConnectActive) {
+        log("⏳ 自动连接需要已授权串口或 COM 桥；请手动点击「连接串口」完成首次授权");
+        setConnectionUI("disconnected");
+        return;
+      }
+
       if (sysPort && typeof sysPort.usbVendorId === "number" && typeof sysPort.usbProductId === "number") {
         log(`🔐 为 ${sysPort.deviceId} 申请授权...`);
         try {
@@ -615,9 +670,9 @@ async function connect() {
     setTimeout(() => sendHeartbeat().catch(() => {}), 250);
     readLoop();
     startTelemetryRequests();
-    try { await refreshPorts(); } catch (e) { /* ignore */ }
     bumpConnectionSession();
     setConnectionUI("connected");
+    disarmConnectWatchdog();
     scheduleRefreshPorts({ probeBridge: false });
     if (typeof window.rememberSelectedPort === "function") {
       window.rememberSelectedPort(
@@ -627,6 +682,9 @@ async function connect() {
     }
     if (typeof window.markGcsSessionConnected === "function") {
       window.markGcsSessionConnected();
+    }
+    if (typeof window.resetAutoConnectAttempts === "function") {
+      window.resetAutoConnectAttempts();
     }
     schedulePostConnectMavlinkInfoRequests();
     if (typeof window.applyConnectionTelemetrySetup === "function") {
@@ -664,7 +722,10 @@ async function connect() {
       log("💡 提示：请关闭 Mission Planner / QGC 等占用同一 COM 口的软件");
     }
     try { await closeSerialResources(); } catch (_) { /* ignore */ }
+    disarmConnectWatchdog();
     setConnectionUI("error");
+  } finally {
+    if (window._gcsConnState !== "connecting") disarmConnectWatchdog();
   }
 }
 window.connect = connect;

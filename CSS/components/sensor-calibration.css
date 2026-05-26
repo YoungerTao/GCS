@@ -968,6 +968,39 @@ label.sc-check .sc-mag-p-title--off {
   font-size: 12px;
 }
 
+.sc-dc-stat-chip {
+  display: grid;
+  gap: 6px;
+  min-width: 168px;
+  padding: 8px 12px;
+  border: 1px solid rgba(78, 93, 121, 0.42);
+  border-radius: 12px;
+  background: rgba(17, 24, 38, 0.72);
+}
+
+.sc-dc-stat-label {
+  color: #8ea2c8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.sc-dc-stat-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #eef4ff;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.sc-dc-stat-unit {
+  color: #9fb0cf;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .sc-pill {
   padding: 2px 8px;
   border-radius: 999px;

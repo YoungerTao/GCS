@@ -301,80 +301,7 @@
       </div>
 
       <div class="ov-panel" id="setup-panel-airframe">
-        <div class="af-page">
-          <div class="af-status-bar">
-            <div class="af-status-items">
-              <span>当前机架: <strong id="af-current-frame">未指定 (Undefined)</strong> <span id="af-frame-state" class="af-chip af-chip-danger">⚠️ Unconfigured</span></span>
-              <span>混控算法: <strong id="af-mixer-state">未加载</strong></span>
-              <span>飞控朝向: <strong id="af-orient-state">ROTATION_NONE</strong> <span class="af-chip af-chip-ok">🟢</span></span>
-            </div>
-            <button id="af-write-btn" class="af-write-btn" type="button">写入并重启飞控 (Write &amp; Reboot)</button>
-          </div>
-
-          <div class="af-grid">
-            <section class="af-left card-dark">
-              <div class="rc-card-head">
-                <h3>机体与机架配置</h3>
-              </div>
-
-              <div id="af-firmware-banner" class="af-firmware-banner" role="status">
-                <span class="af-firmware-icon" aria-hidden="true">🛸</span>
-                <div class="af-firmware-copy">
-                  <strong id="af-firmware-title">等待连接飞控…</strong>
-                  <span id="af-firmware-hint" class="af-firmware-hint">连接后将根据固件自动识别平台（ArduCopter 等）</span>
-                </div>
-              </div>
-
-              <div class="af-left-stack">
-              <div class="af-block af-block-class">
-                <h4>1. 机架类型 <span class="af-param-tag">FRAME_CLASS</span></h4>
-                <div id="af-class-list" class="af-class-grid"></div>
-              </div>
-
-              <div class="af-block af-block-type" id="af-type-block">
-                <h4>2. 混控布局 <span class="af-param-tag">FRAME_TYPE</span></h4>
-                <div id="af-type-list" class="af-type-grid"></div>
-                <p id="af-type-note" class="af-type-note hidden"></p>
-              </div>
-              </div>
-            </section>
-
-            <section class="af-right card-dark">
-              <div class="rc-card-head">
-                <h3>拓扑示意与 IMU 朝向</h3>
-              </div>
-
-              <div class="af-block af-block-topology">
-                <h4>机架与转向图</h4>
-                <div class="af-topology-wrap">
-                  <svg id="af-topology-svg" viewBox="0 0 640 420" preserveAspectRatio="xMidYMid meet" aria-label="机架与转向图"></svg>
-                </div>
-              </div>
-              <div class="af-block af-block-imu">
-                <h4>3. 飞控 / IMU 安装朝向校准</h4>
-                <div class="af-imu-body">
-                  <div class="af-imu-controls">
-                    <div class="af-orient-row">
-                      <label for="af-orient-select">安装角度</label>
-                      <select id="af-orient-select"></select>
-                    </div>
-                    <div class="af-angle-row">
-                      <label>俯仰(Pitch): <input id="af-pitch-input" type="number" value="0" step="1">°</label>
-                      <label>偏航(Yaw): <input id="af-yaw-input" type="number" value="0" step="1">°</label>
-                    </div>
-                  </div>
-                  <div class="af-board-wrap">
-                    <div id="af-board3d" class="af-board3d">
-                      <div class="af-board-face af-board-top">TOP</div>
-                      <div class="af-board-face af-board-front">FORWARD</div>
-                      <div class="af-board-face af-board-side">SIDE</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-        </div>
+        <div id="af-wizard-root" class="af-wizard-root"></div>
       </div>
 
       <div class="ov-panel" id="setup-panel-rc">
@@ -520,9 +447,18 @@
             <span>DroneCAN / UAVCAN 总线</span>
           </nav>
           <div class="sc-dc-bar sc-card sc-card--bar">
-            <div class="sc-bar-item">CAN1 总线负载: <span id="sc-dc-load" class="sc-mono">24%</span> <span class="sc-pill sc-pill-ok">正常</span></div>
-            <div class="sc-bar-item">侦听包速率: <span id="sc-dc-fps" class="sc-mono">450</span> frames/s</div>
-            <div class="sc-bar-item">故障帧 Err: <span id="sc-dc-err" class="sc-mono">0</span> <span class="sc-pill sc-pill-ok">正常</span></div>
+            <div class="sc-dc-stat-chip">
+              <span class="sc-dc-stat-label">CAN1 总线负载</span>
+              <span class="sc-dc-stat-main"><span id="sc-dc-load" class="sc-mono">24%</span> <span class="sc-pill sc-pill-ok">正常</span></span>
+            </div>
+            <div class="sc-dc-stat-chip">
+              <span class="sc-dc-stat-label">侦听包速率</span>
+              <span class="sc-dc-stat-main"><span id="sc-dc-fps" class="sc-mono">450</span> <span class="sc-dc-stat-unit">frames/s</span></span>
+            </div>
+            <div class="sc-dc-stat-chip">
+              <span class="sc-dc-stat-label">故障帧 Err</span>
+              <span class="sc-dc-stat-main"><span id="sc-dc-err" class="sc-mono">0</span> <span class="sc-pill sc-pill-ok">正常</span></span>
+            </div>
           </div>
           <div class="sc-split sc-split-25">
             <section class="sc-card">
@@ -816,9 +752,9 @@
 <script src="JS/core/mavlink-helpers.js" defer></script>
 <script src="JS/core/ardupilot-telemetry.js" defer></script>
 <script src="JS/core/gcs-mission-debug.js" defer></script>
-<script src="JS/core/gcs-auto-start.js?v=7"></script>
-<script src="JS/services/serial.js?v=8" defer></script>
-<script src="JS/services/com-bridge.js?v=11" defer></script>
+<script src="JS/core/gcs-auto-start.js?v=9"></script>
+<script src="JS/services/serial.js?v=10" defer></script>
+<script src="JS/services/com-bridge.js?v=13" defer></script>
 <script src="JS/services/slcan-web-serial.js?v=4" defer></script>
 <script src="JS/services/param-loader.js" defer></script>
 <script src="JS/core/ardupilot-sensor-detect.js" defer></script>
@@ -845,7 +781,7 @@
 <script src="JS/ui/splitter.js" defer></script>
 <script src="JS/ui/rc-setup.js" defer></script>
 <script src="JS/ui/motor-maps.js" defer></script>
-<script src="JS/ui/airframe-setup.js?v=8" defer></script>
+<script src="JS/ui/airframe-setup.js?v=14" defer></script>
 <script src="JS/ui/motor-setup.js?v=8" defer></script>
 <script src="JS/ui/power-setup.js" defer></script>
 <script src="https://unpkg.com/three@0.149.0/build/three.min.js" defer></script>
@@ -853,7 +789,7 @@
 <script src="JS/ui/accel-calibration.js" defer></script>
 <script src="JS/ui/compass-calibration.js" defer></script>
 <script src="JS/ui/sensor-calibration.js" defer></script>
-<script src="JS/ui/dronecan-setup.js?v=150" defer></script>
+<script src="JS/ui/dronecan-setup.js?v=162" defer></script>
 <script src="JS/ui/all-params.js" defer></script>
 
 </body>

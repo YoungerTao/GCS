@@ -55,8 +55,26 @@
     return (browserCanMonitor.nodeRecentFrames.get(nid) || []).filter((f) => f?.canId === cid);
   }
 
+  function recountNodeFrameCounts(nodeId) {
+    const nid = Number(nodeId);
+    if (!Number.isFinite(nid) || nid <= 0) return {};
+    const recent = browserCanMonitor.nodeRecentFrames.get(nid) || [];
+    const counts = {};
+    recent.forEach((frame) => {
+      if (!frame?.canId) return;
+      counts[frame.canId] = (counts[frame.canId] || 0) + 1;
+    });
+    browserCanMonitor.nodeFrameCounts.set(nid, counts);
+    const node = browserCanMonitor.nodes.get(nid);
+    if (node) {
+      node.rxCount = recent.length;
+      browserCanMonitor.nodes.set(nid, node);
+    }
+    return counts;
+  }
+
   window.getDroneCanCachedFrames = getCachedFramesForCan;
-  const nodeRetentionMs = 20000;
+  const nodeRetentionMs = 120000;
   let lastLiveSnapshotAt = 0;
   let groundStationNodeCache = null;
 
@@ -162,6 +180,21 @@
     return recent.find((frame) => frame.canId === canId) || null;
   }
 
+  function getDecodeFramesForCan(node, canId) {
+    const merged = [];
+    const seen = new Set();
+    const pushFrame = (frame) => {
+      if (!frame || frame.canId !== canId || !frame.dataHex) return;
+      const key = `${Number(frame.ts) || 0}|${frame.canId}|${frame.dataHex}|${Number(frame.dlc) || 0}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(frame);
+    };
+    getCachedFramesForCan(node?.nodeId, canId).forEach(pushFrame);
+    (Array.isArray(node?.recentFrames) ? node.recentFrames : []).forEach(pushFrame);
+    return merged.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+  }
+
   function isSerialViaBridge() {
     return !!(window.port && window.port.bridge);
   }
@@ -236,7 +269,8 @@
       dataHex: hex,
       bus: Number(bus) || 0,
     });
-    browserCanMonitor.nodeRecentFrames.set(nodeId, recent.slice(-FRAME_RING_PER_NODE));
+    const trimmedRecent = recent.slice(-FRAME_RING_PER_NODE);
+    browserCanMonitor.nodeRecentFrames.set(nodeId, trimmedRecent);
 
     let byCan = browserCanMonitor.nodeCanIdFrames.get(nodeId);
     if (!byCan) {
@@ -253,10 +287,56 @@
       bus: Number(bus) || 0,
     });
     byCan.set(cid, perCan.slice(-FRAME_RING_PER_CAN_ID));
+    recountNodeFrameCounts(nodeId);
+  }
 
-    const counts = browserCanMonitor.nodeFrameCounts.get(nodeId) || {};
-    counts[node.lastCanId] = (counts[node.lastCanId] || 0) + 1;
-    browserCanMonitor.nodeFrameCounts.set(nodeId, counts);
+  function cacheSnapshotFramesForNode(rawNode) {
+    const nodeId = Number(rawNode?.nodeId || 0);
+    const frames = Array.isArray(rawNode?.recentFrames) ? rawNode.recentFrames : [];
+    if (!Number.isFinite(nodeId) || nodeId <= 0 || !frames.length) return;
+
+    const existingRecent = browserCanMonitor.nodeRecentFrames.get(nodeId) || [];
+    const recentSeen = new Set(existingRecent.map((f) => `${Number(f.ts) || 0}|${f.canId}|${f.dataHex}|${Number(f.dlc) || 0}`));
+    const mergedRecent = existingRecent.slice();
+
+    let byCan = browserCanMonitor.nodeCanIdFrames.get(nodeId);
+    if (!byCan) {
+      byCan = new Map();
+      browserCanMonitor.nodeCanIdFrames.set(nodeId, byCan);
+    }
+    frames.forEach((frame) => {
+      if (!frame?.canId || !frame?.dataHex) return;
+      const ts = Number(frame.ts) || Date.now();
+      const dlc = Number(frame.dlc) || 0;
+      const key = `${ts}|${frame.canId}|${frame.dataHex}|${dlc}`;
+      if (!recentSeen.has(key)) {
+        recentSeen.add(key);
+        mergedRecent.push({
+          ts,
+          canId: frame.canId,
+          dlc,
+          dataHex: frame.dataHex,
+          bus: Number(frame.bus) || 0,
+        });
+      }
+
+      const perCan = byCan.get(frame.canId) || [];
+      const perCanSeen = new Set(perCan.map((f) => `${Number(f.ts) || 0}|${f.canId}|${f.dataHex}|${Number(f.dlc) || 0}`));
+      if (!perCanSeen.has(key)) {
+        perCan.push({
+          ts,
+          canId: frame.canId,
+          dlc,
+          dataHex: frame.dataHex,
+          bus: Number(frame.bus) || 0,
+        });
+        byCan.set(frame.canId, perCan.slice(-FRAME_RING_PER_CAN_ID));
+      }
+    });
+
+    mergedRecent.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+    browserCanMonitor.nodeRecentFrames.set(nodeId, mergedRecent.slice(-FRAME_RING_PER_NODE));
+    recountNodeFrameCounts(nodeId);
   }
 
   function getBrowserCanStatus() {
@@ -662,6 +742,43 @@
     return dcText(`${(diff / 60000).toFixed(1)}m ago`, `${(diff / 60000).toFixed(1)} 分钟前`);
   }
 
+  function computeObservedFrameStats(nodes) {
+    const list = Array.isArray(nodes) ? nodes : [];
+    let totalFrames = 0;
+    let firstSeen = Infinity;
+    let lastSeen = 0;
+    list.forEach((node) => {
+      const rx = Number(node?.rxCount || 0);
+      const first = num(node?.firstSeenAt ?? node?.first_seen, 0);
+      const last = num(node?.lastSeenAt ?? node?.last_seen, 0);
+      if (rx > 0) totalFrames += rx;
+      if (first > 0) firstSeen = Math.min(firstSeen, first);
+      if (last > 0) lastSeen = Math.max(lastSeen, last);
+    });
+    const spanMs = Number.isFinite(firstSeen) && lastSeen > firstSeen ? (lastSeen - firstSeen) : 0;
+    const fps = spanMs > 0 && totalFrames > 0 ? Math.max(1, Math.round((totalFrames * 1000) / spanMs)) : 0;
+    return {
+      fps,
+      loadPct: Math.min(100, Math.round((fps / 1000) * 100)),
+    };
+  }
+
+  function computeNodeObservedStats(node) {
+    const frames = Array.isArray(node?.recentFrames) ? node.recentFrames : [];
+    if (!frames.length) {
+      return {
+        frameCount: num(node?.rxCount, 0),
+        bps: 0,
+      };
+    }
+    const frameCount = Math.max(frames.length, num(node?.rxCount, 0));
+    const firstTs = num(frames[0]?.ts, 0);
+    const lastTs = num(frames[frames.length - 1]?.ts, 0);
+    const spanMs = lastTs > firstTs ? (lastTs - firstTs) : 0;
+    const bps = spanMs > 0 && frameCount > 0 ? Math.max(1, Math.round((frameCount * 1000) / spanMs)) : 0;
+    return { frameCount, bps };
+  }
+
   function mkNode(base) {
     return {
       inferred: false,
@@ -703,7 +820,13 @@
       const fr = frames[i];
       const meta = registry?.describeMessage?.(fr?.canId) || {};
       if (meta.shortName !== "NodeStatus" && meta.fullName !== "uavcan.protocol.NodeStatus") continue;
-      const decoded = decoder?.decodeTransfer?.(fr?.canId, fr?.dataHex || "", fr?.dlc ?? 0, { recentFrames: [fr], anchorTs: fr?.ts });
+      const perCanFrames = getDecodeFramesForCan(rawNode, fr?.canId);
+      const decoded = decoder?.decodeTransfer?.(
+        fr?.canId,
+        fr?.dataHex || "",
+        fr?.dlc ?? 0,
+        { recentFrames: perCanFrames.length ? perCanFrames : [fr], anchorTs: fr?.ts }
+      );
       const uptimeField = Array.isArray(decoded?.fields)
         ? decoded.fields.find((f) => String(f?.name || "") === "uptime_sec")
         : null;
@@ -721,6 +844,7 @@
     if (incomingNodes.length > 0) {
       lastLiveSnapshotAt = now;
     }
+    incomingNodes.forEach((rawNode) => cacheSnapshotFramesForNode(rawNode));
     const nextNodes = new Map();
     for (const rawNode of incomingNodes) {
       const registry = dronecanRegistry();
@@ -762,7 +886,11 @@
       });
       nextNodes.set(node.nodeId, node);
     }
-    if (incomingNodes.length === 0 && slcanRuntime.nodes.size > 0 && (now - lastLiveSnapshotAt) <= nodeRetentionMs) {
+    const shouldKeepCachedNodes =
+      incomingNodes.length === 0
+      && slcanRuntime.nodes.size > 0
+      && (slcanSessionReady || (now - lastLiveSnapshotAt) <= nodeRetentionMs);
+    if (shouldKeepCachedNodes) {
       slcanRuntime.nodes.forEach((cachedNode, nodeId) => {
         nextNodes.set(nodeId, mkNode({
           ...cachedNode,
@@ -863,21 +991,26 @@
     workbench.className = "sc-card sc-dc-workbench";
     workbench.innerHTML = `
       <div class="sc-dc-toolbar">
-        <div class="sc-dc-mode-tabs" role="tablist" aria-label="${dcText("DroneCAN modes", "DroneCAN 模式")}">
-          <button type="button" class="sc-dc-mode-tab active" data-dc-mode="slcan">${dcText("SLCAN Direct", "SLCAN 直连")}</button>
-          <button type="button" class="sc-dc-mode-tab" data-dc-mode="can1">${dcText("MAVLink CAN1", "MAVLink 经 CAN1")}</button>
-          <button type="button" class="sc-dc-mode-tab" data-dc-mode="can2">${dcText("MAVLink CAN2", "MAVLink 经 CAN2")}</button>
-          <button type="button" class="sc-dc-mode-tab" data-dc-mode="filter">${dcText("Filter", "筛选")}</button>
-          <button type="button" class="sc-dc-mode-tab" data-dc-mode="inspector">${dcText("Inspector", "解析器")}</button>
-          <button type="button" class="sc-dc-mode-tab" data-dc-mode="stats">${dcText("Stats", "统计")}</button>
+        <div class="sc-dc-toolbar-block">
+          <div class="sc-dc-toolbar-eyebrow">${dcText("Transport mode", "传输模式")}</div>
+          <div class="sc-dc-mode-tabs" role="tablist" aria-label="${dcText("DroneCAN modes", "DroneCAN 模式")}">
+            <button type="button" class="sc-dc-mode-tab active" data-dc-mode="slcan">${dcText("SLCAN Direct", "SLCAN 直连")}</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-mode="can1">${dcText("MAVLink CAN1", "MAVLink 经 CAN1")}</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-mode="can2">${dcText("MAVLink CAN2", "MAVLink 经 CAN2")}</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-mode="filter">${dcText("Filter", "筛选")}</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-mode="inspector">${dcText("Inspector", "解析器")}</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-mode="stats">${dcText("Stats", "统计")}</button>
+          </div>
         </div>
-        <div class="sc-dc-toolbar-right">
-          <label class="sc-dc-slcan-port-label">${dcText("SLCAN Port", "SLCAN 端口")}
-            <select id="sc-dc-slcan-port" class="sc-dc-slcan-port-select" title="${dcText("CUAV one USB exposes two virtual ports. Pick the non-MAVLink side.", "CUAV 一根 USB 会暴露两个虚拟口，请选非 MAVLink 的那一路")}"></select>
-          </label>
-          <button type="button" id="sc-dc-auth-slcan2" class="sc-btn sc-btn-ghost sc-btn-sm" title="${dcText("Grant the second Web Serial lane in Chrome.", "在 Chrome 中授权第二路 Web Serial")}">${dcText("＋ Authorize 2nd", "＋ 授权第二路")}</button>
-          <label class="sc-dc-check"><input type="checkbox" id="sc-dc-exit-slcan" checked> ${dcText("Exit SLCAN on leave?", "离开时退出 SLCAN？")}</label>
-          <label class="sc-dc-check"><input type="checkbox" id="sc-dc-log"> ${dcText("Log", "记录")}</label>
+        <div class="sc-dc-toolbar-card">
+          <div class="sc-dc-toolbar-right">
+            <label class="sc-dc-slcan-port-label">${dcText("SLCAN Port", "SLCAN 端口")}
+              <select id="sc-dc-slcan-port" class="sc-dc-slcan-port-select" title="${dcText("CUAV one USB exposes two virtual ports. Pick the non-MAVLink side.", "CUAV 一根 USB 会暴露两个虚拟口，请选非 MAVLink 的那一路")}"></select>
+            </label>
+            <button type="button" id="sc-dc-auth-slcan2" class="sc-btn sc-btn-ghost sc-btn-sm" title="${dcText("Grant the second Web Serial lane in Chrome.", "在 Chrome 中授权第二路 Web Serial")}">${dcText("＋ Authorize 2nd", "＋ 授权第二路")}</button>
+            <label class="sc-dc-check"><input type="checkbox" id="sc-dc-exit-slcan" checked> ${dcText("Exit SLCAN on leave?", "离开时退出 SLCAN？")}</label>
+            <label class="sc-dc-check"><input type="checkbox" id="sc-dc-log"> ${dcText("Log", "记录")}</label>
+          </div>
         </div>
       </div>
       <div class="sc-dc-hint-row">
@@ -893,7 +1026,7 @@
       </div>
 
       <div class="sc-dc-panel active" data-dc-panel="slcan">
-        <div class="sc-dc-grid">
+        <div class="sc-dc-grid sc-dc-grid--single">
           <div class="sc-dc-main">
             <div class="sc-card-head">
               <h3>${dcText("Online nodes", "在线节点")}</h3>
@@ -921,22 +1054,46 @@
               </table>
             </div>
             <div class="sc-dc-node-detail-band">
+              <div class="sc-dc-band-head">
+                <h4>${dcText("Selected node snapshot", "当前节点摘要")}</h4>
+                <p>${dcText("Key identity, status, software and hardware markers for the selected node.", "展示当前选中节点的身份、状态、软件和硬件信息。")}</p>
+              </div>
               <div class="sc-dc-band-grid">
-                <div class="sc-dc-band-label">${dcText("Node", "节点")}</div>
-                <div id="sc-dc-band-id" class="sc-dc-band-value">-</div>
-                <div id="sc-dc-band-name" class="sc-dc-band-value">-</div>
-                <div class="sc-dc-band-label">${dcText("State", "状态")}</div>
-                <div id="sc-dc-band-mode" class="sc-dc-band-value">-</div>
-                <div id="sc-dc-band-health" class="sc-dc-band-value">-</div>
-                <div id="sc-dc-band-uptime" class="sc-dc-band-value">-</div>
-                <div class="sc-dc-band-label">${dcText("Vendor code", "厂商码")}</div>
-                <div id="sc-dc-band-vendor" class="sc-dc-band-value sc-dc-band-span2">-</div>
-                <div class="sc-dc-band-label">${dcText("Software", "软件")}</div>
-                <div id="sc-dc-band-sw" class="sc-dc-band-value">-</div>
-                <div id="sc-dc-band-crc" class="sc-dc-band-value">-</div>
-                <div class="sc-dc-band-label">${dcText("Hardware", "硬件")}</div>
-                <div id="sc-dc-band-hw" class="sc-dc-band-value">-</div>
-                <div id="sc-dc-band-uid" class="sc-dc-band-value">-</div>
+                <div class="sc-dc-band-row">
+                  <div class="sc-dc-band-label">${dcText("Node", "节点")}</div>
+                  <div class="sc-dc-band-row-values">
+                    <div id="sc-dc-band-id" class="sc-dc-band-value">-</div>
+                    <div id="sc-dc-band-name" class="sc-dc-band-value">-</div>
+                  </div>
+                </div>
+                <div class="sc-dc-band-row">
+                  <div class="sc-dc-band-label">${dcText("State", "状态")}</div>
+                  <div class="sc-dc-band-row-values sc-dc-band-row-values-3">
+                    <div id="sc-dc-band-mode" class="sc-dc-band-value">-</div>
+                    <div id="sc-dc-band-health" class="sc-dc-band-value">-</div>
+                    <div id="sc-dc-band-uptime" class="sc-dc-band-value">-</div>
+                  </div>
+                </div>
+                <div class="sc-dc-band-row">
+                  <div class="sc-dc-band-label">${dcText("Vendor code", "厂商码")}</div>
+                  <div class="sc-dc-band-row-values">
+                    <div id="sc-dc-band-vendor" class="sc-dc-band-value sc-dc-band-value-wide">-</div>
+                  </div>
+                </div>
+                <div class="sc-dc-band-row">
+                  <div class="sc-dc-band-label">${dcText("Software", "软件")}</div>
+                  <div class="sc-dc-band-row-values">
+                    <div id="sc-dc-band-sw" class="sc-dc-band-value">-</div>
+                    <div id="sc-dc-band-crc" class="sc-dc-band-value">-</div>
+                  </div>
+                </div>
+                <div class="sc-dc-band-row">
+                  <div class="sc-dc-band-label">${dcText("Hardware", "硬件")}</div>
+                  <div class="sc-dc-band-row-values">
+                    <div id="sc-dc-band-hw" class="sc-dc-band-value">-</div>
+                    <div id="sc-dc-band-uid" class="sc-dc-band-value">-</div>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="sc-table-wrap sc-dc-log-wrap">
@@ -947,21 +1104,6 @@
             </div>
           </div>
 
-          <aside class="sc-dc-side">
-            <div class="sc-subcard">
-              <h4 id="sc-dc-node-title">${dcText("Node detail", "节点详情")}</h4>
-              <dl id="sc-dc-node-meta" class="sc-dl"></dl>
-            </div>
-            <div class="sc-subcard">
-              <h4>${dcText("Live fields", "实时字段")}</h4>
-              <div class="sc-table-wrap">
-                <table class="sc-dsdl-table" id="sc-dsdl-table">
-                  <thead><tr><th>${dcText("Field", "字段")}</th><th>${dcText("Value", "数值")}</th></tr></thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-            </div>
-          </aside>
         </div>
       </div>
 
@@ -992,7 +1134,7 @@
     const style = document.createElement("style");
     style.id = "sc-dc-workbench-style";
     style.textContent = `
-      .sc-dc-workbench { margin-top:14px; position:relative; overflow:hidden; }
+      .sc-dc-workbench { margin-top:14px; position:relative; overflow:hidden; padding:18px; border-radius:18px; background:linear-gradient(180deg, rgba(18, 24, 38, 0.96), rgba(14, 19, 31, 0.98)); border:1px solid rgba(84, 99, 130, 0.34); box-shadow:0 22px 50px rgba(0,0,0,0.24); }
       .sc-dc-workbench::before {
         content:"";
         position:absolute;
@@ -1003,27 +1145,32 @@
           radial-gradient(780px 300px at 86% 0%, rgba(61, 109, 255, 0.08), transparent 60%);
         opacity:0.9;
       }
-      .sc-dc-toolbar, .sc-dc-hint-row { display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; position:relative; z-index:1; }
-      .sc-dc-toolbar { margin-bottom:12px; }
-      .sc-dc-mode-tabs { display:flex; gap:6px; flex-wrap:wrap; }
-      .sc-dc-mode-tab {
+      .sc-dc-toolbar, .sc-dc-hint-row { display:flex; gap:14px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; position:relative; z-index:1; }
+      .sc-dc-toolbar { margin-bottom:14px; }
+      .sc-dc-toolbar-block, .sc-dc-toolbar-card { min-width:min(100%, 320px); display:grid; gap:10px; }
+      .sc-dc-toolbar-card { flex:1 1 420px; padding:12px 14px; border-radius:14px; background:rgba(14, 21, 34, 0.78); border:1px solid rgba(71, 87, 115, 0.44); box-shadow:inset 0 1px 0 rgba(255,255,255,0.03); }
+      .sc-dc-toolbar-eyebrow { color:#8ea4cb; font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; }
+      .sc-dc-mode-tabs { display:flex; gap:8px; flex-wrap:wrap; }
+      .sc-dc-mode-tabs .sc-dc-mode-tab {
         position:relative;
-        background:linear-gradient(180deg, #9cc23e, #7f9f29);
-        color:#132003;
-        border:1px solid #d8f37a;
+        background:linear-gradient(180deg, rgba(42, 52, 73, 0.96), rgba(25, 33, 49, 0.98)) !important;
+        color:#d7e4ff !important;
+        border:1px solid rgba(90, 111, 148, 0.48) !important;
         border-radius:999px;
-        padding:7px 12px;
+        padding:8px 14px;
         font-size:12px;
+        font-weight:600;
         cursor:pointer;
         transition:transform .18s ease, box-shadow .18s ease, background .18s ease, color .18s ease, border-color .18s ease;
       }
-      .sc-dc-mode-tab:hover { transform:translateY(-1px); box-shadow:0 10px 22px rgba(0,0,0,.18); }
-      .sc-dc-mode-tab.active {
-        background:linear-gradient(180deg, #ebff9f, #cfe65c);
-        color:#081000;
-        box-shadow:0 10px 26px rgba(152, 194, 61, 0.28);
+      .sc-dc-mode-tabs .sc-dc-mode-tab:hover { transform:translateY(-1px); box-shadow:0 10px 22px rgba(0,0,0,.18); border-color:rgba(126, 164, 231, 0.52) !important; }
+      .sc-dc-mode-tabs .sc-dc-mode-tab.active {
+        background:linear-gradient(180deg, #d8ef88, #b8d856) !important;
+        color:#122002 !important;
+        border-color:#d9ef8f !important;
+        box-shadow:0 12px 28px rgba(142, 180, 56, 0.26);
       }
-      .sc-dc-mode-tab.active::after {
+      .sc-dc-mode-tabs .sc-dc-mode-tab.active::after {
         content:"";
         position:absolute;
         left:14px;
@@ -1033,11 +1180,14 @@
         border-radius:999px;
         background:linear-gradient(90deg, transparent, #dff57d, transparent);
       }
-      .sc-dc-toolbar-right { display:flex; gap:14px; align-items:center; color:#d5dcf0; font-size:12px; position:relative; z-index:1; }
-      .sc-dc-slcan-port-select { min-width: 180px; max-width: 260px; background:#1a2235; color:#e8edf8; border:1px solid #4a5c7d; border-radius:6px; padding:4px 8px; font-size:12px; }
+      .sc-dc-toolbar-right { display:flex; gap:12px; align-items:center; color:#d5dcf0; font-size:12px; position:relative; z-index:1; flex-wrap:wrap; min-height:40px; }
+      .sc-dc-slcan-port-label { display:grid; gap:6px; align-content:center; color:#b9c7e4; font-weight:600; margin:0; }
+      .sc-dc-slcan-port-select { min-width: 220px; max-width: 280px; background:#121a2a; color:#e8edf8; border:1px solid #4a5c7d; border-radius:10px; padding:7px 10px; font-size:12px; }
       .sc-dc-slcan-port-select option { background:#1a2235; color:#e8edf8; }
-      .sc-dc-check { display:flex; gap:6px; align-items:center; }
-      .sc-dc-hint-row { padding:8px 0 12px; border-bottom:1px solid #2a3148; margin-bottom:12px; }
+      .sc-dc-toolbar-right .sc-btn { align-self:center; min-height:36px; display:inline-flex; align-items:center; justify-content:center; }
+      .sc-dc-check { display:inline-flex; gap:6px; align-items:center; min-height:36px; padding:0 2px; margin:0; line-height:1; }
+      .sc-dc-check input { margin:0; align-self:center; }
+      .sc-dc-hint-row { padding:12px 14px 14px; border:1px solid rgba(70, 84, 112, 0.42); border-radius:14px; background:rgba(13, 18, 30, 0.7); margin-bottom:14px; }
       #sc-dc-transport-badge { position:relative; overflow:hidden; }
       #sc-dc-transport-badge.sc-dc-live { box-shadow:0 0 0 1px rgba(224, 245, 125, .34), 0 0 24px rgba(224, 245, 125, .12); }
       .sc-dc-menu { position:fixed; z-index:2200; min-width:210px; max-width:min(320px, calc(100vw - 24px)); background:#121827; border:1px solid #39445f; border-radius:10px; box-shadow:0 18px 42px rgba(0,0,0,0.35); padding:6px; display:grid; gap:4px; }
@@ -1045,7 +1195,8 @@
       .sc-dc-menu-item { text-align:left; background:#182133; color:#e5ebf6; border:1px solid transparent; border-radius:8px; padding:9px 10px; font-size:12px; cursor:pointer; transition:background .16s ease, border-color .16s ease, transform .16s ease; }
       .sc-dc-menu-item:hover { background:#22314b; border-color:#4a5c7d; }
       .sc-dc-menu-item:hover, .sc-dc-row:hover, .sc-dc-tree-row:hover { transform:translateY(-1px); }
-      .sc-dc-grid { display:grid; grid-template-columns:minmax(0, 1.45fr) minmax(320px, 0.75fr); gap:14px; }
+      .sc-dc-grid { display:grid; grid-template-columns:minmax(0, 1.58fr) minmax(340px, 0.8fr); gap:16px; align-items:start; }
+      .sc-dc-grid--single { grid-template-columns:minmax(0, 1fr); }
       .sc-dc-mini-grid, .sc-dc-filter-grid, .sc-dc-inspector-grid, .sc-dc-stats-grid { display:grid; gap:14px; }
       .sc-dc-mini-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
       .sc-dc-filter-grid { grid-template-columns:minmax(300px, 0.9fr) minmax(0, 1.1fr); }
@@ -1053,17 +1204,25 @@
       .sc-dc-stats-grid { grid-template-columns:repeat(4, minmax(0, 1fr)); }
       .sc-dc-panel { display:none; }
       .sc-dc-panel.active { display:block; }
-      .sc-dc-node-table-wrap { max-height:380px; }
+      .sc-dc-main, .sc-dc-side { min-width:0; }
+      .sc-dc-node-table-wrap { max-height:360px; border:1px solid rgba(63, 76, 102, 0.48); border-radius:14px; background:rgba(12, 17, 29, 0.72); }
+      .sc-dc-node-table thead th { position:sticky; top:0; z-index:1; background:#182033; }
       .sc-dc-row { cursor:pointer; transition:background .16s ease, transform .16s ease; }
       .sc-dc-row-marker { width:18px; text-align:center; color:#a8bbdf; font-size:12px; }
       .sc-dc-row:hover td { background:rgba(144, 182, 58, 0.1); }
       .sc-dc-row.active td { background:rgba(144, 182, 58, 0.18); }
-      .sc-dc-node-detail-band { margin-top:12px; border:1px solid var(--sc-border); border-radius:8px; background:#171d2d; padding:10px; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.02); }
-      .sc-dc-band-grid { display:grid; grid-template-columns:220px 1fr 1fr 1fr; gap:6px; }
-      .sc-dc-band-label, .sc-dc-band-value { min-height:24px; display:flex; align-items:center; padding:3px 8px; font-size:12px; transition:background-color .18s ease, box-shadow .18s ease, transform .18s ease; }
-      .sc-dc-band-label { color:#d9e2f2; }
-      .sc-dc-band-value { background:#474747; color:#ffffff; font-family:var(--sc-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .sc-dc-band-span2 { grid-column:span 2; }
+      .sc-dc-node-detail-band { margin-top:14px; border:1px solid rgba(74, 92, 125, 0.42); border-radius:16px; background:linear-gradient(180deg, rgba(20, 28, 43, 0.96), rgba(14, 21, 34, 0.96)); padding:14px; box-shadow:inset 0 1px 0 rgba(255,255,255,0.03); }
+      .sc-dc-band-head { display:grid; gap:4px; margin-bottom:12px; }
+      .sc-dc-band-head h4 { margin:0; font-size:14px; color:#eef4ff; }
+      .sc-dc-band-head p { margin:0; color:#8ea2c8; font-size:12px; }
+      .sc-dc-band-grid { display:grid; gap:8px; }
+      .sc-dc-band-row { display:grid; grid-template-columns:210px minmax(0, 1fr); gap:10px; align-items:center; }
+      .sc-dc-band-row-values { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; min-width:0; }
+      .sc-dc-band-row-values-3 { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+      .sc-dc-band-label, .sc-dc-band-value { min-height:24px; display:flex; align-items:center; padding:0; font-size:12px; transition:background-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+      .sc-dc-band-label { color:#8ea2c8; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; }
+      .sc-dc-band-value { min-height:34px; padding:7px 12px; border-radius:10px; background:rgba(255,255,255,0.04); border:1px solid rgba(77, 93, 121, 0.36); color:#ffffff; font-family:var(--sc-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+      .sc-dc-band-value-wide { grid-column:1 / -1; }
       #sc-dc-node-meta {
         display:grid;
         grid-template-columns:minmax(140px, 44%) minmax(0, 1fr);
@@ -1073,7 +1232,10 @@
       #sc-dc-node-meta dt, #sc-dc-node-meta dd { margin:0; min-height:24px; display:flex; align-items:center; }
       #sc-dc-node-meta dt { color:#8ea2c8; white-space:nowrap; }
       #sc-dc-node-meta dd { color:#f2f6ff; font-family:var(--sc-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .sc-dc-log-wrap { margin-top:12px; max-height:180px; }
+      .sc-dc-log-wrap { margin-top:14px; max-height:180px; border:1px solid rgba(63, 76, 102, 0.38); border-radius:14px; background:rgba(12, 17, 29, 0.64); }
+      .sc-dc-side { position:sticky; top:18px; display:grid; gap:14px; }
+      .sc-dc-side .sc-subcard { border-radius:16px; background:linear-gradient(180deg, rgba(18, 25, 40, 0.98), rgba(13, 19, 31, 0.98)); border:1px solid rgba(73, 89, 118, 0.4); box-shadow:0 14px 28px rgba(0,0,0,0.14); }
+      .sc-dc-side .sc-subcard h4 { margin-bottom:12px; }
       .sc-dc-tree { max-height:620px; overflow:auto; padding:4px 0; border:1px solid #2c3550; border-radius:12px; background:#101624; scrollbar-gutter:stable; }
       .sc-dc-tree-list, .sc-dc-tree-branch { list-style:none; margin:0; padding:0; }
       .sc-dc-tree-row { display:flex; align-items:center; gap:10px; min-height:34px; width:100%; background:transparent; color:#e6ecf6; border:0; border-radius:8px; padding:7px 10px; cursor:pointer; text-align:left; transition:background .16s ease, box-shadow .16s ease, transform .16s ease; }
@@ -1131,7 +1293,10 @@
       #sc-dc-transport-badge.sc-dc-live { animation:sc-dc-pulse 2.8s ease-in-out infinite; }
       @media (max-width: 980px) {
         .sc-dc-grid, .sc-dc-mini-grid, .sc-dc-filter-grid, .sc-dc-inspector-grid, .sc-dc-stats-grid { grid-template-columns:1fr; }
-        .sc-dc-band-grid { grid-template-columns:1fr; }
+        .sc-dc-band-row { grid-template-columns:1fr; gap:6px; }
+        .sc-dc-band-row-values, .sc-dc-band-row-values-3 { grid-template-columns:1fr; }
+        .sc-dc-side { position:static; }
+        .sc-dc-toolbar-card, .sc-dc-toolbar-block { min-width:100%; }
       }
     `;
     document.head.appendChild(style);
@@ -1143,8 +1308,9 @@
       selectedCanId = canNodes[0]?.nodeId ?? 0;
     }
     const fcCan = getFlightControllerCanIdentity();
-    const fps = slcanRuntime.framesPerSecond;
-    const loadPct = Math.min(100, Math.round((fps / 1000) * 100));
+    const observedStats = currentMode === "inspector" ? computeObservedFrameStats(canNodes) : null;
+    const fps = observedStats ? observedStats.fps : slcanRuntime.framesPerSecond;
+    const loadPct = observedStats ? observedStats.loadPct : Math.min(100, Math.round((fps / 1000) * 100));
     setLiveText("sc-dc-load", `${loadPct}%`);
     setLiveText("sc-dc-fps", String(fps));
     setLiveText("sc-dc-err", String(slcanRuntime.errorFrames));
@@ -1161,6 +1327,22 @@
           ? `${dcText("SLCAN Direct", "SLCAN 直连")}${detectSlcanAdapterPort() ? ` · ${detectSlcanAdapterPort()}` : ""}`
           : dcText("SLCAN Direct", "SLCAN 直连"),
       );
+    }
+    if (currentMode === "slcan" && slcanSessionReady && $("sc-dc-hint")) {
+      const adapterPort = detectSlcanAdapterPort();
+      if (slcanBoundPort === "webserial") {
+        $("sc-dc-hint").textContent =
+          dcText(
+            "SLCAN Direct over Chrome second Web Serial lane (no GCS.cmd needed). Keep MAVLink connected at the top; this page shows SLCAN-observed nodes.",
+            "SLCAN 直连（Chrome 第二路 Web Serial，无需 GCS.cmd）。顶部保持 MAVLink 连接；本页显示 SLCAN 监听到的节点。",
+          );
+      } else if (adapterPort) {
+        $("sc-dc-hint").textContent =
+          dcText(
+            `SLCAN Direct via COM bridge (${adapterPort}). MAVLink and DroneCAN should use separate USB lanes, bridged by GCS.cmd on 8765.`,
+            `SLCAN 直连（COM 桥 ${adapterPort}）。顶部 MAVLink 与 DroneCAN 各走一路 USB，由 GCS.cmd 提供 8765 桥接。`,
+          );
+      }
     }
   }
 
@@ -1285,23 +1467,24 @@
       fullName: "raw.can.Frame",
       category: "Raw",
     };
-    const cachedForCan = getCachedFramesForCan(node.nodeId, selection.canId);
-    const latestCached = cachedForCan.length ? cachedForCan[cachedForCan.length - 1] : null;
+    const decodeFrames = getDecodeFramesForCan(node, selection.canId);
+    const latestCached = decodeFrames.length ? decodeFrames[decodeFrames.length - 1] : null;
+    const activeFrame = latestCached || frame || null;
     const decoded = decoder?.decodeTransfer?.(
       selection.canId,
-      latestCached?.dataHex || frame?.dataHex || node.lastDataHex || "",
-      latestCached?.dlc ?? frame?.dlc ?? node.lastDlc ?? 0,
-      { recentFrames: cachedForCan, anchorTs: latestCached?.ts ?? frame?.ts }
+      activeFrame?.dataHex || node.lastDataHex || "",
+      activeFrame?.dlc ?? node.lastDlc ?? 0,
+      { recentFrames: decodeFrames, anchorTs: activeFrame?.ts }
     ) || null;
     const idInfo = decoded || decoder?.parseCanIdValue?.(selection.canId) || {};
 
     const sourceNodeId = idInfo.sourceNodeId ?? meta.sourceNodeId ?? node.nodeId;
     const dataTypeId = idInfo.dataTypeId ?? meta.dataTypeId ?? "—";
 
-    const dlc = frame?.dlc ?? decoded?.dlc ?? node.lastDlc ?? "—";
-    const frameHex = frame?.dataHex || node.lastDataHex || "";
+    const dlc = activeFrame?.dlc ?? decoded?.dlc ?? node.lastDlc ?? "—";
+    const frameHex = activeFrame?.dataHex || node.lastDataHex || "";
     const payloadHex = decoded?.payloadHex || "";
-    const timeHint = frame ? formatLastSeenAgo(frame.ts) : "";
+    const timeHint = activeFrame ? formatLastSeenAgo(activeFrame.ts) : "";
 
     if (evidence) {
       evidence.textContent = timeHint ? dcText(`Updated ${timeHint}`, `更新于 ${timeHint}`) : "";
@@ -1396,9 +1579,9 @@
     root.className = "sc-dc-tree-list";
 
     nodes.forEach((n) => {
-      const rxCount = num(n.dsdlData?.["frame.count"], 0);
-      const spanMs = Math.max(1, num(n.lastSeenAt, Date.now()) - num(n.firstSeenAt, Date.now()));
-      const bps = Math.round((rxCount * 1000) / spanMs);
+      const observed = computeNodeObservedStats(n);
+      const rxCount = observed.frameCount;
+      const bps = observed.bps;
       const frameCounts = Object.entries(n.frameIdCounts || {}).sort((a, b) => Number(b[1]) - Number(a[1]));
       const nodeItem = document.createElement("li");
       const nodeOpen = inspectorOpenState.nodes.has(n.nodeId);
@@ -1604,13 +1787,13 @@
     if (meta.labelZh) entries["message.label_zh"] = meta.labelZh;
     if (meta.dataTypeId != null) entries["message.data_type_id"] = meta.dataTypeId;
 
-    const cachedForCan = getCachedFramesForCan(node.nodeId, canId);
-    const lastFr = cachedForCan.length ? cachedForCan[cachedForCan.length - 1] : null;
+    const decodeFrames = getDecodeFramesForCan(node, canId);
+    const lastFr = decodeFrames.length ? decodeFrames[decodeFrames.length - 1] : null;
     const decoded = dronecanDecode()?.decodeTransfer?.(
       canId,
       lastFr?.dataHex || node.lastDataHex || "",
       lastFr?.dlc ?? node.lastDlc ?? 0,
-      { recentFrames: cachedForCan, anchorTs: lastFr?.ts }
+      { recentFrames: decodeFrames, anchorTs: lastFr?.ts }
     );
     if (decoded?.fields) {
       decoded.fields.forEach((field) => {

@@ -665,10 +665,10 @@
     const ltLE = addV(-(wLE + stabSpanLE), yStLE, stabZTop(yStLE) + 0.04); // 左根后缘
     const ltTE = addV(-(wTE + stabSpanTE), yStTE, stabZTop(yStTE)); // 左尖后缘
     
-    // 上表面
-    quad(rrLE, rtLE, rtTE, rrTE, 238, 236, 242, MAT.FUSE);
-    quad(ltLE, lrLE, lrTE, ltTE, 238, 236, 242, MAT.FUSE);
-    
+    // 上表面（红色；顶点逆时针绕 +Z，法线朝上，避免背面剔除）
+    quad(rrLE, rrTE, rtTE, rtLE, 218, 55, 62, MAT.RED);
+    quad(ltLE, ltTE, lrTE, lrLE, 218, 55, 62, MAT.RED);
+
     // 下表面
     const rrLEb = addV(wLE, yStLE, stabZTop(yStLE) - stabT);
     const rrTEb = addV(wTE, yStTE, stabZTop(yStTE) - stabT);
@@ -678,30 +678,30 @@
     const lrTEb = addV(-wTE, yStTE, stabZTop(yStTE) - stabT);
     const ltLEb = addV(-(wLE + stabSpanLE), yStLE, stabZTop(yStLE) + 0.04 - stabT);
     const ltTEb = addV(-(wTE + stabSpanTE), yStTE, stabZTop(yStTE) - stabT);
-    
-    quad(rrLEb, rtLEb, rtTEb, rrTEb, 220, 218, 226, MAT.FUSE);
-    quad(ltLEb, lrLEb, lrTEb, ltTEb, 220, 218, 226, MAT.FUSE);
-    
+
+    quad(rrLEb, rtLEb, rtTEb, rrTEb, 200, 45, 52, MAT.RED);
+    quad(ltLEb, lrLEb, lrTEb, ltTEb, 200, 45, 52, MAT.RED);
+
     // 前缘
-    quad(rrLE, rrLEb, rtLEb, rtLE, 228, 226, 234, MAT.FUSE);
-    quad(lrLE, lrLEb, ltLEb, ltLE, 228, 226, 234, MAT.FUSE);
-    
+    quad(rrLE, rrLEb, rtLEb, rtLE, 210, 50, 58, MAT.RED);
+    quad(lrLE, lrLEb, ltLEb, ltLE, 210, 50, 58, MAT.RED);
+
     // 后缘
-    quad(rtTE, rtTEb, rrTEb, rrTE, 228, 226, 234, MAT.FUSE);
-    quad(ltTE, ltTEb, lrTEb, lrTE, 228, 226, 234, MAT.FUSE);
-    
+    quad(rtTE, rtTEb, rrTEb, rrTE, 210, 50, 58, MAT.RED);
+    quad(ltTE, ltTEb, lrTEb, lrTE, 210, 50, 58, MAT.RED);
+
     // 左右翼尖
-    quad(rtLE, rtLEb, rtTEb, rtTE, 228, 226, 234, MAT.FUSE);
-    quad(ltLE, ltLEb, ltTEb, ltTE, 228, 226, 234, MAT.FUSE);
-    
+    quad(rtLE, rtLEb, rtTEb, rtTE, 210, 50, 58, MAT.RED);
+    quad(ltLE, ltLEb, ltTEb, ltTE, 210, 50, 58, MAT.RED);
+
     // 连接机身的部分
-    quad(rrLE, lrLE, lrLEb, rrLEb, 228, 226, 234, MAT.FUSE);
-    
+    quad(rrLE, lrLE, lrLEb, rrLEb, 218, 55, 62, MAT.RED);
+
     // 水平尾翼翼尖装饰
     const elR = addV(wTE + stabSpanTE * 0.92, yStTE - 0.85, stabZTop(yStTE) - 0.22);
-    tri(rtTE, elR, rtTEb, 188, 186, 196, MAT.FUSE);
+    tri(rtTE, elR, rtTEb, 200, 45, 52, MAT.RED);
     const elL = addV(-(wTE + stabSpanTE * 0.92), yStTE - 0.85, stabZTop(yStTE) - 0.22);
-    tri(ltTE, ltTEb, elL, 188, 186, 196, MAT.FUSE);
+    tri(ltTE, ltTEb, elL, 200, 45, 52, MAT.RED);
 
     // —— 整流锥 + 三叶螺旋桨 ——
     const spinTip = addV(0, 148, 11.0);

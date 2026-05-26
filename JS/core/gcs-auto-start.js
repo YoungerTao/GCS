@@ -117,10 +117,12 @@
       const runtimeOk = await ensureRuntimeStarted();
       if (runtimeOk) {
         await ensureBridgeFromRuntime();
-        const bridgeWait = global.__gcsLiveServerDev ? 2500 : 8000;
+        const bridgeWait = global.__gcsLiveServerDev ? 2500 : 15000;
         const bridgeOk = await waitForBridge(bridgeWait);
-        if (!bridgeOk) {
+        if (!bridgeOk && !global.__gcsRuntimeNative) {
           global._comBridgeBackoffUntil = Date.now() + 45000;
+        } else if (!bridgeOk) {
+          global._comBridgeBackoffUntil = 0;
         }
       } else if (global.__gcsLiveServerDev) {
         global._comBridgeBackoffUntil = Date.now() + 45000;
@@ -142,10 +144,17 @@
     if (global.__gcsBootstrapPromise) {
       await global.__gcsBootstrapPromise;
     }
+    if (await fetchOk(BRIDGE_HEALTH)) {
+      global._comBridgeOnline = true;
+      global._comBridgeBackoffUntil = 0;
+      if (typeof global.resetAutoConnectAttempts === "function") {
+        global.resetAutoConnectAttempts();
+      }
+      return true;
+    }
     if (typeof global._comBridgeBackoffUntil === "number" && Date.now() < global._comBridgeBackoffUntil) {
       return false;
     }
-    if (await fetchOk(BRIDGE_HEALTH)) return true;
     if (global.__gcsLiveServerDev) return false;
     if (typeof global.ensureComBridgeRunning === "function") {
       return global.ensureComBridgeRunning();
