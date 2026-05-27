@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+an zhai<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -26,6 +26,7 @@
 <link rel="stylesheet" href="CSS/components/all-params.css?v=20260527b">
 <link rel="stylesheet" href="CSS/components/flight-plan.css">
 <link rel="stylesheet" href="CSS/components/serial-setup.css">
+<link rel="stylesheet" href="CSS/components/safety-setup.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 </head>
 <body>
@@ -564,6 +565,123 @@
         </div>
       </div>
 
+      <div class="ov-panel" id="setup-panel-safety">
+        <div class="safety-page">
+          <header class="safety-header card-dark">
+            <div>
+              <h3>安全策略中心</h3>
+              <p class="muted">仿 QGC · 围栏 / RTL / 失效保护 / 解锁检查 / 急停联动</p>
+            </div>
+            <div class="safety-chip-row">
+              <span id="safety-prearm-chip" class="safety-chip safety-chip-muted">Pre-arm: 未知</span>
+              <span id="safety-fence-chip" class="safety-chip safety-chip-muted">Fence: 未知</span>
+            </div>
+          </header>
+
+          <div class="safety-grid">
+            <section class="card-dark safety-card">
+              <h4>Geofence 围栏</h4>
+              <div class="safety-form-grid">
+                <label>启用
+                  <select id="safety-fence-enable">
+                    <option value="0">关闭</option>
+                    <option value="1">开启</option>
+                  </select>
+                </label>
+                <label>类型
+                  <select id="safety-fence-type">
+                    <option value="1">圆形围栏</option>
+                    <option value="3">圆形+高度</option>
+                    <option value="7">全围栏</option>
+                  </select>
+                </label>
+                <label>半径 (m)<input id="safety-fence-radius" type="number" min="20" step="10"></label>
+                <label>高度上限 (m)<input id="safety-fence-altmax" type="number" min="10" step="5"></label>
+                <label>触发动作
+                  <select id="safety-fence-action">
+                    <option value="0">仅报告</option>
+                    <option value="1">RTL</option>
+                    <option value="2">LAND</option>
+                    <option value="4">BRAKE/LAND</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="geofence-viz-wrap">
+                <div class="geofence-viz-label">3D 围栏预览（圆柱体）</div>
+                <canvas id="safety-geofence-viz" height="210"></canvas>
+                <div id="safety-geofence-overlay" class="geofence-viz-overlay"></div>
+              </div>
+            </section>
+
+            <section class="card-dark safety-card">
+              <h4>RTL 返航策略</h4>
+              <div class="safety-form-grid">
+                <label>返航高度 RTL_ALT (cm)<input id="safety-rtl-alt" type="number" min="0" step="50"></label>
+                <label>最小爬升 RTL_CLIMB_MIN (m)<input id="safety-rtl-climb-min" type="number" min="0" step="1"></label>
+                <label>锥形斜率 RTL_CONE_SLOPE<input id="safety-rtl-cone-slope" type="number" min="0" max="10" step="0.1"></label>
+                <label>到家等待 RTL_LOIT_TIME (s)<input id="safety-rtl-loit-time" type="number" min="0" step="1"></label>
+              </div>
+            </section>
+
+            <section class="card-dark safety-card">
+              <h4>链路失效保护</h4>
+              <div class="safety-form-grid">
+                <label>遥控失联 FS_THR_ENABLE
+                  <select id="safety-fs-thr-enable">
+                    <option value="0">禁用</option>
+                    <option value="1">RTL</option>
+                    <option value="3">SmartRTL/RTL</option>
+                    <option value="4">SmartRTL/LAND</option>
+                    <option value="5">LAND</option>
+                  </select>
+                </label>
+                <label>GCS 失联 FS_GCS_ENABLE
+                  <select id="safety-fs-gcs-enable">
+                    <option value="0">禁用</option>
+                    <option value="1">启用</option>
+                    <option value="2">仅自动模式</option>
+                  </select>
+                </label>
+                <label>Failsafe 预设
+                  <select id="safety-fs-preset">
+                    <option value="safe">保守（推荐）</option>
+                    <option value="mission">任务优先</option>
+                    <option value="manual">手动自定义</option>
+                  </select>
+                </label>
+                <label>FS_OPTIONS (位掩码)<input id="safety-fs-options" type="number" min="0" step="1"></label>
+              </div>
+            </section>
+
+            <section class="card-dark safety-card">
+              <h4>电池失效保护摘要</h4>
+              <div id="safety-battery-summary" class="safety-note muted">等待参数加载…</div>
+              <button type="button" id="safety-open-power-btn" class="safety-link-btn">前往电源页细调</button>
+            </section>
+
+            <section class="card-dark safety-card">
+              <h4>解锁检查（Pre-arm）</h4>
+              <div class="safety-form-grid">
+                <label>ARMING_CHECK<input id="safety-arming-check" type="number" min="0" step="1"></label>
+              </div>
+              <p id="safety-prearm-summary" class="safety-note muted">等待状态消息…</p>
+            </section>
+
+            <section class="card-dark safety-card">
+              <h4>急停与电机安全</h4>
+              <div id="safety-emergency-summary" class="safety-note muted">正在检查 RCx_OPTION 与电机安全参数…</div>
+            </section>
+          </div>
+
+          <section class="card-dark safety-write-actions">
+            <button id="safety-write-params-btn" type="button">一键写入飞控</button>
+            <button id="safety-reload-btn" type="button" class="safety-secondary-btn">重载参数到表单</button>
+            <p id="safety-write-status" class="muted safety-write-status"></p>
+          </section>
+        </div>
+      </div>
+
       <div class="ov-panel" id="setup-panel-sensors">
         <div class="sc-page cal-tokens" data-active-module="accel">
           <nav class="sc-breadcrumb" aria-label="传感器校准导航">
@@ -799,6 +917,8 @@
 <script src="JS/ui/airframe-setup.js?v=14" defer></script>
 <script src="JS/ui/motor-setup.js?v=8" defer></script>
 <script src="JS/ui/power-setup.js" defer></script>
+<script src="JS/ui/safety-setup.js" defer></script>
+<script src="JS/ui/geofence-viz-three.js" defer></script>
 <script src="https://unpkg.com/three@0.149.0/build/three.min.js" defer></script>
 <script src="JS/ui/accel-calib-three.js" defer></script>
 <script src="JS/ui/accel-calibration.js" defer></script>

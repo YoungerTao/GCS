@@ -1,0 +1,187 @@
+.safety-page {
+  display: grid;
+  gap: 12px;
+}
+
+.safety-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.safety-header h3 {
+  margin: 0 0 4px;
+}
+
+.safety-chip-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.safety-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(148, 163, 184, 0.2);
+  color: #dbe7ff;
+}
+
+.safety-chip-ok {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.safety-chip-warn {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.5);
+}
+
+.safety-chip-muted {
+  opacity: 0.82;
+}
+
+.safety-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.safety-card {
+  padding: 12px 14px;
+}
+
+.safety-card h4 {
+  margin: 0 0 10px;
+}
+
+.safety-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.safety-form-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #a8bbda;
+}
+
+.safety-form-grid input,
+.safety-form-grid select {
+  width: 100%;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(116, 146, 187, 0.45);
+  background: rgba(8, 16, 38, 0.72);
+  color: #eff4ff;
+  padding: 0 10px;
+  box-sizing: border-box;
+}
+
+.safety-note {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.safety-link-btn,
+.safety-secondary-btn,
+#safety-write-params-btn {
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(116, 146, 187, 0.45);
+  background: rgba(8, 16, 38, 0.72);
+  color: #d8e6ff;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+#safety-write-params-btn {
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #f8fbff;
+}
+
+.safety-write-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.safety-write-status {
+  margin: 0;
+  min-height: 20px;
+}
+
+@media (max-width: 840px) {
+  .safety-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .safety-write-actions {
+    flex-wrap: wrap;
+  }
+}
+
+/* Geofence 3D 圆柱预览 */
+.geofence-viz-wrap {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(116, 146, 187, 0.25);
+}
+
+.geofence-viz-label {
+  font-size: 11px;
+  color: #8fa4c4;
+  margin-bottom: 4px;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#safety-geofence-viz {
+  display: block;
+  width: 100%;
+  height: 210px;
+  border-radius: 8px;
+  background: rgba(8, 16, 38, 0.6);
+  border: 1px solid rgba(116, 146, 187, 0.25);
+  cursor: default;
+  position: relative;
+}
+
+.geofence-viz-wrap {
+  position: relative;
+}
+
+/* 禁用状态 HTML 覆盖层（替代 3D sprite，更可控） */
+.geofence-viz-overlay {
+  position: absolute;
+  inset: 0;
+  display: none; /* 默认隐藏，由 JS 控制 */
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.75);
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  padding: 8px 12px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.geofence-viz-overlay.show {
+  display: flex;
+}
+
+@media (max-width: 600px) {
+  #safety-geofence-viz {
+    height: 180px;
+  }
+}

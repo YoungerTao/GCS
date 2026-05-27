@@ -491,7 +491,7 @@ if(id === 0){ // HEARTBEAT — 本项目约定线序（与 MAVLink common.xml �
   }
 
   if (id === 148) {
-    parseAutopilotVersion(payload);
+    parseAutopilotVersion(payload, sys, comp);
   }
 
   if (id === 193) {
@@ -691,7 +691,7 @@ function parseStatustext(payload, sys, comp) {
 //移至 JS/ui/mavlink-helpers.js
 
 /** MAVLink common AUTOPILOT_VERSION（#148）线序：capabilities(8) + 四段 sw + board + 三组 custom[8] + vendor/product + uid(8) + uid2[18] */
-function parseAutopilotVersion(payload) {
+function parseAutopilotVersion(payload, sys, comp) {
   if (!payload || payload.length < 24) {
     if (typeof log === "function") log(`⚠️ #148 载荷过短：${payload?.length ?? 0} byte，放弃解析`, "debug");
     return;
@@ -727,6 +727,7 @@ function parseAutopilotVersion(payload) {
     const git = u8.length >= 32 ? bytesToHexTrim(u8, 24, 8) : "";
     let firmwareText = decodeFlightSwVersion(flight_sw_version);
     if (git) firmwareText += ` · ${git.slice(0, 12)}${git.length > 12 ? "…" : ""}`;
+    const looksZeroSemver = /^0\.0\.0(?:\b|\s|$)/.test(String(firmwareText || "").trim());
 
     if (typeof log === "function") {
       log(`🔍 #148 解析结果：固件=${firmwareText} 硬件=${hardwareText} 板型=${boardType}`, "debug");
@@ -741,6 +742,78 @@ function parseAutopilotVersion(payload) {
     }
     if (uidText && !uidText.startsWith("0x")) uidText = `0x${uidText}`;
 
+    const hasVersionData =
+      !looksZeroSemver && (
+      flight_sw_version !== 0 ||
+      middleware_sw_version !== 0 ||
+      os_sw_version !== 0
+      );
+    const hasBoardData =
+      board_version !== 0 ||
+      vendor_id !== 0 ||
+      product_id !== 0;
+    const hasUidData = !!uidText && !/^0x0+$/i.test(uidText);
+    const hasCoreData =
+      hasVersionData ||
+      (
+      flight_sw_version !== 0 ||
+      middleware_sw_version !== 0 ||
+      os_sw_version !== 0 ||
+      board_version !== 0 ||
+      !!uidText ||
+      vendor_id !== 0 ||
+      product_id !== 0
+      );
+
+    const srcSys = Number(sys);
+    const srcComp = Number(comp);
+    const sourceKnown = Number.isFinite(srcSys) && srcSys > 0 && Number.isFinite(srcComp) && srcComp >= 0;
+    const preferredSys = Number(window.fcSysid || window.sysid || 0);
+    if (sourceKnown && preferredSys > 0 && srcSys !== preferredSys) {
+      if (typeof log === "function") {
+        log(`ℹ️ 忽略非当前飞控 #148：src ${srcSys}/${srcComp}，当前 ${preferredSys}`, "debug");
+      }
+      return;
+    }
+    if (!window._autopilotVersionSource && sourceKnown) {
+      window._autopilotVersionSource = { sys: srcSys, comp: srcComp };
+    } else if (window._autopilotVersionSource && sourceKnown) {
+      const locked = window._autopilotVersionSource;
+      if (locked.sys !== srcSys || locked.comp !== srcComp) {
+        if (typeof log === "function") {
+          log(`ℹ️ 忽略来源漂移 #148：src ${srcSys}/${srcComp}，锁定 ${locked.sys}/${locked.comp}`, "debug");
+        }
+        return;
+      }
+    }
+
+    const prev = window.autopilotVersionInfo || null;
+    const fallback = window._overviewVersionFallback || null;
+    const fallbackHasAny = !!(
+      fallback &&
+      (
+        String(fallback.firmwareText || "").trim() ||
+        String(fallback.hardwareText || "").trim() ||
+        String(fallback.deviceId || "").trim()
+      )
+    );
+    const prevHasCoreData = !!(prev && (
+      Number(prev.flight_sw_version) ||
+      Number(prev.middleware_sw_version) ||
+      Number(prev.os_sw_version) ||
+      Number(prev.board_version) ||
+      prev.uidHex ||
+      Number(prev.vendor_id) ||
+      Number(prev.product_id)
+    ));
+    if (!hasCoreData && (prevHasCoreData || fallbackHasAny)) {
+      window._lastAutopilotVersionRejectedAt = Date.now();
+      window._lastAutopilotVersionRejectReason = "empty-payload-with-existing-data";
+      if (typeof log === "function") log("ℹ️ #148 本次为全零/空数据，保留现有有效信息", "debug");
+      return;
+    }
+    window._lastAutopilotVersionRejectReason = "";
+
     window.autopilotVersionInfo = {
       flight_sw_version,
       middleware_sw_version,
@@ -752,6 +825,11 @@ function parseAutopilotVersion(payload) {
       product_id,
       uidHex: uidText,
       updatedAt: Date.now(),
+      sourceSys: sourceKnown ? srcSys : null,
+      sourceComp: sourceKnown ? srcComp : null,
+      hasVersionData,
+      hasBoardData,
+      hasUidData,
     };
     if (typeof window.parseArdupilotFirmwareVersion === "function") {
       window._telemetryFirmwareVersion = window.parseArdupilotFirmwareVersion(flight_sw_version);
@@ -768,20 +846,43 @@ function parseAutopilotVersion(payload) {
     const fwEl = document.getElementById("ov-fw-version");
     const hwEl = document.getElementById("ov-board-hardware");
     const idEl = document.getElementById("ov-device-id");
+    const fallbackFw = String(fallback?.firmwareText || "").trim();
+    const fallbackHw = String(fallback?.hardwareText || "").trim();
+    const fallbackId = String(fallback?.deviceId || "").trim();
+    const currentFw = String(fwEl?.textContent || "").trim();
+    const currentHw = String(hwEl?.textContent || "").trim();
+    const currentId = String(idEl?.textContent || "").trim();
+    const fallbackToCurrent = (cur) => {
+      if (!cur || /等待飞控上报/.test(cur) || cur === "—") return "";
+      return cur;
+    };
+    const resolvedFw = hasVersionData ? firmwareText : (fallbackFw || fallbackToCurrent(currentFw));
+    const resolvedHw = hasBoardData ? hardwareText : (fallbackHw || fallbackToCurrent(currentHw));
+    const resolvedId = hasUidData ? uidText : (fallbackId || fallbackToCurrent(currentId));
     if (fwEl) {
-      fwEl.textContent = firmwareText;
-      fwEl.className = "ok";
-      fwEl.title = `flight_sw=${flight_sw_version} middleware=${middleware_sw_version} os=${os_sw_version}`;
+      if (resolvedFw) {
+        fwEl.textContent = resolvedFw;
+        fwEl.className = "ok";
+      }
+      fwEl.title = hasVersionData
+        ? `flight_sw=${flight_sw_version} middleware=${middleware_sw_version} os=${os_sw_version}`
+        : (fwEl.title || "来自 STATUSTEXT 回填");
     }
     if (hwEl) {
-      hwEl.textContent = hardwareText;
-      hwEl.className = "ok";
-      hwEl.title = rawName ? String(rawName) : `board_version=0x${board_version.toString(16)}`;
+      if (resolvedHw) {
+        hwEl.textContent = resolvedHw;
+        hwEl.className = "ok";
+      }
+      hwEl.title = hasBoardData
+        ? (rawName ? String(rawName) : `board_version=0x${board_version.toString(16)}`)
+        : (hwEl.title || "来自 STATUSTEXT 回填");
     }
     if (idEl) {
-      idEl.textContent = uidText || "—";
-      idEl.className = uidText ? "ok" : "muted";
-      idEl.title = uidText ? "uid2 优先，否则 64-bit uid" : "飞控未提供 UID";
+      idEl.textContent = resolvedId || "—";
+      idEl.className = resolvedId ? "ok" : "muted";
+      idEl.title = hasUidData
+        ? "uid2 优先，否则 64-bit uid"
+        : (resolvedId ? "来自 STATUSTEXT 回填" : "飞控未提供 UID");
     }
     if (typeof log === "function") {
       log(`✅ 概览字段已更新：固件 → ${firmwareText} / 硬件 → ${hardwareText} / UID → ${uidText || "—"}`, "debug");

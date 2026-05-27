@@ -1536,6 +1536,9 @@
   function updateOverview() {
     const el = document.getElementById("ov-airframe-type");
     if (!el) return;
+    const st = (window._gcsConnState || "").toLowerCase();
+    // 概览卡片显示的是飞控实时状态；连接后不应被向导草稿覆盖（否则会与 overview-preflight 抢写闪跳）。
+    if (st === "connected") return;
     const path = buildPathParts();
     if (!state.frame_type) {
       el.textContent = "未配置";

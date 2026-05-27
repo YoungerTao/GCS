@@ -1096,12 +1096,6 @@
                 </div>
               </div>
             </div>
-            <div class="sc-table-wrap sc-dc-log-wrap">
-              <table class="sc-dsdl-table">
-                <thead><tr><th>${dcText("Node", "节点")}</th><th>${dcText("Level", "级别")}</th><th>${dcText("Source", "来源")}</th><th>${dcText("Text", "内容")}</th></tr></thead>
-                <tbody id="sc-dc-log-body"></tbody>
-              </table>
-            </div>
           </div>
 
         </div>

@@ -354,12 +354,24 @@
     const stillWaiting = (el) =>
       el && String(el.textContent || "").includes("等待飞控上报");
 
-    // ArduCopter V4.6.3 ( 92b0cd78 ) 等
+    const updateOverviewFallback = (patch) => {
+      const prev = window._overviewVersionFallback || {};
+      window._overviewVersionFallback = {
+        firmwareText: typeof prev.firmwareText === "string" ? prev.firmwareText : "",
+        hardwareText: typeof prev.hardwareText === "string" ? prev.hardwareText : "",
+        deviceId: typeof prev.deviceId === "string" ? prev.deviceId : "",
+        source: "statustext",
+        updatedAt: Date.now(),
+        ...patch,
+      };
+    };
+
+    // ArduCopter/ArduPlane 版本行；允许前后噪声与括号内 hash
     const fwM = line.match(
-      /^\s*(Ardu(?:Copter|Plane|Rover|Sub)|AntennaTracker)\s+V[\d.]+\s*(?:\([^)]*\))?\s*$/i,
+      /(Ardu(?:Copter|Plane|Rover|Sub)|AntennaTracker)\s+V[\d.]+(?:\s*\([^)]*\))?/i,
     );
     if (fwM && fwEl) {
-      let show = line;
+      let show = String(fwM[0] || "").trim() || line;
       const ch = window._statustextChibiosHash;
       if (ch && !show.includes(ch)) {
         show = `${show.trim()} · ChibiOS ${ch}`;
@@ -367,11 +379,12 @@
       fwEl.textContent = show;
       fwEl.className = "ok";
       fwEl.title = "来自飞控 STATUSTEXT 启动横幅（与消息栏一致）";
+      updateOverviewFallback({ firmwareText: show });
       return;
     }
 
     // ChibiOS : 88b84600 — 合并到固件行（若已有 Ardu 行则追加）
-    const chibM = line.match(/^\s*ChibiOS\s*:\s*([0-9a-fA-F]+)\s*$/i);
+    const chibM = line.match(/ChibiOS\s*:\s*([0-9a-fA-F]+)/i);
     if (chibM && fwEl) {
       window._statustextChibiosHash = chibM[1];
       const tail = `ChibiOS ${chibM[1]}`;
@@ -387,12 +400,13 @@
       }
       fwEl.className = "ok";
       fwEl.title = (fwEl.title || "") + (fwEl.title ? "；" : "") + "STATUSTEXT OS 信息";
+      updateOverviewFallback({ firmwareText: String(fwEl.textContent || "").trim() });
       return;
     }
 
-    // 板型 + 十进制 UID 段：如 CUAV-X7 00440049 35325105 31373432
+    // 板型 + 设备号段：如 CUAV-X7 004B002F 3432510F 33303438（常含十六进制字符）
     const brdM = line.match(
-      /^([A-Za-z][A-Za-z0-9_+\-/]{1,40})\s+((?:\d{4,}\s*)+)\s*$/,
+      /^([A-Za-z][A-Za-z0-9_+\-/]{1,40})\s+((?:[0-9a-fA-F]{4,}\s*){2,})\s*$/,
     );
     if (
       brdM &&
@@ -408,6 +422,10 @@
       idEl.textContent = brdM[2].trim().replace(/\s+/g, " ");
       idEl.className = "ok";
       idEl.title = "来自飞控 STATUSTEXT（与消息栏设备号段一致）";
+      updateOverviewFallback({
+        hardwareText: String(hwEl.textContent || "").trim(),
+        deviceId: String(idEl.textContent || "").trim(),
+      });
     }
   }
 

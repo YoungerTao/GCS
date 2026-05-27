@@ -854,6 +854,9 @@ function schedulePostConnectMavlinkInfoRequests() {
           } else {
             if (typeof log === "function") {
               log("⚠️ 已重试 5 次仍未收到 #148，飞控可能不支持 MAV_CMD_REQUEST_MESSAGE", "debug");
+              if (window._lastAutopilotVersionRejectReason) {
+                log(`ℹ️ 最近一次 #148 未用于覆盖概览：${window._lastAutopilotVersionRejectReason}`, "debug");
+              }
             }
             // 不改动占位文本，让用户手动点"刷新"
           }
