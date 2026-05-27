@@ -3493,6 +3493,7 @@ body.param-loading {
 
 .afw-content {
   min-height: 0;
+  min-width: 0;
   padding: 18px;
   display: flex;
   flex-direction: column;
@@ -3540,7 +3541,9 @@ body.param-loading {
 .afw-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .afw-grid {
@@ -4070,6 +4073,106 @@ body.param-loading {
   white-space: pre-wrap;
 }
 
+.afw-flying-shell {
+  grid-template-columns: minmax(0, 1.26fr) minmax(500px, 1.14fr);
+  gap: 12px;
+  max-width: 100%;
+}
+
+.afw-flying-shell .afw-conventional-side {
+  gap: 10px;
+}
+
+.afw-flying-shell .afw-conventional-preview {
+  position: static;
+  overflow: hidden;
+}
+
+.afw-flying-shell .afw-surface-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.afw-flying-shell .afw-servo-row {
+  grid-template-columns: minmax(0, 1fr) 88px auto;
+}
+
+.afw-flying-shell .afw-servo-select {
+  width: 88px;
+  min-width: 88px;
+}
+
+.afw-flying-shell .afw-surface-section,
+.afw-flying-shell .afw-conventional-preview {
+  padding: 14px;
+}
+
+.afw-flying-shell .afw-breadcrumb-row-wide {
+  margin-top: 6px;
+}
+
+.afw-flying-shell + .afw-breadcrumb-row > span {
+  display: none;
+}
+
+.afw-flying-mix-card {
+  z-index: 0;
+}
+
+.afw-wing-mix-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.afw-wing-mix-field {
+  display: grid;
+  gap: 6px;
+  color: var(--afw-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.afw-wing-mix-field input {
+  border: 1px solid #435062;
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: #111a24;
+  color: #ecf3ff;
+  width: 50%;
+  min-width: 120px;
+  max-width: 180px;
+}
+
+.afw-wing-mix-help {
+  margin: 10px 0 0;
+  color: var(--afw-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.afw-wing-mix-explain {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(142, 160, 184, 0.24);
+  color: var(--afw-muted);
+  font-size: 11px;
+  line-height: 1.42;
+}
+
+.afw-wing-mix-explain p {
+  margin: 0;
+}
+
+.afw-wing-mix-explain p + p {
+  margin-top: 6px;
+}
+
+.afw-wing-mix-explain strong {
+  color: var(--afw-text);
+}
+
 .afw-breadcrumb-row {
   display: flex;
   flex-direction: column;
@@ -4112,6 +4215,21 @@ body.param-loading {
   }
 }
 
+@media (max-width: 1280px) {
+  .afw-flying-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "surfaces"
+      "side";
+  }
+}
+
+@media (max-width: 980px) {
+  .afw-flying-shell .afw-surface-list {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .afw-surface-head,
   .afw-breadcrumb-row {
@@ -4125,5 +4243,9 @@ body.param-loading {
 
   .afw-inline-next {
     width: 100%;
+  }
+
+  .afw-wing-mix-grid {
+    grid-template-columns: 1fr;
   }
 }

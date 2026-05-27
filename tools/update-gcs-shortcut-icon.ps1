@@ -9,6 +9,11 @@ if (-not (Test-Path -LiteralPath $Launcher)) {
 if (-not (Test-Path -LiteralPath $IconIco)) {
     throw "Icon not found. Run: python tools\build-gcs-icon.py"
 }
+$icoBytes = [System.IO.File]::ReadAllBytes($IconIco)
+$icoCount = [BitConverter]::ToUInt16($icoBytes, 4)
+if ($icoCount -ne 1) {
+    throw "ICO must be a single 256x256 image (found $icoCount sizes). Run: python tools\build-gcs-icon.py"
+}
 
 function New-GcsShortcut {
     param([string]$ShortcutPath)
@@ -34,3 +39,9 @@ New-GcsShortcut (Join-Path $Desktop "GCS.lnk")
 New-GcsShortcut (Join-Path $StartMenuDir "GCS.lnk")
 
 Write-Host "Shortcuts updated with dog icon: $IconIco"
+
+$ie4u = Join-Path $env:SystemRoot "System32\ie4uinit.exe"
+if (Test-Path -LiteralPath $ie4u) {
+    Start-Process -FilePath $ie4u -ArgumentList "-show" -Wait -NoNewWindow -ErrorAction SilentlyContinue | Out-Null
+}
+Write-Host "If the icon still looks tiny/blurry, refresh the desktop (F5) or sign out and back in."

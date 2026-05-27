@@ -21,6 +21,8 @@
   const drafts = new Map();
   /** 筛选输入防抖定时器 */
   let filterDebounce = null;
+  /** 当前展开说明的参数名（一次仅展开一行） */
+  let expandedParamKey = null;
 
   /** 串口已连接且可写 */
   function fcConnected() {
@@ -130,6 +132,26 @@
     return document.getElementById(id);
   }
 
+  function toggleRowExpanded(mapKey) {
+    expandedParamKey = expandedParamKey === mapKey ? null : mapKey;
+    applyExpandedState();
+  }
+
+  function applyExpandedState() {
+    const tbody = el("cfg-ap-tbody");
+    if (!tbody) return;
+    const rows = tbody.querySelectorAll("tr[data-p]");
+    rows.forEach((tr) => {
+      const active = !!expandedParamKey && tr.dataset.p === expandedParamKey;
+      tr.classList.toggle("cfg-ap-row-expanded", active);
+      const desc = tr.querySelector(".cfg-ap-desc-text");
+      if (desc && !desc.classList.contains("cfg-ap-desc-empty")) {
+        desc.setAttribute("aria-expanded", active ? "true" : "false");
+        desc.title = active ? "" : "点击展开说明";
+      }
+    });
+  }
+
   /** 更新状态栏 HTML 与写入按钮禁用态 */
   function updateStatus() {
     const st = el("cfg-ap-status");
@@ -182,6 +204,7 @@
       const hit = !q || name.includes(q) || desc.includes(q);
       tr.style.display = hit ? "" : "none";
     });
+    applyExpandedState();
   }
 
   /** 根据 window.params 重建表格（取消未决的节流重建） */
@@ -259,7 +282,25 @@
 
       const tdDesc = document.createElement("td");
       tdDesc.className = "cfg-ap-desc";
-      tdDesc.textContent = descText.trim() || "—";
+      const descBody = document.createElement("div");
+      descBody.className = "cfg-ap-desc-text";
+      const descPlain = descText.trim();
+      descBody.textContent = descPlain || "—";
+      if (descPlain) {
+        descBody.tabIndex = 0;
+        descBody.setAttribute("role", "button");
+        descBody.setAttribute("aria-expanded", "false");
+        descBody.addEventListener("click", () => toggleRowExpanded(k));
+        descBody.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            toggleRowExpanded(k);
+          }
+        });
+      } else {
+        descBody.classList.add("cfg-ap-desc-empty");
+      }
+      tdDesc.appendChild(descBody);
 
       tr.appendChild(tdName);
       tr.appendChild(tdVal);
@@ -270,6 +311,7 @@
       const cmpDiff = compareMap && compareMap.has(keyU) && !valuesClose(compareMap.get(keyU), fc);
       if (dirty) tr.classList.add("cfg-ap-row-dirty");
       if (cmpDiff) tr.classList.add("cfg-ap-row-diff");
+      if (expandedParamKey === k) tr.classList.add("cfg-ap-row-expanded");
 
       frag.appendChild(tr);
     }
@@ -277,6 +319,7 @@
     tbody.innerHTML = "";
     tbody.appendChild(frag);
     applyRowFilter();
+    applyExpandedState();
     updateStatus();
   }
 

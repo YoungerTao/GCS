@@ -44,6 +44,34 @@
       artSrc: "assets/airframe/vtol-quadplane.png",
       artAlt: "垂起固定翼示意图",
     },
+    {
+      key: "landing_gear",
+      title: "起落架 Landing Gear",
+      required: false,
+      icon: "LG",
+      options: [
+        { value: "none", label: "无起落架" },
+        { value: "single", label: "单起落架" },
+      ],
+      rowsByOption: {
+        none: [],
+        single: [{ key: "landing-gear", label: "起落架", func: 29, comment: "起落架" }],
+      },
+    },
+    {
+      key: "landing_gear",
+      title: "起落架 Landing Gear",
+      required: false,
+      icon: "LG",
+      options: [
+        { value: "none", label: "无起落架" },
+        { value: "single", label: "单起落架" },
+      ],
+      rowsByOption: {
+        none: [],
+        single: [{ key: "landing-gear", label: "起落架", func: 29, comment: "起落架" }],
+      },
+    },
   ];
 
   const VTOL_TYPE_CARDS = [
@@ -143,6 +171,16 @@
       "elevator-single": "SERVO1",
       "throttle-single": "SERVO2",
     },
+  };
+
+  const FLYING_WING_DEFAULTS = {
+    elevon: "dual",
+    throttle: "single",
+    rudder: "none",
+    landing_gear: "none",
+    mixing_gain: 0.5,
+    mixing_offset: 0,
+    servos: {},
   };
 
   const CONVENTIONAL_SECTIONS = [
@@ -253,6 +291,67 @@
     },
   ];
 
+  const FLYING_WING_SECTIONS = [
+    {
+      key: "elevon",
+      title: "Elevon 混控面",
+      required: true,
+      icon: "EV",
+      options: [{ value: "dual", label: "双 Elevon" }],
+      rowsByOption: {
+        dual: [
+          { key: "elevon-left", label: "左 Elevon", func: 77, comment: "左 Elevon" },
+          { key: "elevon-right", label: "右 Elevon", func: 78, comment: "右 Elevon" },
+        ],
+      },
+    },
+    {
+      key: "throttle",
+      title: "油门 Throttle",
+      required: true,
+      icon: "TH",
+      options: [
+        { value: "single", label: "单电机" },
+        { value: "dual", label: "双电机" },
+      ],
+      rowsByOption: {
+        single: [{ key: "throttle-single", label: "电机", func: 70, comment: "电机" }],
+        dual: [
+          { key: "throttle-left", label: "左电机", func: 73, comment: "左电机" },
+          { key: "throttle-right", label: "右电机", func: 74, comment: "右电机" },
+        ],
+      },
+    },
+    {
+      key: "rudder",
+      title: "方向舵 Rudder",
+      required: false,
+      icon: "RU",
+      options: [
+        { value: "none", label: "无方向舵" },
+        { value: "single", label: "单方向舵" },
+      ],
+      rowsByOption: {
+        none: [],
+        single: [{ key: "rudder-single", label: "方向舵", func: 21, comment: "方向舵" }],
+      },
+    },
+    {
+      key: "landing_gear",
+      title: "起落架 Landing Gear",
+      required: false,
+      icon: "LG",
+      options: [
+        { value: "none", label: "无起落架" },
+        { value: "single", label: "单起落架" },
+      ],
+      rowsByOption: {
+        none: [],
+        single: [{ key: "landing-gear", label: "起落架", func: 29, comment: "起落架" }],
+      },
+    },
+  ];
+
   const SERVO_OPTIONS = Array.from({ length: 16 }, (_, index) => `SERVO${index + 1}`);
 
   const state = {
@@ -269,8 +368,11 @@
     writeProgress: [],
     lastWriteFailed: false,
     conventional: createConventionalState(),
+    flyingWing: createFlyingWingState(),
     conventionalDirty: false,
     conventionalSyncSignature: "",
+    flyingWingDirty: false,
+    flyingWingSyncSignature: "",
     servoMenuOpen: false,
     pendingExternalRender: false,
   };
@@ -287,6 +389,18 @@
     };
   }
 
+  function createFlyingWingState() {
+    return {
+      elevon: FLYING_WING_DEFAULTS.elevon,
+      throttle: FLYING_WING_DEFAULTS.throttle,
+      rudder: FLYING_WING_DEFAULTS.rudder,
+      landing_gear: FLYING_WING_DEFAULTS.landing_gear,
+      mixing_gain: FLYING_WING_DEFAULTS.mixing_gain,
+      mixing_offset: FLYING_WING_DEFAULTS.mixing_offset,
+      servos: { ...FLYING_WING_DEFAULTS.servos },
+    };
+  }
+
   function root() {
     return document.getElementById(ROOT_ID);
   }
@@ -297,6 +411,16 @@
     render();
   }
 
+  function refreshConnectionBadge() {
+    const shell = root();
+    if (!shell) return;
+    const conn = shell.querySelector(".afw-conn");
+    if (!conn) return;
+    state.fc_connected = isConnected();
+    conn.className = `afw-conn ${state.fc_connected ? "online" : "offline"}`;
+    conn.textContent = state.fc_connected ? "椋炴帶鍦ㄧ嚎" : "椋炴帶绂荤嚎";
+  }
+
   function requestExternalRender() {
     if (state.writing) return;
     if (state.servoMenuOpen) {
@@ -304,6 +428,25 @@
       return;
     }
     render();
+  }
+
+  function requestHeartbeatRefresh() {
+    if (state.writing) return;
+    if (state.frame_type === FRAME_TYPE.FLYING_WING && state.step === 2) {
+      refreshConnectionBadge();
+      return;
+    }
+    requestExternalRender();
+  }
+
+  function refreshConnectionBadge() {
+    const shell = root();
+    if (!shell) return;
+    const conn = shell.querySelector(".afw-conn");
+    if (!conn) return;
+    state.fc_connected = isConnected();
+    conn.className = `afw-conn ${state.fc_connected ? "online" : "offline"}`;
+    conn.textContent = state.fc_connected ? "\u98de\u63a7\u5728\u7ebf" : "\u98de\u63a7\u79bb\u7ebf";
   }
 
   function isConnected() {
@@ -334,12 +477,15 @@
   function resetForFrameType(frameType) {
     if (frameType === FRAME_TYPE.CONVENTIONAL) {
       state.conventional = createConventionalState();
+      state.flyingWing = createFlyingWingState();
       resetVtolSelections();
     } else if (frameType === FRAME_TYPE.FLYING_WING) {
       resetVtolSelections();
       state.conventional = createConventionalState();
+      state.flyingWing = createFlyingWingState();
     } else if (frameType === FRAME_TYPE.VTOL) {
       state.conventional = createConventionalState();
+      state.flyingWing = createFlyingWingState();
       resetVtolSelections();
     }
   }
@@ -489,6 +635,78 @@
     state.conventionalSyncSignature = signature;
   }
 
+  function syncFlyingWingFromFlightController(force) {
+    const signature = conventionalSignatureFromParams();
+    if (!force && state.flyingWingDirty) return;
+    if (!force && signature && signature === state.flyingWingSyncSignature) return;
+
+    const next = createFlyingWingState();
+    const pmap = getParamMap();
+    if (!pmap) {
+      state.flyingWing = next;
+      state.flyingWingDirty = false;
+      state.flyingWingSyncSignature = "";
+      return;
+    }
+
+    const funcMap = new Map();
+    pmap.forEach((rawValue, key) => {
+      const match = key.match(/^SERVO(\d+)_FUNCTION$/);
+      if (!match) return;
+      const value = Math.round(Number(rawValue));
+      if (!Number.isFinite(value)) return;
+      const servoName = `SERVO${match[1]}`;
+      if (!funcMap.has(value)) funcMap.set(value, []);
+      funcMap.get(value).push(servoName);
+    });
+    funcMap.forEach((list) => list.sort(servoSort));
+
+    const elevonLeft = consumeServo(funcMap, 77);
+    const elevonRight = consumeServo(funcMap, 78);
+    if (elevonLeft) next.servos["elevon-left"] = elevonLeft;
+    if (elevonRight) next.servos["elevon-right"] = elevonRight;
+
+    const throttleSingle = consumeServo(funcMap, 70);
+    const throttleLeft = consumeServo(funcMap, 73);
+    const throttleRight = consumeServo(funcMap, 74);
+    if (throttleLeft && throttleRight) {
+      next.throttle = "dual";
+      next.servos["throttle-left"] = throttleLeft;
+      next.servos["throttle-right"] = throttleRight;
+      delete next.servos["throttle-single"];
+    } else if (throttleSingle) {
+      next.throttle = "single";
+      next.servos["throttle-single"] = throttleSingle;
+      delete next.servos["throttle-left"];
+      delete next.servos["throttle-right"];
+    }
+
+    const rudderSingle = consumeServo(funcMap, 21);
+    if (rudderSingle) {
+      next.rudder = "single";
+      next.servos["rudder-single"] = rudderSingle;
+    } else {
+      delete next.servos["rudder-single"];
+    }
+
+    const landingGear = consumeServo(funcMap, 29);
+    if (landingGear) {
+      next.landing_gear = "single";
+      next.servos["landing-gear"] = landingGear;
+    } else {
+      delete next.servos["landing-gear"];
+    }
+
+    const mixingGain = Number(pmap.get("MIXING_GAIN"));
+    if (Number.isFinite(mixingGain)) next.mixing_gain = mixingGain;
+    const mixingOffset = Number(pmap.get("MIXING_OFFSET"));
+    if (Number.isFinite(mixingOffset)) next.mixing_offset = Math.round(mixingOffset);
+
+    state.flyingWing = next;
+    state.flyingWingDirty = false;
+    state.flyingWingSyncSignature = signature;
+  }
+
   function getConventionalSection(sectionKey) {
     return CONVENTIONAL_SECTIONS.find((section) => section.key === sectionKey) || null;
   }
@@ -508,7 +726,10 @@
     if (frameType === FRAME_TYPE.CONVENTIONAL && previousFrameType !== FRAME_TYPE.CONVENTIONAL) {
       syncConventionalFromFlightController(true);
     }
-    if (frameType === FRAME_TYPE.CONVENTIONAL || frameType === FRAME_TYPE.VTOL) {
+    if (frameType === FRAME_TYPE.FLYING_WING && previousFrameType !== FRAME_TYPE.FLYING_WING) {
+      syncFlyingWingFromFlightController(true);
+    }
+    if (frameType === FRAME_TYPE.CONVENTIONAL || frameType === FRAME_TYPE.FLYING_WING || frameType === FRAME_TYPE.VTOL) {
       state.step = 2;
     } else {
       state.step = 3;
@@ -607,6 +828,7 @@
     const parts = [];
     if (state.frame_type) parts.push(frameTypeLabel(state.frame_type));
     if (state.frame_type === FRAME_TYPE.CONVENTIONAL) parts.push("控制面配置");
+    if (state.frame_type === FRAME_TYPE.FLYING_WING) parts.push("飞翼配置");
     if (state.vtol_type) parts.push(vtolTypeLabel(state.vtol_type));
     if (state.vtol_type === VTOL_TYPE.TAILSITTER && state.q_tailsit_enable != null) {
       parts.push(tailsitterLabel(state.q_tailsit_enable));
@@ -642,10 +864,89 @@
     return Boolean(state.conventional.elevator && state.conventional.throttle);
   }
 
+  function getFlyingWingSection(sectionKey) {
+    return FLYING_WING_SECTIONS.find((section) => section.key === sectionKey) || null;
+  }
+
+  function getFlyingWingRows(sectionKey, optionValue) {
+    const section = getFlyingWingSection(sectionKey);
+    if (!section) return [];
+    return section.rowsByOption[optionValue] || [];
+  }
+
+  function setFlyingWingOption(sectionKey, optionValue) {
+    const previousRows = getFlyingWingRows(sectionKey, state.flyingWing[sectionKey]);
+    previousRows.forEach((row) => {
+      delete state.flyingWing.servos[row.key];
+    });
+
+    state.flyingWing[sectionKey] = optionValue;
+    const nextRows = getFlyingWingRows(sectionKey, optionValue);
+    nextRows.forEach((row, index) => {
+      const fallback =
+        SERVO_OPTIONS.find((servo) => !Object.values(state.flyingWing.servos).includes(servo)) ||
+        SERVO_OPTIONS[index] ||
+        "SERVO1";
+      state.flyingWing.servos[row.key] = fallback;
+    });
+    state.flyingWingDirty = true;
+    render();
+  }
+
+  function setFlyingWingServo(rowKey, servoName) {
+    if (!servoName) {
+      delete state.flyingWing.servos[rowKey];
+    } else {
+      state.flyingWing.servos[rowKey] = servoName;
+    }
+    state.flyingWingDirty = true;
+    render();
+  }
+
+  function setFlyingWingMixingValue(key, rawValue) {
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) return;
+    if (key === "mixing_gain") {
+      state.flyingWing.mixing_gain = Math.min(1.2, Math.max(0.5, numeric));
+    } else if (key === "mixing_offset") {
+      state.flyingWing.mixing_offset = Math.min(1000, Math.max(-1000, Math.round(numeric)));
+    }
+    state.flyingWingDirty = true;
+    render();
+  }
+
+  function getFlyingWingConflictList() {
+    const servoOwners = new Map();
+    FLYING_WING_SECTIONS.forEach((section) => {
+      const rows = getFlyingWingRows(section.key, state.flyingWing[section.key]);
+      rows.forEach((row) => {
+        const servo = state.flyingWing.servos[row.key];
+        if (!servo) return;
+        if (!servoOwners.has(servo)) servoOwners.set(servo, []);
+        servoOwners.get(servo).push(row.comment);
+      });
+    });
+
+    return [...servoOwners.entries()]
+      .filter(([, owners]) => owners.length > 1)
+      .map(([servo, owners]) => ({ servo, owners }));
+  }
+
+  function isFlyingWingConfigured() {
+    return Boolean(
+      state.flyingWing.servos["elevon-left"] &&
+      state.flyingWing.servos["elevon-right"] &&
+      (state.flyingWing.throttle === "dual"
+        ? state.flyingWing.servos["throttle-left"] && state.flyingWing.servos["throttle-right"]
+        : state.flyingWing.servos["throttle-single"])
+    );
+  }
+
   function isStepComplete(step) {
     if (step === 1) return !!state.frame_type;
     if (step === 2) {
       if (state.frame_type === FRAME_TYPE.CONVENTIONAL) return isConventionalConfigured();
+      if (state.frame_type === FRAME_TYPE.FLYING_WING) return isFlyingWingConfigured();
       if (state.frame_type !== FRAME_TYPE.VTOL) return true;
       if (!state.vtol_type) return false;
       if (state.vtol_type === VTOL_TYPE.TAILSITTER) return state.q_tailsit_enable != null;
@@ -660,10 +961,15 @@
 
   function canEnterStep(step) {
     if (step === 1) return true;
-    if (step === 2) return state.frame_type === FRAME_TYPE.CONVENTIONAL || state.frame_type === FRAME_TYPE.VTOL;
+    if (step === 2) {
+      return (
+        state.frame_type === FRAME_TYPE.CONVENTIONAL ||
+        state.frame_type === FRAME_TYPE.FLYING_WING ||
+        state.frame_type === FRAME_TYPE.VTOL
+      );
+    }
     if (step === 3) {
       if (!state.frame_type) return false;
-      if (state.frame_type === FRAME_TYPE.FLYING_WING) return true;
       return isStepComplete(2);
     }
     if (step === 4) return isStepComplete(3);
@@ -693,6 +999,17 @@
 
     if (state.frame_type === FRAME_TYPE.FLYING_WING) {
       params.Q_ENABLE = 0;
+      params.MIXING_GAIN = Number(state.flyingWing.mixing_gain);
+      params.MIXING_OFFSET = Number(state.flyingWing.mixing_offset);
+      FLYING_WING_SECTIONS.forEach((section) => {
+        const rows = getFlyingWingRows(section.key, state.flyingWing[section.key]);
+        rows.forEach((row) => {
+          const servo = state.flyingWing.servos[row.key];
+          if (servo) {
+            params[`${servo}_FUNCTION`] = row.func;
+          }
+        });
+      });
       return params;
     }
 
@@ -718,6 +1035,8 @@
 
   function stepTitle() {
     if (state.step === 1) return "选择机型大类";
+    if (state.step === 2 && state.frame_type === FRAME_TYPE.FLYING_WING) return "飞翼 / 三角翼 — 控制面配置";
+    if (state.step === 1) return "选择机型大类";
     if (state.step === 2 && state.frame_type === FRAME_TYPE.CONVENTIONAL) return "常规固定翼 — 控制面配置";
     if (state.step === 2 && !state.vtol_type) return "选择 VTOL 子类型";
     if (state.step === 2 && state.vtol_type === VTOL_TYPE.TAILSITTER) return "选择 Tailsitter 控制方式";
@@ -727,6 +1046,8 @@
   }
 
   function stepHint() {
+    if (state.step === 1) return "常规固定翼、飞翼都会进入控制面配置；VTOL 会进入第二步。";
+    if (state.step === 2 && state.frame_type === FRAME_TYPE.FLYING_WING) return "配置左右 Elevon、油门与可选方向舵，并按飞翼需求调整 MIXING_GAIN / MIXING_OFFSET。";
     if (state.step === 1) return "常规固定翼会进入控制面配置；Flying Wing 当前保留直接预览；VTOL 会进入第二步。";
     if (state.step === 2 && state.frame_type === FRAME_TYPE.CONVENTIONAL) return "为每个控制面选择类型并分配 SERVO1 ~ SERVO16，底部会实时检查通道冲突。";
     if (state.step === 2 && !state.vtol_type) return "TailSitter 会进入控制方式选择；QuadPlane 和 TiltRotor 需要继续配置 Q_FRAME。";
@@ -940,6 +1261,112 @@
     `;
   }
 
+  function renderFlyingWingServoRow(row) {
+    const selectedServo = state.flyingWing.servos[row.key] || "";
+    return `
+      <div class="afw-servo-row">
+        <span class="afw-servo-label">${row.label}</span>
+        <select class="afw-servo-select" data-flying-servo-key="${row.key}">
+          <option value="" ${selectedServo ? "" : "selected"}>NONE</option>
+          ${SERVO_OPTIONS.map((servo) => `<option value="${servo}" ${selectedServo === servo ? "selected" : ""}>${servo}</option>`).join("")}
+        </select>
+        <span class="afw-func-badge">function=${row.func}</span>
+      </div>
+    `;
+  }
+
+  function renderFlyingWingSection(section) {
+    const optionValue = state.flyingWing[section.key];
+    const activeRows = getFlyingWingRows(section.key, optionValue);
+    const configured = activeRows.length > 0 && activeRows.every((row) => !!state.flyingWing.servos[row.key]);
+
+    return `
+      <section class="afw-surface-section ${configured ? "is-configured" : ""}">
+        <div class="afw-surface-head">
+          <div class="afw-surface-title">
+            <span class="afw-surface-icon">${section.icon}</span>
+            <strong>${section.title}</strong>
+          </div>
+          <div class="afw-surface-badges">
+            <span class="afw-badge ${section.required ? "is-required" : "is-optional"}">${section.required ? "必选" : "可选"}</span>
+            ${configured ? '<span class="afw-badge is-done">已配置</span>' : ""}
+          </div>
+        </div>
+        ${section.options.length > 1 ? `
+          <div class="afw-choice-row">
+            ${section.options.map((option) => `
+              <button type="button" class="afw-choice-btn ${optionValue === option.value ? "selected" : ""}" data-flying-option="${section.key}:${option.value}">
+                ${optionValue === option.value ? "✓" : ""}${option.label}
+              </button>
+            `).join("")}
+          </div>
+        ` : ""}
+        <div class="afw-surface-divider"></div>
+        <div class="afw-servo-list">
+          ${activeRows.map(renderFlyingWingServoRow).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderFlyingWingMixingCard() {
+    return `
+      <section class="afw-conventional-preview afw-flying-mix-card">
+        <strong>飞翼混控</strong>
+        <div class="afw-wing-mix-grid">
+          <label class="afw-wing-mix-field">
+            <span>MIXING_GAIN</span>
+            <input type="number" step="0.01" min="0.5" max="1.2" value="${Number(state.flyingWing.mixing_gain).toFixed(2)}" data-flying-mix="mixing_gain">
+          </label>
+          <label class="afw-wing-mix-field">
+            <span>MIXING_OFFSET</span>
+            <input type="number" step="1" min="-1000" max="1000" value="${Math.round(Number(state.flyingWing.mixing_offset) || 0)}" data-flying-mix="mixing_offset">
+          </label>
+        </div>
+        <p class="afw-wing-mix-help">默认推荐 MIXING_GAIN=0.50、MIXING_OFFSET=0；需要更灵敏副翼时再微调。</p>
+      </section>
+    `;
+  }
+
+  function renderFlyingWingParamPreview() {
+    const params = generateParams();
+    const entries = Object.entries(params).sort(([a], [b]) => {
+      if (a === "Q_ENABLE") return -1;
+      if (b === "Q_ENABLE") return 1;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+    if (!entries.length) return "等待配置...";
+    return entries.map(([key, value]) => `${key} = ${value}`).join("\n");
+  }
+
+  function renderFlyingWingConfig() {
+    const conflicts = getFlyingWingConflictList();
+    const canProceed = isStepComplete(2);
+    return `
+      <div class="afw-conventional-shell afw-flying-shell">
+        <div class="afw-surface-list">
+          ${FLYING_WING_SECTIONS.map(renderFlyingWingSection).join("")}
+        </div>
+        <div class="afw-conventional-side">
+          ${conflicts.length ? `
+            <div class="afw-conflict-bar">
+              ${conflicts.map((conflict) => `通道冲突：${conflict.servo} 被 ${conflict.owners.join(" 和 ")} 同时使用`).join("<br>")}
+            </div>
+          ` : ""}
+          ${renderFlyingWingMixingCard()}
+          <div class="afw-conventional-preview">
+            <strong>参数预览稿</strong>
+            <pre>${renderFlyingWingParamPreview()}</pre>
+          </div>
+        </div>
+      </div>
+      <div class="afw-breadcrumb-row afw-breadcrumb-row-wide">
+        <span>${buildPathParts().join(" > ") || "飞翼 / 三角翼 > 飞翼配置"}</span>
+        <button type="button" class="afw-primary-btn afw-inline-next" id="afw-flying-wing-next-btn">下一步：参数预览</button>
+      </div>
+    `;
+  }
+
   function renderPreviewRows() {
     const params = generateParams();
     return Object.entries(params)
@@ -1008,6 +1435,10 @@
       return renderConventionalConfig();
     }
 
+    if (state.step === 2 && state.frame_type === FRAME_TYPE.FLYING_WING) {
+      return renderFlyingWingConfig();
+    }
+
     if (state.step === 2 && !state.vtol_type) {
       return `<div class="afw-grid afw-grid-3">${renderVtolTypeCards()}</div>`;
     }
@@ -1048,14 +1479,27 @@
 
   function navigationState() {
     let canGoPrev = state.step > 1;
+    if (state.writing) canGoPrev = false;
+    if (state.step === 1) {
+      return { canGoPrev, canGoNext: !!state.frame_type, nextLabel: "进入 Step 2" };
+    }
+    if (state.step === 2 && state.frame_type === FRAME_TYPE.FLYING_WING) {
+      return { canGoPrev, canGoNext: false, nextLabel: "进入预览" };
+    }
+    canGoPrev = state.step > 1;
     let canGoNext = false;
     let nextLabel = "下一步";
 
     if (state.step === 1) {
       canGoNext = !!state.frame_type;
+      nextLabel = "进入 Step 2";
       nextLabel = state.frame_type === FRAME_TYPE.FLYING_WING ? "进入预览" : "进入 Step 2";
     } else if (state.step === 2) {
       canGoNext = isStepComplete(2) && state.frame_type !== FRAME_TYPE.CONVENTIONAL;
+      if (state.frame_type === FRAME_TYPE.FLYING_WING) {
+        canGoNext = false;
+      }
+      nextLabel = "进入预览";
       nextLabel = "进入预览";
     }
 
@@ -1105,8 +1549,13 @@
   }
 
   function gotoNextStep() {
+    if (state.step === 1 && state.frame_type === FRAME_TYPE.FLYING_WING) {
+      state.step = 2;
+      render();
+      return;
+    }
     if (state.step === 1 && state.frame_type) {
-      state.step = state.frame_type === FRAME_TYPE.FLYING_WING ? 3 : 2;
+      state.step = 2;
     } else if (state.step === 2 && isStepComplete(2)) {
       state.step = 3;
     }
@@ -1114,10 +1563,15 @@
   }
 
   function gotoPrevStep() {
+    if (state.step === 3 && state.frame_type === FRAME_TYPE.FLYING_WING) {
+      state.step = 2;
+      render();
+      return;
+    }
     if (state.step === 4) {
       state.step = 3;
     } else if (state.step === 3) {
-      state.step = state.frame_type === FRAME_TYPE.FLYING_WING ? 1 : 2;
+      state.step = 2;
     } else if (state.step === 2) {
       state.step = 1;
     }
@@ -1186,6 +1640,9 @@
       if (state.frame_type === FRAME_TYPE.CONVENTIONAL) {
         state.conventionalDirty = false;
         state.conventionalSyncSignature = conventionalSignatureFromParams();
+      } else if (state.frame_type === FRAME_TYPE.FLYING_WING) {
+        state.flyingWingDirty = false;
+        state.flyingWingSyncSignature = conventionalSignatureFromParams();
       }
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
@@ -1233,6 +1690,13 @@
       });
     });
 
+    shell.querySelectorAll("[data-flying-option]").forEach((node) => {
+      node.addEventListener("click", () => {
+        const [sectionKey, optionValue] = node.getAttribute("data-flying-option").split(":");
+        setFlyingWingOption(sectionKey, optionValue);
+      });
+    });
+
     shell.querySelectorAll("[data-servo-key]").forEach((node) => {
       node.addEventListener("focus", () => {
         state.servoMenuOpen = true;
@@ -1245,6 +1709,27 @@
         state.servoMenuOpen = false;
         setConventionalServo(node.getAttribute("data-servo-key"), node.value);
         window.setTimeout(() => flushDeferredRender(), 0);
+      });
+    });
+
+    shell.querySelectorAll("[data-flying-servo-key]").forEach((node) => {
+      node.addEventListener("focus", () => {
+        state.servoMenuOpen = true;
+      });
+      node.addEventListener("blur", () => {
+        state.servoMenuOpen = false;
+        window.setTimeout(() => flushDeferredRender(), 0);
+      });
+      node.addEventListener("change", () => {
+        state.servoMenuOpen = false;
+        setFlyingWingServo(node.getAttribute("data-flying-servo-key"), node.value);
+        window.setTimeout(() => flushDeferredRender(), 0);
+      });
+    });
+
+    shell.querySelectorAll("[data-flying-mix]").forEach((node) => {
+      node.addEventListener("change", () => {
+        setFlyingWingMixingValue(node.getAttribute("data-flying-mix"), node.value);
       });
     });
 
@@ -1261,8 +1746,28 @@
     shell.querySelector("#afw-prev-btn")?.addEventListener("click", gotoPrevStep);
     shell.querySelector("#afw-next-btn")?.addEventListener("click", gotoNextStep);
     shell.querySelector("#afw-conventional-next-btn")?.addEventListener("click", gotoNextStep);
+    shell.querySelector("#afw-flying-wing-next-btn")?.addEventListener("click", () => {
+      if (!isStepComplete(2)) {
+        window.alert("请先为飞翼必选控制面分配舵机，再进入参数预览。");
+        return;
+      }
+      gotoNextStep();
+    });
     shell.querySelector("#afw-preview-write-btn")?.addEventListener("click", openWriteStep);
     shell.querySelector("#afw-write-btn")?.addEventListener("click", writeConfig);
+  }
+
+  function enhanceFlyingWingMixHelp() {
+    const shell = root();
+    if (!shell || state.frame_type !== FRAME_TYPE.FLYING_WING || state.step !== 2) return;
+    const help = shell.querySelector(".afw-wing-mix-help");
+    if (!help || help.nextElementSibling?.classList.contains("afw-wing-mix-explain")) return;
+    help.insertAdjacentHTML("afterend", `
+      <div class="afw-wing-mix-explain">
+        <p><strong>MIXING_GAIN</strong>：控制 Elevon 对俯仰与横滚混控的总体响应强度。数值越大，综合动作越灵敏；如果飞机反应偏肉可以小幅增加，若动作过猛或容易抖动就回调。</p>
+        <p><strong>MIXING_OFFSET</strong>：给左右 Elevon 增加一个基准偏移量，用来修正中立位不齐、机械安装偏差，或巡航时需要轻微持续压舵的情况。通常保持 0，仅在确认机械微调不方便时再使用。</p>
+      </div>
+    `);
   }
 
   function render() {
@@ -1274,16 +1779,20 @@
     if (state.frame_type === FRAME_TYPE.CONVENTIONAL) {
       syncConventionalFromFlightController(false);
     }
+    if (state.frame_type === FRAME_TYPE.FLYING_WING) {
+      syncFlyingWingFromFlightController(false);
+    }
     shell.innerHTML = renderShell();
     const nextBody = shell.querySelector(".afw-body");
     if (nextBody) nextBody.scrollTop = preservedScrollTop;
+    enhanceFlyingWingMixHelp();
     attachEvents();
     updateOverview();
   }
 
   function bindGlobalEvents() {
     document.addEventListener("gcs-heartbeat", () => {
-      requestExternalRender();
+      requestHeartbeatRefresh();
     });
 
     document.addEventListener("gcs-airframe-params-changed", () => {

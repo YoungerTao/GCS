@@ -48,8 +48,27 @@ gcs-project/
 │       └── param-hints.json
 ├── assets/icons/              # SVG 图标
 ├── tools/com-bridge/          # 本地 COM 桥接 Python 服务
-└── translate_params.py        # 参数翻译脚本
+├── translate_params.py        # 参数翻译脚本（Google / MyMemory 机翻）
+└── translate_params_ai.py     # 参数翻译脚本（OpenAI AI 重译）
 ```
+
+## 参数说明翻译
+
+默认仓库里的 `translate_params.py` 走的是 Google / MyMemory 机翻，适合快速铺底，但术语质量一般。
+
+如果要重译参数说明，优先使用新的 AI 脚本：
+
+```bash
+set OPENAI_API_KEY=你的密钥
+python translate_params_ai.py --model gpt-5.4-mini --limit 200
+```
+
+说明：
+
+- 读取英文源库：`JS/data/apm-param-db.en.json`
+- 输出中文库：`JS/data/apm-param-db.json`
+- AI 缓存：`JS/data/apm-param-translate-cache.ai.json`
+- 默认会先备份当前输出库到：`JS/data/apm-param-db.pre-ai-backup.json`
 
 ## 启动（开发：Windows / macOS 相同）
 
@@ -107,7 +126,7 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 | `Start-GCS.bat` | Windows 调试，同 `GCS.cmd` |
 | `assets/gcs-dog.ico` | 桌面「GCS」快捷方式图标（狗） |
 | `tools/install-gcs-desktop.ps1` | 安装桌面「GCS」快捷方式（带狗图标） |
-| `tools/build-gcs-icon.py` | 从 `assets/gcs-dog.svg` 重新生成 `.ico` |
+| `tools/build-gcs-icon.py` | 从根目录 `dog1.png` 重新生成 `.ico`（去白边/棋盘格） |
 
 日常开发只用 Live Server，上述文件保留在仓库即可，不必运行。
 

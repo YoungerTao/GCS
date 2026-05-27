@@ -483,6 +483,64 @@ let mapInstance, mapMarker;
 let mapInfoDiv = null;
 let mapBootstrapped = false;
 let mapInitScheduled = false;
+let mapMarkerIconSignature = "";
+
+const MAP_MAV_TYPE_FIXED_WING = 1;
+const MAP_MAV_TYPE_VTOL_TYPES = new Set([19, 20, 21]);
+const MAP_MAV_TYPE_COPTER_TYPES = new Set([2, 3, 4, 7, 8, 9, 12, 13, 14, 15, 16, 17]);
+
+function detectMainMapVehicleKind() {
+  const mavType = Math.round(Number(window.fcMavType));
+  if (mavType === MAP_MAV_TYPE_FIXED_WING) return "plane";
+  if (MAP_MAV_TYPE_VTOL_TYPES.has(mavType)) return "vtol";
+  if (MAP_MAV_TYPE_COPTER_TYPES.has(mavType)) return "multirotor";
+
+  const params = window.params instanceof Map ? window.params : null;
+  const hasQFrame = !!(params && params.has("Q_FRAME_CLASS") && params.has("Q_FRAME_TYPE"));
+  const hasFrame = !!(params && params.has("FRAME_CLASS") && params.has("FRAME_TYPE"));
+  if (hasQFrame) return "vtol";
+  if (hasFrame) return "multirotor";
+
+  const fwText = String(document.getElementById("ov-fw-version")?.textContent || "").toLowerCase();
+  if (/vtol|quadplane/.test(fwText)) return "vtol";
+  if (/plane|arduplane/.test(fwText)) return "plane";
+  return "multirotor";
+}
+
+function mainMapVehicleMarkerSvg(kind) {
+  if (kind === "plane") {
+    return '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" d="M16 3 L20 14 L29 16 L20 18 L18 29 L16 24 L14 29 L12 18 L3 16 L12 14 Z"/></svg>';
+  }
+  if (kind === "vtol") {
+    return '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" d="M16 4 L19 13 L28 15 L19 17 L17 26 L16 22 L15 26 L13 17 L4 15 L13 13 Z"/><circle fill="currentColor" cx="8" cy="20" r="2.5"/><circle fill="currentColor" cx="24" cy="20" r="2.5"/></svg>';
+  }
+  return '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true"><circle fill="currentColor" cx="16" cy="16" r="3"/><rect fill="currentColor" x="3" y="14.5" width="26" height="3" rx="1.5"/><rect fill="currentColor" x="14.5" y="3" width="3" height="26" rx="1.5"/><circle fill="#0e141b" cx="6" cy="6" r="2.2"/><circle fill="#0e141b" cx="26" cy="6" r="2.2"/><circle fill="#0e141b" cx="6" cy="26" r="2.2"/><circle fill="#0e141b" cx="26" cy="26" r="2.2"/></svg>';
+}
+
+function createMainMapVehicleIcon(kind, headingDeg) {
+  const rotation = Number.isFinite(headingDeg) ? headingDeg : 0;
+  return L.divIcon({
+    className: "fp-vehicle-marker fp-vehicle-marker--" + kind,
+    html:
+      '<span class="fp-vehicle-marker-wrap" title="飞行器位置">' +
+      '<span class="fp-vehicle-marker-rot" style="transform:rotate(' + rotation.toFixed(1) + 'deg)">' +
+      mainMapVehicleMarkerSvg(kind) +
+      "</span>" +
+      "</span>",
+    iconSize: [40, 40],
+    iconAnchor: [20, 20]
+  });
+}
+
+function refreshMainMapMarkerIcon() {
+  if (!mapMarker || typeof L === "undefined") return;
+  const kind = detectMainMapVehicleKind();
+  const heading = normalizeHeadingDegrees(toDegrees(getSafe(window.yaw)));
+  const signature = kind + ":" + heading.toFixed(1);
+  if (signature === mapMarkerIconSignature) return;
+  mapMarkerIconSignature = signature;
+  mapMarker.setIcon(createMainMapVehicleIcon(kind, heading));
+}
 
 function initMap() {
   if (mapBootstrapped && mapInstance) {
@@ -510,7 +568,13 @@ function initMap() {
     window.addGcsMapBaseLayers(mapInstance);
   }
 
-  mapMarker = L.marker(center).addTo(mapInstance);
+  mapMarker = L.marker(center, {
+    icon: createMainMapVehicleIcon(
+      detectMainMapVehicleKind(),
+      normalizeHeadingDegrees(toDegrees(getSafe(window.yaw)))
+    )
+  }).addTo(mapInstance);
+  refreshMainMapMarkerIcon();
 
   // 创建一个自定义控件显示经纬度与海拔（左下角）
   const MapInfoControl = L.Control.extend({
@@ -525,6 +589,7 @@ function initMap() {
 
   window.updateMap = function(lat, lon) {
     if (mapMarker) mapMarker.setLatLng([lat, lon]);
+    refreshMainMapMarkerIcon();
     // 仅平移中心点，保留用户当前缩放级别
     if (mapInstance) mapInstance.panTo([lat, lon], { animate: false });
     if (mapInfoDiv) {

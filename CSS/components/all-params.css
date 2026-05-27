@@ -171,10 +171,9 @@
 }
 
 .cfg-ap-table tbody td {
-  padding: 6px 10px;
+  padding: 4px 10px;
   border-bottom: 1px solid #1a1e26;
-  /* 与多行说明对齐：整行顶对齐 */
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .cfg-ap-table tbody tr:nth-child(even) {
@@ -206,7 +205,7 @@
   width: 100%;
   min-width: 88px;
   max-width: 140px;
-  padding: 4px 8px;
+  padding: 3px 8px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 12px;
   border: 1px solid #3d4450;
@@ -235,11 +234,44 @@
 /* 说明列：保留换行，宽度不足时自动折行（含长英文单词） */
 .cfg-ap-desc {
   color: #b8c0cc;
-  line-height: 1.45;
+}
+
+.cfg-ap-desc-text {
+  display: block;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.cfg-ap-table tbody tr:hover .cfg-ap-desc-text:not(.cfg-ap-desc-empty) {
+  color: #d6e7ff;
+}
+
+.cfg-ap-desc-text:focus-visible {
+  outline: 1px solid rgba(79, 154, 223, 0.8);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.cfg-ap-desc-text.cfg-ap-desc-empty {
+  cursor: default;
+}
+
+.cfg-ap-table tbody tr.cfg-ap-row-expanded td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  vertical-align: top;
+}
+
+.cfg-ap-table tbody tr.cfg-ap-row-expanded .cfg-ap-desc-text {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
   hyphens: auto;
+  text-overflow: clip;
+  overflow: visible;
 }
 
 .cfg-ap-empty {

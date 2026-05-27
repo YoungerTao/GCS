@@ -23,8 +23,9 @@
 <link rel="stylesheet" href="CSS/components/quick-grid.css">
 <link rel="stylesheet" href="CSS/components/status-messages.css">
 <link rel="stylesheet" href="CSS/components/sensor-calibration.css">
-<link rel="stylesheet" href="CSS/components/all-params.css">
+<link rel="stylesheet" href="CSS/components/all-params.css?v=20260527b">
 <link rel="stylesheet" href="CSS/components/flight-plan.css">
+<link rel="stylesheet" href="CSS/components/serial-setup.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 </head>
 <body>
@@ -180,7 +181,7 @@
       <button class="ov-nav-item" data-setup-panel="motor">电机</button>
       <button class="ov-nav-item" data-setup-panel="dronecan">DroneCAN</button>
       <button class="ov-nav-item" data-setup-panel="sensors">传感器</button>
-      <button class="ov-nav-item" data-setup-panel="radio">电台</button>
+      <button class="ov-nav-item" data-setup-panel="serial">serial</button>
       <button class="ov-nav-item" data-setup-panel="power">电源</button>
       <button class="ov-nav-item" data-setup-panel="safety">安全</button>
       <button class="ov-nav-item" data-setup-panel="params">参数</button>
@@ -503,6 +504,19 @@
         </div>
       </div>
 
+      <div class="ov-panel" id="setup-panel-serial">
+        <div class="serial-page">
+          <section class="serial-summary card-dark" aria-live="polite">
+            <div id="serial-summary-content"></div>
+            <div class="serial-write-actions">
+              <button id="serial-write-params-btn" type="button" disabled>写入飞控</button>
+              <p id="serial-write-status" class="muted serial-write-status"></p>
+            </div>
+          </section>
+          <div id="serial-port-grid" class="serial-port-grid"></div>
+        </div>
+      </div>
+
       <div class="ov-panel" id="setup-panel-power">
         <div class="power-page">
           <div class="power-grid">
@@ -780,6 +794,7 @@
 <script src="JS/ui/quick-grid.js" defer></script>
 <script src="JS/ui/splitter.js" defer></script>
 <script src="JS/ui/rc-setup.js" defer></script>
+<script src="JS/ui/serial-setup.js" defer></script>
 <script src="JS/ui/motor-maps.js" defer></script>
 <script src="JS/ui/airframe-setup.js?v=14" defer></script>
 <script src="JS/ui/motor-setup.js?v=8" defer></script>
@@ -790,7 +805,7 @@
 <script src="JS/ui/compass-calibration.js" defer></script>
 <script src="JS/ui/sensor-calibration.js" defer></script>
 <script src="JS/ui/dronecan-setup.js?v=162" defer></script>
-<script src="JS/ui/all-params.js" defer></script>
+<script src="JS/ui/all-params.js?v=20260527b" defer></script>
 
 </body>
 </html>

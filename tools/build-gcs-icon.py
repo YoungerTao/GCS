@@ -1,94 +1,107 @@
 #!/usr/bin/env python3
-"""Rasterize assets/gcs-dog.svg style into assets/gcs-dog.ico for Windows shortcuts."""
+"""Build assets/gcs-dog.ico from dog1.png for Windows shortcuts (true colors, no margins)."""
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+import numpy as np
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "dog1.png"
 OUT = ROOT / "assets" / "gcs-dog.ico"
-
-BG = (25, 56, 74)
-FUR = (242, 197, 92)
-FUR_DARK = (200, 150, 60)
-MUZZLE = (245, 230, 200)
-NOSE = (42, 35, 32)
-EYE = (26, 32, 40)
-COLLAR = (94, 200, 232)
+ICON_BG = (25, 45, 78)
+# Single 256px entry only: Windows .lnk IconLocation ",0" uses directory index 0.
+# Multi-size ICO puts 16x16 at index 0, which looks tiny and blurry when scaled up.
+ICON_SIZE = 256
 
 
-def _sc(v: float, s: float) -> int:
-    return int(round(v * s))
+def _is_export_background(r: int, g: int, b: int) -> bool:
+    r, g, b = int(r), int(g), int(b)
+    if r > 250 and g > 250 and b > 250:
+        return True
+    if abs(r - g) <= 3 and abs(g - b) <= 3 and 208 <= r <= 225:
+        return True
+    return False
 
 
-def draw_dog(size: int) -> Image.Image:
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    s = size / 64.0
+def _flood_background_mask(rgb: np.ndarray) -> np.ndarray:
+    h, w = rgb.shape[:2]
+    bg = np.zeros((h, w), dtype=bool)
+    q: deque[tuple[int, int]] = deque()
+    for x in range(w):
+        for y in (0, h - 1):
+            if _is_export_background(*rgb[y, x]) and not bg[y, x]:
+                bg[y, x] = True
+                q.append((x, y))
+    for y in range(h):
+        for x in (0, w - 1):
+            if _is_export_background(*rgb[y, x]) and not bg[y, x]:
+                bg[y, x] = True
+                q.append((x, y))
+    while q:
+        x, y = q.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if (
+                0 <= nx < w
+                and 0 <= ny < h
+                and not bg[ny, nx]
+                and _is_export_background(*rgb[ny, nx])
+            ):
+                bg[ny, nx] = True
+                q.append((nx, ny))
+    return bg
 
-    d.rounded_rectangle(
-        (_sc(4, s), _sc(4, s), _sc(60, s), _sc(60, s)),
-        radius=_sc(14, s),
-        fill=BG,
-    )
-    d.ellipse(
-        (_sc(12, s), _sc(7, s), _sc(26, s), _sc(29, s)),
-        fill=FUR_DARK,
-    )
-    d.ellipse(
-        (_sc(38, s), _sc(7, s), _sc(52, s), _sc(29, s)),
-        fill=FUR_DARK,
-    )
-    d.ellipse(
-        (_sc(15, s), _sc(14, s), _sc(49, s), _sc(46, s)),
-        fill=FUR,
-    )
-    d.ellipse(
-        (_sc(23, s), _sc(30, s), _sc(41, s), _sc(44, s)),
-        fill=MUZZLE,
-    )
-    d.ellipse(
-        (_sc(28.5, s), _sc(33, s), _sc(35.5, s), _sc(39, s)),
-        fill=NOSE,
-    )
-    d.ellipse(
-        (_sc(21.8, s), _sc(23.2, s), _sc(28.2, s), _sc(30.8, s)),
-        fill=EYE,
-    )
-    d.ellipse(
-        (_sc(35.8, s), _sc(23.2, s), _sc(42.2, s), _sc(30.8, s)),
-        fill=EYE,
-    )
-    d.ellipse(
-        (_sc(24.9, s), _sc(24.9, s), _sc(27.1, s), _sc(27.1, s)),
-        fill=(244, 247, 251),
-    )
-    d.ellipse(
-        (_sc(38.9, s), _sc(24.9, s), _sc(41.1, s), _sc(27.1, s)),
-        fill=(244, 247, 251),
-    )
-    d.arc(
-        (_sc(20, s), _sc(40, s), _sc(44, s), _sc(50, s)),
-        start=200,
-        end=340,
-        fill=COLLAR,
-        width=max(2, _sc(3, s)),
-    )
-    return img
+
+def load_icon_source(path: Path = SOURCE) -> Image.Image:
+    if not path.is_file():
+        raise FileNotFoundError(f"Icon source not found: {path}")
+    img = Image.open(path).convert("RGBA")
+    rgb = np.array(img)[:, :, :3].astype(np.int16)
+
+    light = (rgb[:, :, 0] > 200) & (rgb[:, :, 1] > 200) & (rgb[:, :, 2] > 200)
+    if light.any():
+        ys, xs = np.where(~light)
+        img = img.crop((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+
+    data = np.array(img)
+    sub_rgb = data[:, :, :3]
+    data[_flood_background_mask(sub_rgb)] = (0, 0, 0, 0)
+    img = Image.fromarray(data)
+
+    bbox = img.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+
+    w, h = img.size
+    side = max(w, h)
+    square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    square.paste(img, ((side - w) // 2, (side - h) // 2))
+    tight = square.getbbox()
+    if tight:
+        square = square.crop(tight)
+    return square
+
+
+def flatten_icon(img: Image.Image, bg: tuple[int, int, int] = ICON_BG) -> Image.Image:
+    base = Image.new("RGBA", img.size, bg + (255,))
+    return Image.alpha_composite(base, img.convert("RGBA"))
+
+
+def rasterize_icon(source: Image.Image, size: int = ICON_SIZE) -> Image.Image:
+    flat = flatten_icon(source)
+    return flat.resize((size, size), Image.Resampling.LANCZOS).convert("RGB")
 
 
 def main() -> None:
-    sizes = [16, 24, 32, 48, 64, 128, 256]
-    images = [draw_dog(n) for n in sizes]
+    source = load_icon_source()
+    icon = rasterize_icon(source, ICON_SIZE)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    images[0].save(
-        OUT,
-        format="ICO",
-        sizes=[(img.width, img.height) for img in images],
-        append_images=images[1:],
-    )
-    print(f"Wrote {OUT}")
+    icon.save(OUT, format="ICO", sizes=[(ICON_SIZE, ICON_SIZE)])
+    kb = OUT.stat().st_size // 1024
+    print(f"Wrote {OUT} ({kb} KB, {ICON_SIZE}x{ICON_SIZE} only) from {SOURCE}")
 
 
 if __name__ == "__main__":
