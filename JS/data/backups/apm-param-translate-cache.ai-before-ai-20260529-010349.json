@@ -1,0 +1,7 @@
+{
+  "d\tMaximum allowable loss in altitude during a trick or sequence from its starting altitude.": "特技或动作序列期间相对于起始高度的最大允许高度损失。",
+  "d\tMaximum angular acceleration in maneuvers": "机动中的最大角加速度。",
+  "d\tThis is the time over which we filter the desired roll to smooth it": "这是对期望横滚进行滤波以使其平滑的时间常数。",
+  "d\tLength of aerobatic \"box\"": "特技飞行区域（\"box\"）的长度。",
+  "d\tThis controls the printing of extra debug information on paths": "控制是否打印路径的额外调试信息。"
+}

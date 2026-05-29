@@ -1,0 +1,84 @@
+{
+  "_meta": {
+    "description": "Pilot review batch — 仅 d（说明）字段。使用本 GCS 术语表（失效保护、解锁前检查、位掩码、返航等）进行高质量 AI 精翻。优先覆盖安全策略中心相关参数。",
+    "generated_at": "2026-05-29T00:28:00+08:00",
+    "model_used": "grok-high-quality-translation (plan execution)",
+    "scope": "仅 d 字段，pilot 安全关键组（ARMING_*、FS_*、RTL_* 等）",
+    "instructions": "请逐条 review 'proposed' 译文。可直接编辑、删除不满意的条目，或将 status 改为 'accepted'。完成后运行：python tools/apply-reviewed-translations.py 本文件路径",
+    "count": 18
+  },
+  "items": [
+    {
+      "id": "d-pilot-001",
+      "param": "ARMING_SKIPCHK",
+      "field": "d",
+      "source": "Checks to skip prior to arming motor. This is a bitmask of checks before allowing arming that will be skipped. For most users it is recommended to leave this at the default of 0 (no checks skipped). In extreme circumstances, a value of -1 can be used to skip all non-mandatory current and future checks.\n\n位定义:\n  位1: Barometer\n  位2: Compass\n  位3: GPS lock\n  位4: INS\n  位5: Parameters\n  位6: RC Channels\n  位7: Board voltage\n  位8: Battery Level\n  位10: Logging Available\n  位11: Hardware safety switch\n  位12: GPS Configuration\n  位13: System\n  位14: Mission\n  位15: Rangefinder\n  位16: Camera\n  位17: AuxAuth\n  位18: VisualOdometry\n  位19: FFT",
+      "proposed": "解锁电机前要跳过的检查。这是一个位掩码，标记在允许解锁前将被跳过的检查项目。对于大多数用户，建议保持默认值 0（不跳过任何检查）。在极端情况下，可将该值设为 -1，以跳过所有非强制性的当前及未来检查。\n\n位定义：\n  位1: 气压计\n  位2: 罗盘\n  位3: GPS 锁定\n  位4: 惯性传感器 (INS)\n  位5: 参数\n  位6: RC 通道\n  位7: 板载电压\n  位8: 电池电量\n  位10: 日志可用\n  位11: 硬件安全开关\n  位12: GPS 配置\n  位13: 系统\n  位14: 任务\n  位15: 测距仪\n  位16: 相机\n  位17: 辅助授权\n  位18: 视觉里程计\n  位19: FFT",
+      "status": "pending"
+    },
+    {
+      "id": "d-pilot-002",
+      "param": "FS_OPTIONS",
+      "field": "d",
+      "source": "Bitmask of additional options for battery, radio, & GCS failsafes. 0 disables all options.\n\n位定义:\n  位0: Continue if in Auto on RC failsafe\n  位1: Continue if in Auto on GCS failsafe\n  位2: Continue if in Guided on RC failsafe\n  位3: Continue if landing on any failsafe\n  位4: Continue if in pilot controlled modes on GCS failsafe\n  位5: Release Gripper",
+      "proposed": "电池、遥控与 GCS 失效保护的附加选项位掩码。0 禁用所有选项。\n\n位定义：\n  位0: RC 失联时在 Auto 继续任务\n  位1: GCS 失联时在 Auto 继续任务\n  位2: RC 失联时在 Guided 继续\n  位3: 任意失效保护时若正在降落则继续\n  位4: GCS 失联时在手动模式继续\n  位5: 失效保护时释放夹具",
+      "status": "pending"
+    },
+    {
+      "id": "d-pilot-003",
+      "param": "FS_THR_ENABLE",
+      "field": "d",
+      "source": "The throttle failsafe allows you to configure a software failsafe activated by a setting on the throttle input channel\n\n取值:\n  0: Disabled\n  1: Enabled always RTL\n  2: Enabled Continue with Mission in Auto Mode (Removed in 4.0+)\n  3: Enabled always Land\n  4: Enabled always SmartRTL or RTL\n  5: Enabled always SmartRTL or Land\n  6: Enabled Auto DO_LAND_START/DO_RETURN_PATH_START or RTL\n  7: Enabled always Brake or Land",
+      "proposed": "油门失效保护允许你配置一个由油门输入通道设置触发的软件失效保护。\n\n取值：\n  0: 禁用\n  1: 启用，始终 RTL\n  2: 启用，在 Auto 模式下继续任务（4.0+ 已移除）\n  3: 启用，始终 LAND\n  4: 启用，始终 SmartRTL 或 RTL\n  5: 启用，始终 SmartRTL 或 LAND\n  6: 启用，自动 DO_LAND_START/DO_RETURN_PATH_START 或 RTL\n  7: 启用，始终 Brake 或 LAND",
+      "status": "pending"
+    },
+    {
+      "id": "d-pilot-004",
+      "param": "FS_GCS_ENABLE",
+      "field": "d",
+      "source": "Controls whether failsafe will be invoked (and what action to take) when connection with Ground station is lost for at least 5 seconds. See FS_OPTIONS param for additional actions, or for cases allowing Mission continuation, when GCS failsafe is enabled.\n\n取值:\n  0: Disabled/NoAction\n  1: RTL\n  2: RTL or Continue with Mission in Auto Mode (Removed in 4.0+-see FS_OPTIONS)\n  3: SmartRTL or RTL\n  4: SmartRTL or Land\n  5: Land\n  6: Auto DO_LAND_START/DO_RETURN_PATH_START or RTL\n  7: Brake or Land",
+      "proposed": "控制当地面站连接丢失至少 5 秒时是否调用失效保护（以及采取什么操作）。请参阅 FS_OPTIONS 参数以了解其他操作，或在启用 GCS 失效保护时允许任务继续的情况。\n\n取值：\n  0：禁用/无操作\n  1：RTL\n  2：RTL 或在自动模式下继续任务（在 4.0+ 中删除 - 请参阅 FS_OPTIONS）\n  3：SmartRTL 或 RTL\n  4：SmartRTL 或陆地\n  5：土地\n  6：自动 DO_LAND_START/DO_RETURN_PATH_START 或 RTL\n  7：刹车或着陆",
+      "status": "pending"
+    },
+    {
+      "id": "d-pilot-005",
+      "param": "ARMING_RUDDER",
+      "field": "d",
+      "source": "Allow arm/disarm by rudder input. When enabled arming can be done with right rudder, disarming with left rudder. Rudder arming only works with throttle at zero +- deadzone (RCx_DZ). Depending on vehicle type, arming in certain modes is prevented. See the wiki for each vehicle. Caution is recommended when arming if it is allowed in an auto-throttle mode!\n\n取值:\n  0: Disabled\n  1: ArmingOnly\n  2: ArmOrDisarm",
+      "proposed": "允许通过方向舵输入进行解锁/加锁。启用后，可通过右方向舵解锁，左方向舵加锁。方向舵解锁仅在油门处于零位 ± 死区（RCx_DZ）时有效。根据机型不同，某些模式下可能禁止解锁。请查阅对应机型的 wiki 文档。如果允许在自动油门模式下解锁，建议谨慎操作！\n\n取值：\n  0: 禁用\n  1: 仅解锁\n  2: 解锁或加锁",
+      "status": "pending"
+    },
+    {
+      "id": "d-pilot-006",
+      "param": "FS_GCS_TIMEOUT",
+      "field": "d",
+      "source": "Timeout before triggering the GCS failsafe\n\n范围: 2 … 120",
+      "proposed": "触发 GCS 失效保护前的超时时间\n\n范围: 2 … 120",
+      "status": "pending"
+    },
+    {
+      "id": "d-pilot-007",
+      "param": "RTL_ALT_M",
+      "field": "d",
+      "source": "The minimum alt above home the vehicle will climb to before returning. If the vehicle is flying higher than this value it will return at its current altitude.\n\n范围: 0.30 … 3000",
+      "proposed": "返航前飞行器将爬升到的 Home 上方的最低高度。如果飞行器当前高度高于此值，则保持当前高度返航。\n\n范围: 0.30 … 3000",
+      "status": "pending"
+    },
+    {
+      "id": "d-pilot-008",
+      "param": "FS_SHORT_ACTN",
+      "field": "d",
+      "source": "The action to take on a short failsafe event. A short failsafe event can be triggered instantly by loss of RC control or by throttle value (see THR_FS_VALUE). If in CIRCLE or RTL mode this parameter is ignored. A short failsafe event in stabilization and manual modes will cause a change to CIRCLE mode if FS_SHORT_ACTN is 0 or 1, a change to FBWA mode with zero throttle if FS_SHORT_ACTN is 2, and a change to FBWB mode if FS_SHORT_ACTN is 4. In all other modes (AUTO, GUIDED and LOITER) a short failsafe event will cause no mode change if FS_SHORT_ACTN is set to 0, will cause a change to CIRCLE mode if set to 1, will change to FBWA mode with zero throttle if set to 2, or will change to FBWB if set to 4. Please see the documentation for FS_LONG_ACTN for the behaviour after FS_LONG_TIMEOUT seconds of failsafe. This parameter only applies to failsafes during fixed wing modes.",
+      "proposed": "短时故障保护事件发生时采取的动作。短时故障保护事件可由遥控失联或油门值低于阈值（见 THR_FS_VALUE）立即触发。在 CIRCLE 或 RTL 模式下此参数被忽略。在稳定和手动模式下，短时故障保护事件将导致：FS_SHORT_ACTN 为 0 或 1 时切换到 CIRCLE 模式；为 2 时切换到零油门 FBWA 模式；为 4 时切换到 FBWB 模式。在所有其他模式（AUTO、GUIDED、LOITER）下，若 FS_SHORT_ACTN 设为 0 则不改变模式，设为 1 则切换到 CIRCLE，设为 2 则切换到零油门 FBWA，设为 4 则切换到 FBWB。请参阅 FS_LONG_ACTN 的文档了解 FS_LONG_TIMEOUT 秒后的行为。此参数仅适用于固定翼模式下的故障保护。",
+      "status": "pending"
+    },
+    {
+      "id": "d-pilot-009",
+      "param": "ARMING_CRSDP_IGN",
+      "field": "d",
+      "source": "Must have value \"1\" if crashdump data is present on the system, or a prearm failure will be raised.  Do not set this parameter unless the risks of doing so are fully understood.  The presence of a crash dump means that the firmware currently installed has suffered a critical software failure which resulted in the autopilot immediately rebooting.  The crashdump file gives diagnostic information which can help in finding the issue, please contact the ArduPilot support team.  If this crashdump data is present, the vehicle is likely unsafe to fly.  Check the ArduPilot documentation for more details.\n\n取值:\n  0: Crash Dump arming check active\n  1: Crash Dump arming check deactivated",
+      "proposed": "如果系统中存在崩溃转储（crashdump）数据，则必须将该参数设为 \"1\"，否则将触发解锁前失败。除非你完全理解这样做的风险，否则不要设置此参数。崩溃转储的存在表示当前安装的固件曾发生严重软件故障，导致自动驾驶仪立即重启。崩溃转储文件提供了有助于定位问题的诊断信息，请联系 ArduPilot 支持团队。如果存在此崩溃转储数据，飞行器很可能不安全，请勿起飞。请查阅 ArduPilot 文档了解更多细节。\n\n取值：\n  0: 崩溃转储解锁检查启用\n  1: 崩溃转储解锁检查禁用",
+      "status": "pending"
+    }
+  ]
+}

@@ -485,36 +485,20 @@ let mapBootstrapped = false;
 let mapInitScheduled = false;
 let mapMarkerIconSignature = "";
 
-const MAP_MAV_TYPE_FIXED_WING = 1;
-const MAP_MAV_TYPE_VTOL_TYPES = new Set([19, 20, 21]);
-const MAP_MAV_TYPE_COPTER_TYPES = new Set([2, 3, 4, 7, 8, 9, 12, 13, 14, 15, 16, 17]);
-
 function detectMainMapVehicleKind() {
-  const mavType = Math.round(Number(window.fcMavType));
-  if (mavType === MAP_MAV_TYPE_FIXED_WING) return "plane";
-  if (MAP_MAV_TYPE_VTOL_TYPES.has(mavType)) return "vtol";
-  if (MAP_MAV_TYPE_COPTER_TYPES.has(mavType)) return "multirotor";
-
-  const params = window.params instanceof Map ? window.params : null;
-  const hasQFrame = !!(params && params.has("Q_FRAME_CLASS") && params.has("Q_FRAME_TYPE"));
-  const hasFrame = !!(params && params.has("FRAME_CLASS") && params.has("FRAME_TYPE"));
-  if (hasQFrame) return "vtol";
-  if (hasFrame) return "multirotor";
-
-  const fwText = String(document.getElementById("ov-fw-version")?.textContent || "").toLowerCase();
-  if (/vtol|quadplane/.test(fwText)) return "vtol";
-  if (/plane|arduplane/.test(fwText)) return "plane";
-  return "multirotor";
+  const VMI = window.VehicleMarkerIcons;
+  if (VMI && typeof VMI.detectVehicleMarkerKind === "function") {
+    return VMI.detectVehicleMarkerKind({ requireConnected: true });
+  }
+  return "multirotor-x";
 }
 
 function mainMapVehicleMarkerSvg(kind) {
-  if (kind === "plane") {
-    return '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" d="M16 3 L20 14 L29 16 L20 18 L18 29 L16 24 L14 29 L12 18 L3 16 L12 14 Z"/></svg>';
+  const VMI = window.VehicleMarkerIcons;
+  if (VMI && typeof VMI.vehicleMarkerSvg === "function") {
+    return VMI.vehicleMarkerSvg(kind);
   }
-  if (kind === "vtol") {
-    return '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" d="M16 4 L19 13 L28 15 L19 17 L17 26 L16 22 L15 26 L13 17 L4 15 L13 13 Z"/><circle fill="currentColor" cx="8" cy="20" r="2.5"/><circle fill="currentColor" cx="24" cy="20" r="2.5"/></svg>';
-  }
-  return '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true"><circle fill="currentColor" cx="16" cy="16" r="3"/><rect fill="currentColor" x="3" y="14.5" width="26" height="3" rx="1.5"/><rect fill="currentColor" x="14.5" y="3" width="3" height="26" rx="1.5"/><circle fill="#0e141b" cx="6" cy="6" r="2.2"/><circle fill="#0e141b" cx="26" cy="6" r="2.2"/><circle fill="#0e141b" cx="6" cy="26" r="2.2"/><circle fill="#0e141b" cx="26" cy="26" r="2.2"/></svg>';
+  return "";
 }
 
 function createMainMapVehicleIcon(kind, headingDeg) {
@@ -527,15 +511,18 @@ function createMainMapVehicleIcon(kind, headingDeg) {
       mainMapVehicleMarkerSvg(kind) +
       "</span>" +
       "</span>",
-    iconSize: [40, 40],
-    iconAnchor: [20, 20]
+    iconSize: [80, 80],
+    iconAnchor: [40, 40]
   });
 }
 
 function refreshMainMapMarkerIcon() {
   if (!mapMarker || typeof L === "undefined") return;
   const kind = detectMainMapVehicleKind();
-  const heading = normalizeHeadingDegrees(toDegrees(getSafe(window.yaw)));
+  const heading =
+    kind === "disconnected"
+      ? 0
+      : normalizeHeadingDegrees(toDegrees(getSafe(window.yaw)));
   const signature = kind + ":" + heading.toFixed(1);
   if (signature === mapMarkerIconSignature) return;
   mapMarkerIconSignature = signature;
@@ -566,6 +553,9 @@ function initMap() {
   // 卫星 + 道路/地名（均为 WGS84，与飞控 GPS 一致）
   if (typeof window.addGcsMapBaseLayers === "function") {
     window.addGcsMapBaseLayers(mapInstance);
+  }
+  if (window.GcsMapPrefetch && typeof window.GcsMapPrefetch.setupMap === "function") {
+    window.GcsMapPrefetch.setupMap(mapInstance);
   }
 
   mapMarker = L.marker(center, {
@@ -670,6 +660,14 @@ function initLogTabs() {
 window.addEventListener('DOMContentLoaded', () => {
   initMainTabs();
   initLogTabs();
+  document.addEventListener("gcs-connection", () => {
+    mapMarkerIconSignature = "";
+    refreshMainMapMarkerIcon();
+  });
+  document.addEventListener("gcs-airframe-params-changed", () => {
+    mapMarkerIconSignature = "";
+    refreshMainMapMarkerIcon();
+  });
 });
 
 // ==================== 主页面选项卡切换 ====================

@@ -44,34 +44,6 @@
       artSrc: "assets/airframe/vtol-quadplane.png",
       artAlt: "垂起固定翼示意图",
     },
-    {
-      key: "landing_gear",
-      title: "起落架 Landing Gear",
-      required: false,
-      icon: "LG",
-      options: [
-        { value: "none", label: "无起落架" },
-        { value: "single", label: "单起落架" },
-      ],
-      rowsByOption: {
-        none: [],
-        single: [{ key: "landing-gear", label: "起落架", func: 29, comment: "起落架" }],
-      },
-    },
-    {
-      key: "landing_gear",
-      title: "起落架 Landing Gear",
-      required: false,
-      icon: "LG",
-      options: [
-        { value: "none", label: "无起落架" },
-        { value: "single", label: "单起落架" },
-      ],
-      rowsByOption: {
-        none: [],
-        single: [{ key: "landing-gear", label: "起落架", func: 29, comment: "起落架" }],
-      },
-    },
   ];
 
   const VTOL_TYPE_CARDS = [
@@ -1083,7 +1055,11 @@
   }
 
   function renderFrameCards() {
-    return FRAME_TYPE_CARDS.map((item) => `
+    const validCards = FRAME_TYPE_CARDS.filter((item) => item && item.id && item.accent && item.title && item.subtitle);
+    if (validCards.length !== FRAME_TYPE_CARDS.length) {
+      console.warn("[airframe-wizard] FRAME_TYPE_CARDS contained invalid entries that were filtered out.");
+    }
+    return validCards.map((item) => `
       <button type="button" class="afw-card afw-main-card ${state.frame_type === item.id ? "selected" : ""}" data-frame-type="${item.id}" style="--afw-accent:${item.accent}">
         <div class="afw-card-layout">
           <div class="afw-card-copy">

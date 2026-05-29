@@ -225,27 +225,36 @@
       currentHeight = height;
 
       const isCircular = type === 1 || type === 3;
-      const shouldShow = enabled && isCircular;
+
+      // 防御性尺寸同步：每次参数更新都确认 renderer / camera 与 canvas 当前 CSS 尺寸一致。
+      // 解决面板初次显示、splitter 拖动、或从隐藏状态切入时 3D 内容渲染尺寸与实际不符的问题，
+      // 让圆柱的视觉大小真正对应用户在表单输入的半径/高度数值。
+      const cw = canvas.clientWidth || canvas.width;
+      const ch = canvas.clientHeight || canvas.height;
+      if (cw >= 2 && ch >= 2) {
+        const sz = new THREE.Vector2();
+        renderer.getSize(sz);
+        if (Math.abs(sz.x - cw) > 1 || Math.abs(sz.y - ch) > 1) {
+          renderer.setSize(cw, ch, false);
+          camera.aspect = cw / ch;
+          camera.updateProjectionMatrix();
+        }
+      }
 
       removeDisabledSprite();
 
-      if (!shouldShow) {
+      if (!isCircular) {
         removeFenceMesh();
-        // 清空高度标尺
         updateHeightScale(0, radius);
-
-        // 地面保持小尺寸
         ground.scale.setScalar(Math.max(30, radius * 0.6));
         ring.scale.setScalar(Math.max(30, radius * 0.6));
-
-        // 禁用提示已改由外部 HTML overlay 控制，此处不再创建 3D sprite
-        // （保留函数以防其他地方需要，但不再调用）
         fitCamera(radius, height);
         renderer.render(scene, camera);
         return;
       }
 
-      // 重建圆柱
+      // 圆形（含高度）类型：始终绘制圆柱体（即使表单里 FENCE_ENABLE=0），
+      // 仅通过透明度区分“预览（未启用）” vs “已启用”状态，让用户调整半径/高度时 3D 预览实时匹配表单数据。
       removeFenceMesh();
 
       fenceMat = fenceMat || new THREE.MeshStandardMaterial({
@@ -261,9 +270,11 @@
       const geom = new THREE.CylinderGeometry(radius, radius, height, 52, 1, false);
       fenceMesh = new THREE.Mesh(geom, fenceMat);
       fenceMesh.position.y = height / 2;
+      // 根据启用状态调整不透明度：未启用时更透明（ghost 预览），已启用时正常
+      fenceMat.opacity = enabled ? 0.52 : 0.25;
       scene.add(fenceMesh);
 
-      // 地面与环按半径缩放
+      // 地面与环按半径缩放（始终使用用户输入的数值）
       const groundScale = radius * 1.28;
       ground.scale.setScalar(groundScale);
       ring.scale.setScalar(groundScale);

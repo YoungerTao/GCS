@@ -1,4 +1,4 @@
-an zhai<!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -25,6 +25,7 @@ an zhai<!DOCTYPE html>
 <link rel="stylesheet" href="CSS/components/sensor-calibration.css">
 <link rel="stylesheet" href="CSS/components/all-params.css?v=20260527b">
 <link rel="stylesheet" href="CSS/components/flight-plan.css">
+<link rel="stylesheet" href="CSS/components/map-prefetch.css">
 <link rel="stylesheet" href="CSS/components/serial-setup.css">
 <link rel="stylesheet" href="CSS/components/safety-setup.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
@@ -60,6 +61,14 @@ an zhai<!DOCTYPE html>
   </select>
   <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
   <button id="loadParamsBtn" type="button" onclick="loadParams({ force: true })">加载参数</button>
+  <span class="map-tile-controls">
+    <button id="mapPrefetchBtn" type="button" title="对当前地图视野预取瓦片">预取地图</button>
+    <label for="mapCacheOnly" title="仅使用已下载瓦片，不联网补图">
+      <input type="checkbox" id="mapCacheOnly">
+      仅缓存
+    </label>
+    <span id="mapTileStatus" class="map-tile-status" aria-live="polite">瓦片…</span>
+  </span>
   <div class="main-tabs" aria-label="主功能切换">
     <button class="main-tab active" data-view="flight-data">
       <img src="assets/icons/tab-flight.svg" alt="">
@@ -81,78 +90,68 @@ an zhai<!DOCTYPE html>
 </div>
 
 <div id="view-flight-data" class="main-view active">
-  <!-- 中间主区域 -->
-  <div class="main-area">
-    <!-- 左侧HUD -->
-    <div class="hud-container">
-      <canvas id="hud" width="800" height="800"></canvas>
+  <div class="flight-data-layout">
+    <div class="flight-data-left">
+      <div class="hud-container">
+        <canvas id="hud" width="800" height="800"></canvas>
+      </div>
+      <div class="h-splitter" data-splitter="hud-log" aria-label="调整HUD高度" title="拖拽调整HUD高度"></div>
+      <div class="log-container">
+        <div class="log-tabs">
+          <button class="log-tab active" data-panel="quick">快速</button>
+          <button class="log-tab" data-panel="actions">动作</button>
+          <button class="log-tab" data-panel="messages" type="button">
+            消息
+            <span id="log-tab-messages-badge" class="log-tab-badge" hidden aria-label="未读警报">0</span>
+          </button>
+          <button class="log-tab" data-panel="servo">舵机</button>
+          <button class="log-tab" data-panel="logs">日志</button>
+        </div>
+        <div class="log-panels">
+          <div id="panel-quick" class="log-panel active">
+            <div id="quick-grid" class="quick-grid" aria-label="Quick telemetry grid"></div>
+
+            <!-- 参数选择模态 -->
+            <div id="param-modal" class="param-modal hidden">
+              <div class="pm-content">
+                <div class="pm-header">
+                  <input id="pm-search" placeholder="搜索参数..." autofocus>
+                  <button id="pm-close">关闭</button>
+                </div>
+                <div id="pm-list" class="pm-list"></div>
+                <div class="pm-footer">
+                  <button id="pm-clear">清除参数</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="panel-actions" class="log-panel">动作面板（开发中）</div>
+          <div id="panel-messages" class="log-panel log-panel--messages">
+            <div class="gcs-messages" aria-label="STATUSTEXT 消息">
+              <div class="gcs-msg-toolbar" role="toolbar" aria-label="按等级过滤">
+                <button type="button" class="gcs-msg-filter active" data-level="critical" title="严重 0–2">Critical</button>
+                <button type="button" class="gcs-msg-filter active" data-level="warning" title="警告 3–4">Warning</button>
+                <button type="button" class="gcs-msg-filter active" data-level="info" title="信息 5–6">Info</button>
+                <button type="button" class="gcs-msg-filter active" data-level="debug" title="调试 7">Debug</button>
+              </div>
+              <div id="gcs-msg-list" class="gcs-msg-list"></div>
+              <div class="gcs-msg-statusbar">
+                <span id="gcs-msg-conn" class="gcs-msg-conn">未连接</span>
+                <span class="gcs-msg-status-right">
+                  <span id="gcs-msg-unread">未读警报 0</span>
+                  <span id="gcs-msg-total">总计 0</span>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div id="panel-servo" class="log-panel">舵机面板（开发中）</div>
+          <div id="panel-logs" class="log-panel">日志输出区<div id="log"></div></div>
+        </div>
+      </div>
     </div>
     <div class="v-splitter" data-splitter="main" aria-label="调整HUD宽度" title="拖拽调整HUD宽度"></div>
-    <!-- 右侧地图 -->
     <div class="map-container">
       <div id="map"></div>
-    </div>
-  </div>
-
-  <!-- 底部信息区 -->
-  <div class="bottom-area">
-    <!-- 左侧日志：增加标签切换面板 -->
-    <div class="log-container">
-      <div class="log-tabs">
-        <button class="log-tab active" data-panel="quick">快速</button>
-        <button class="log-tab" data-panel="actions">动作</button>
-        <button class="log-tab" data-panel="messages" type="button">
-          消息
-          <span id="log-tab-messages-badge" class="log-tab-badge" hidden aria-label="未读警报">0</span>
-        </button>
-        <button class="log-tab" data-panel="servo">舵机</button>
-        <button class="log-tab" data-panel="logs">日志</button>
-      </div>
-      <div class="log-panels">
-        <div id="panel-quick" class="log-panel active">
-          <div id="quick-grid" class="quick-grid" aria-label="Quick telemetry grid"></div>
-
-          <!-- 参数选择模态 -->
-          <div id="param-modal" class="param-modal hidden">
-            <div class="pm-content">
-              <div class="pm-header">
-                <input id="pm-search" placeholder="搜索参数..." autofocus>
-                <button id="pm-close">关闭</button>
-              </div>
-              <div id="pm-list" class="pm-list"></div>
-              <div class="pm-footer">
-                <button id="pm-clear">清除参数</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div id="panel-actions" class="log-panel">动作面板（开发中）</div>
-        <div id="panel-messages" class="log-panel log-panel--messages">
-          <div class="gcs-messages" aria-label="STATUSTEXT 消息">
-            <div class="gcs-msg-toolbar" role="toolbar" aria-label="按等级过滤">
-              <button type="button" class="gcs-msg-filter active" data-level="critical" title="严重 0–2">Critical</button>
-              <button type="button" class="gcs-msg-filter active" data-level="warning" title="警告 3–4">Warning</button>
-              <button type="button" class="gcs-msg-filter active" data-level="info" title="信息 5–6">Info</button>
-              <button type="button" class="gcs-msg-filter active" data-level="debug" title="调试 7">Debug</button>
-            </div>
-            <div id="gcs-msg-list" class="gcs-msg-list"></div>
-            <div class="gcs-msg-statusbar">
-              <span id="gcs-msg-conn" class="gcs-msg-conn">未连接</span>
-              <span class="gcs-msg-status-right">
-                <span id="gcs-msg-unread">未读警报 0</span>
-                <span id="gcs-msg-total">总计 0</span>
-              </span>
-            </div>
-          </div>
-        </div>
-        <div id="panel-servo" class="log-panel">舵机面板（开发中）</div>
-        <div id="panel-logs" class="log-panel">日志输出区<div id="log"></div></div>
-      </div>
-    </div>
-    <div class="v-splitter" data-splitter="bottom" aria-label="调整HUD宽度" title="拖拽调整HUD宽度"></div>
-    <!-- 右侧参数 -->
-    <div class="params-container">
-      <div id="params"></div>
     </div>
   </div>
 </div>
@@ -570,7 +569,7 @@ an zhai<!DOCTYPE html>
           <header class="safety-header card-dark">
             <div>
               <h3>安全策略中心</h3>
-              <p class="muted">仿 QGC · 围栏 / RTL / 失效保护 / 解锁检查 / 急停联动</p>
+              <p class="muted">仿 QGC · 围栏 / RTL / 失效保护 / 解锁检查</p>
             </div>
             <div class="safety-chip-row">
               <span id="safety-prearm-chip" class="safety-chip safety-chip-muted">Pre-arm: 未知</span>
@@ -614,64 +613,61 @@ an zhai<!DOCTYPE html>
               </div>
             </section>
 
-            <section class="card-dark safety-card">
+            <section class="card-dark safety-card" id="safety-rtl-card">
               <h4>RTL 返航策略</h4>
-              <div class="safety-form-grid">
-                <label>返航高度 RTL_ALT (cm)<input id="safety-rtl-alt" type="number" min="0" step="50"></label>
-                <label>最小爬升 RTL_CLIMB_MIN (m)<input id="safety-rtl-climb-min" type="number" min="0" step="1"></label>
-                <label>锥形斜率 RTL_CONE_SLOPE<input id="safety-rtl-cone-slope" type="number" min="0" max="10" step="0.1"></label>
-                <label>到家等待 RTL_LOIT_TIME (s)<input id="safety-rtl-loit-time" type="number" min="0" step="1"></label>
-              </div>
+              <div id="safety-rtl-type-banner" class="rtl-type-banner" hidden></div>
+              <div id="safety-rtl-form" class="safety-form-grid" data-rtl-kind=""></div>
             </section>
 
-            <section class="card-dark safety-card">
+            <section class="card-dark safety-card" id="safety-linkfs-card">
               <h4>链路失效保护</h4>
-              <div class="safety-form-grid">
-                <label>遥控失联 FS_THR_ENABLE
-                  <select id="safety-fs-thr-enable">
-                    <option value="0">禁用</option>
-                    <option value="1">RTL</option>
-                    <option value="3">SmartRTL/RTL</option>
-                    <option value="4">SmartRTL/LAND</option>
-                    <option value="5">LAND</option>
-                  </select>
-                </label>
-                <label>GCS 失联 FS_GCS_ENABLE
-                  <select id="safety-fs-gcs-enable">
-                    <option value="0">禁用</option>
-                    <option value="1">启用</option>
-                    <option value="2">仅自动模式</option>
-                  </select>
-                </label>
-                <label>Failsafe 预设
-                  <select id="safety-fs-preset">
-                    <option value="safe">保守（推荐）</option>
-                    <option value="mission">任务优先</option>
-                    <option value="manual">手动自定义</option>
-                  </select>
-                </label>
-                <label>FS_OPTIONS (位掩码)<input id="safety-fs-options" type="number" min="0" step="1"></label>
+              <div class="safety-linkfs-grid">
+                <section class="card-dark safety-card safety-card--sub" id="safety-fs-action-card">
+                  <h5>失效响应</h5>
+                  <div class="safety-form-grid safety-form-grid--stack">
+                    <label>遥控失联 <span class="safety-param-tag" id="safety-fs-thr-enable-tag">FS_THR_ENABLE</span>
+                      <select id="safety-fs-thr-enable">
+                        <option value="0">禁用</option>
+                        <option value="1">RTL</option>
+                        <option value="3">SmartRTL/RTL</option>
+                        <option value="4">SmartRTL/LAND</option>
+                        <option value="5">LAND</option>
+                      </select>
+                    </label>
+                    <label>GCS 失联 <span class="safety-param-tag" id="safety-fs-gcs-enable-tag">FS_GCS_ENABLE</span>
+                      <select id="safety-fs-gcs-enable">
+                        <option value="0">禁用</option>
+                        <option value="1">启用</option>
+                        <option value="2">仅自动模式</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p class="safety-fs-options-heading">FS_OPTIONS</p>
+                  <p class="safety-fs-options-intro muted">故障安全选项位掩码（飞控参数）。勾选 = 启用对应位；下方数值为写入飞控的 FS_OPTIONS。</p>
+                  <div id="safety-fs-options-grid" class="safety-fs-options-bits"></div>
+                  <p id="safety-fs-options-readout" class="safety-note muted">等待参数…</p>
+                </section>
+                <section class="card-dark safety-card safety-card--sub" id="safety-fs-detect-card">
+                  <h5>失联判定</h5>
+                  <div id="safety-fs-detect-banner" class="rtl-type-banner" hidden></div>
+                  <div id="safety-fs-detect-form" class="safety-form-grid safety-form-grid--stack" data-fs-kind=""></div>
+                </section>
               </div>
             </section>
 
-            <section class="card-dark safety-card">
-              <h4>电池失效保护摘要</h4>
-              <div id="safety-battery-summary" class="safety-note muted">等待参数加载…</div>
-              <button type="button" id="safety-open-power-btn" class="safety-link-btn">前往电源页细调</button>
-            </section>
-
-            <section class="card-dark safety-card">
+            <section class="card-dark safety-card" id="safety-prearm-card">
               <h4>解锁检查（Pre-arm）</h4>
-              <div class="safety-form-grid">
-                <label>ARMING_CHECK<input id="safety-arming-check" type="number" min="0" step="1"></label>
-              </div>
+              <p class="safety-arming-intro muted">勾选 = 启用该项解锁前检查（固件未在 ARMING_SKIPCHK 中跳过）。</p>
+              <p id="safety-arming-skip-banner" class="rtl-type-banner rtl-type-banner-warn" hidden>已跳过全部非强制检查（ARMING_SKIPCHK = -1）</p>
+              <div id="safety-arming-check-grid" class="safety-arming-bits"></div>
+              <label class="safety-arming-skip-all">
+                <input id="safety-arming-skip-all" type="checkbox">
+                <span>跳过全部非强制检查（-1，慎用）</span>
+              </label>
+              <p id="safety-arming-mask-readout" class="safety-note muted">等待参数…</p>
               <p id="safety-prearm-summary" class="safety-note muted">等待状态消息…</p>
             </section>
 
-            <section class="card-dark safety-card">
-              <h4>急停与电机安全</h4>
-              <div id="safety-emergency-summary" class="safety-note muted">正在检查 RCx_OPTION 与电机安全参数…</div>
-            </section>
           </div>
 
           <section class="card-dark safety-write-actions">
@@ -845,28 +841,57 @@ an zhai<!DOCTYPE html>
     <button type="button" class="cfg-subtab active" disabled>全部参数</button>
   </header>
   <div class="cfg-all-params-wrap">
-    <div class="cfg-ap-toolbar" role="toolbar" aria-label="参数表工具">
-      <button type="button" id="cfg-ap-refresh">刷新参数</button>
-      <button type="button" id="cfg-ap-compare-btn">比对参数…</button>
-      <button type="button" id="cfg-ap-compare-clear">清除比对</button>
-      <button type="button" id="cfg-ap-write" class="cfg-ap-btn-primary">写入参数</button>
-      <input type="file" id="cfg-ap-compare-file" class="visually-hidden" accept=".param,.txt,text/plain">
-      <input type="search" id="cfg-ap-filter" placeholder="筛选名称或说明…" autocomplete="off" aria-label="筛选参数">
+    <div class="cfg-ap-body">
+      <aside class="cfg-ap-tree-panel" aria-label="参数分组">
+        <div id="cfg-ap-tree" class="cfg-ap-tree"></div>
+      </aside>
+      <div class="cfg-ap-main">
+        <div class="cfg-ap-toolbar" role="toolbar" aria-label="参数表工具">
+          <button type="button" id="cfg-ap-refresh">刷新参数</button>
+          <button type="button" id="cfg-ap-compare-btn">比对参数…</button>
+          <button type="button" id="cfg-ap-compare-clear">清除比对</button>
+          <button type="button" id="cfg-ap-write" class="cfg-ap-btn-primary">写入参数</button>
+          <input type="file" id="cfg-ap-compare-file" class="visually-hidden" accept=".param,.txt,text/plain">
+          <input type="search" id="cfg-ap-filter" placeholder="筛选名称或说明…" autocomplete="off" aria-label="筛选参数">
+        </div>
+        <p id="cfg-ap-status" class="cfg-ap-status" aria-live="polite"></p>
+        <div class="cfg-ap-table-scroll">
+          <table class="cfg-ap-table" aria-label="飞控全部参数">
+            <thead>
+              <tr>
+                <th scope="col">名称</th>
+                <th scope="col">值</th>
+                <th scope="col">比对文件</th>
+                <th scope="col">说明</th>
+              </tr>
+            </thead>
+            <tbody id="cfg-ap-tbody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <p id="cfg-ap-status" class="cfg-ap-status" aria-live="polite"></p>
-    <div class="cfg-ap-table-scroll">
-      <table class="cfg-ap-table" aria-label="飞控全部参数">
-        <thead>
-          <tr>
-            <th scope="col">名称</th>
-            <th scope="col">值</th>
-            <th scope="col">比对文件</th>
-            <th scope="col">说明</th>
-          </tr>
-        </thead>
-        <tbody id="cfg-ap-tbody"></tbody>
-      </table>
+  </div>
+</div>
+
+<div id="gcsPrefetchModal" class="gcs-prefetch-modal hidden" role="dialog" aria-modal="true" aria-labelledby="gcsPrefetchTitle" aria-hidden="true">
+  <div class="gcs-prefetch-panel">
+    <h2 id="gcsPrefetchTitle">预取离线地图</h2>
+    <div class="gcs-prefetch-bounds">
+      南 <span id="gcsPrefetchSouth">—</span> · 西 <span id="gcsPrefetchWest">—</span><br>
+      北 <span id="gcsPrefetchNorth">—</span> · 东 <span id="gcsPrefetchEast">—</span>
     </div>
+    <div class="gcs-prefetch-zoom-row">
+      <label>最小级别 <input type="number" id="gcsPrefetchZoomMin" min="0" max="19" value="14"></label>
+      <label>最大级别 <input type="number" id="gcsPrefetchZoomMax" min="0" max="19" value="17"></label>
+    </div>
+    <div id="gcsPrefetchEstimate" class="gcs-prefetch-estimate"></div>
+    <div id="gcsPrefetchProgress" class="gcs-prefetch-progress"></div>
+    <div class="gcs-prefetch-actions">
+      <button type="button" id="gcsPrefetchStopBtn">停止</button>
+      <button type="button" id="gcsPrefetchCancelBtn">关闭</button>
+      <button type="button" id="gcsPrefetchStartBtn" class="primary">开始下载</button>
+    </div>
+    <p class="gcs-prefetch-hint">在地图上按住 Shift 拖拽矩形选区；或点顶栏「预取地图」使用当前视野。</p>
   </div>
 </div>
 
@@ -875,6 +900,8 @@ an zhai<!DOCTYPE html>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 <script src="JS/core/globals.js" defer></script>
 <script src="JS/core/map-layers.js" defer></script>
+<script src="JS/ui/map-prefetch.js" defer></script>
+<script src="JS/ui/map-tile-settings.js" defer></script>
 <script src="JS/core/ardupilot-board-types.js" defer></script>
 <script src="JS/core/ardupilot-devid.js" defer></script>
 <script src="JS/ui/status-messages.js" defer></script>
@@ -895,7 +922,9 @@ an zhai<!DOCTYPE html>
 <script src="JS/core/dronecan-labels-zh.js?v=3" defer></script>
 <script src="JS/core/dronecan-registry.js?v=4" defer></script>
 <script src="JS/ui/overview-sensors.js" defer></script>
+<script src="JS/core/vehicle-profile.js" defer></script>
 <script src="JS/ui/overview-preflight.js?v=8" defer></script>
+<script src="JS/ui/vehicle-marker-icons.js" defer></script>
 <script src="JS/ui/hud-map-tabs.js" defer></script>
 <script src="JS/mission/mission-model.js" defer></script>
 <script src="JS/mission/ardupilot-mission-compat.js" defer></script>
@@ -925,7 +954,7 @@ an zhai<!DOCTYPE html>
 <script src="JS/ui/compass-calibration.js" defer></script>
 <script src="JS/ui/sensor-calibration.js" defer></script>
 <script src="JS/ui/dronecan-setup.js?v=162" defer></script>
-<script src="JS/ui/all-params.js?v=20260527b" defer></script>
+<script src="JS/ui/all-params.js?v=20260528a" defer></script>
 
 </body>
 </html>

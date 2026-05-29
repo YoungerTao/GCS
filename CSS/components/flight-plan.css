@@ -1291,25 +1291,29 @@
 
 .fp-vehicle-marker-wrap {
   display: block;
-  width: 40px;
-  height: 40px;
+  width: 80px;
+  height: 80px;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.55));
 }
 
 .fp-vehicle-marker-rot {
   display: block;
-  width: 40px;
-  height: 40px;
+  width: 80px;
+  height: 80px;
   transform-origin: 50% 50%;
 }
 
 .fp-vehicle-marker-svg {
   display: block;
-  width: 40px;
-  height: 40px;
+  width: 80px;
+  height: 80px;
 }
 
-.fp-vehicle-marker--multirotor {
+.fp-vehicle-marker--multirotor,
+.fp-vehicle-marker--multirotor-plus,
+.fp-vehicle-marker--multirotor-x,
+.fp-vehicle-marker--multirotor-v,
+.fp-vehicle-marker--multirotor-h {
   color: #4fc3f7;
 }
 
@@ -1323,6 +1327,10 @@
 
 .fp-vehicle-marker--rover {
   color: #66d7a6;
+}
+
+.fp-vehicle-marker--disconnected {
+  color: #9ad8ff;
 }
 
 @media (max-width: 1100px) {

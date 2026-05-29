@@ -23,6 +23,127 @@
   let filterDebounce = null;
   /** 当前展开说明的参数名（一次仅展开一行） */
   let expandedParamKey = null;
+  /** 参数树：选中分组 id（__ALL__ = 全部） */
+  const TREE_ALL = "__ALL__";
+  let selectedGroupId = TREE_ALL;
+  /** 上次建树使用的机型源（Copter/Plane），用于 heartbeat 切换 */
+  let lastTreeVehicleSrc = "";
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function vehicleSrcForTree() {
+    if (typeof window.gcsDetectFirmwareProfile === "function") {
+      const kind = window.gcsDetectFirmwareProfile().kind || "unknown";
+      if (kind === "plane" || kind === "vtol") return "Plane";
+      if (kind === "copter") return "Copter";
+    }
+    return "Copter";
+  }
+
+  function prefixGroup(name) {
+    const u = String(name).toUpperCase();
+    const m = u.match(/^([A-Z]+)(\d*)/);
+    if (!m || !m[1]) return "OTHER";
+    return m[1] + (m[2] || "");
+  }
+
+  function resolveOfficialGrp(paramName) {
+    const u = String(paramName).toUpperCase();
+    const e = paramDb[u];
+    if (!e) return "";
+    const src = vehicleSrcForTree();
+    if (e.grpBySrc && typeof e.grpBySrc[src] === "string") return e.grpBySrc[src];
+    if (typeof e.grp === "string") return e.grp;
+    return "";
+  }
+
+  function normalizeGroupId(grp) {
+    if (!grp) return "";
+    return String(grp).replace(/_+$/, "");
+  }
+
+  function effectiveGroupId(paramName) {
+    const official = resolveOfficialGrp(paramName);
+    if (official) {
+      const norm = normalizeGroupId(official);
+      return norm || prefixGroup(paramName);
+    }
+    return prefixGroup(paramName);
+  }
+
+  function groupDisplayLabel(groupId) {
+    if (groupId === TREE_ALL) return "全部参数";
+    if (groupId === "OTHER") return "未分类";
+    return groupId;
+  }
+
+  function buildParamTree(keys) {
+    const counts = new Map();
+    for (const k of keys) {
+      const gid = effectiveGroupId(k);
+      counts.set(gid, (counts.get(gid) || 0) + 1);
+    }
+    const groups = Array.from(counts.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0], "en", { sensitivity: "base" })
+    );
+    return { total: keys.length, groups };
+  }
+
+  function ensureSelectedGroupValid(keys) {
+    if (selectedGroupId === TREE_ALL) return;
+    const { groups } = buildParamTree(keys);
+    if (!groups.some(([g]) => g === selectedGroupId)) selectedGroupId = TREE_ALL;
+  }
+
+  function renderParamTree() {
+    const root = el("cfg-ap-tree");
+    if (!root) return;
+    const pmap = window.params;
+    if (!(pmap instanceof Map) || pmap.size === 0) {
+      root.innerHTML = '<div class="cfg-ap-tree-empty muted">暂无参数</div>';
+      return;
+    }
+    const keys = Array.from(pmap.keys());
+    ensureSelectedGroupValid(keys);
+    const { total, groups } = buildParamTree(keys);
+    const parts = [
+      `<button type="button" class="cfg-ap-tree-node${selectedGroupId === TREE_ALL ? " is-active" : ""}" data-grp="${TREE_ALL}">`,
+      `<span>${escapeHtml(groupDisplayLabel(TREE_ALL))}</span>`,
+      `<span class="cfg-ap-tree-count">${total}</span>`,
+      "</button>",
+    ];
+    for (const [gid, count] of groups) {
+      const active = selectedGroupId === gid ? " is-active" : "";
+      parts.push(
+        `<button type="button" class="cfg-ap-tree-node${active}" data-grp="${escapeHtml(gid)}">`,
+        `<span>${escapeHtml(groupDisplayLabel(gid))}</span>`,
+        `<span class="cfg-ap-tree-count">${count}</span>`,
+        "</button>"
+      );
+    }
+    root.innerHTML = parts.join("");
+    root.querySelectorAll(".cfg-ap-tree-node").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        selectedGroupId = btn.dataset.grp || TREE_ALL;
+        renderParamTree();
+        applyRowFilter();
+      });
+    });
+  }
+
+  function onTreeContextMaybeChanged() {
+    const src = vehicleSrcForTree();
+    if (src === lastTreeVehicleSrc) return;
+    lastTreeVehicleSrc = src;
+    renderParamTree();
+    applyRowFilter();
+  }
 
   /** 串口已连接且可写 */
   function fcConnected() {
@@ -201,8 +322,10 @@
     rows.forEach((tr) => {
       const name = (tr.dataset.p || "").toLowerCase();
       const desc = (tr.dataset.desc || "").toLowerCase();
-      const hit = !q || name.includes(q) || desc.includes(q);
-      tr.style.display = hit ? "" : "none";
+      const rowGrp = tr.dataset.grp || "";
+      const grpHit = selectedGroupId === TREE_ALL || rowGrp === selectedGroupId;
+      const textHit = !q || name.includes(q) || desc.includes(q);
+      tr.style.display = grpHit && textHit ? "" : "none";
     });
     applyExpandedState();
   }
@@ -227,6 +350,7 @@
       empty.textContent = "暂无参数。请连接飞控后等待自动加载，或点击「刷新参数」。";
       const tbl = scroll.querySelector("table.cfg-ap-table");
       if (tbl) tbl.style.display = "none";
+      renderParamTree();
       updateStatus();
       return;
     }
@@ -247,6 +371,7 @@
       const draft = drafts.has(k) ? drafts.get(k) : fc;
       const tr = document.createElement("tr");
       tr.dataset.p = k;
+      tr.dataset.grp = effectiveGroupId(k);
       const descText = paramDescFor(k);
       tr.dataset.desc = descText;
 
@@ -318,6 +443,8 @@
 
     tbody.innerHTML = "";
     tbody.appendChild(frag);
+    lastTreeVehicleSrc = vehicleSrcForTree();
+    renderParamTree();
     applyRowFilter();
     applyExpandedState();
     updateStatus();
@@ -477,6 +604,8 @@
 
     document.addEventListener("gcs-connection", () => updateStatus());
 
+    document.addEventListener("gcs-heartbeat", () => onTreeContextMaybeChanged());
+
     document.addEventListener("gcs-airframe-params-changed", (ev) => {
       if (ev.detail && ev.detail.bulk) rebuildTable();
       else window.refreshAllParamsTable();
@@ -489,6 +618,7 @@
         /* 任一路由失败不阻断界面 */
       })
       .finally(() => {
+        lastTreeVehicleSrc = vehicleSrcForTree();
         wire();
         rebuildTable();
       });

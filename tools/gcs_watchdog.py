@@ -16,6 +16,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from gcs_supervisor import ensure_bridge_process, bridge_healthy, gcs_python  # noqa: E402
+from map_tiles_supervisor import ensure_tile_server, tile_server_healthy  # noqa: E402
 
 REPO_ROOT = TOOLS_DIR.parent
 RUNTIME_SCRIPT = TOOLS_DIR / "gcs-runtime.py"
@@ -59,6 +60,7 @@ def launch_runtime(wait_s: float = 20.0) -> bool:
     while time.time() < deadline:
         if runtime_healthy():
             ensure_bridge_process(wait_s=10.0, force_restart=True)
+            ensure_tile_server(wait_s=10.0)
             return True
         time.sleep(0.3)
     return runtime_healthy()
@@ -92,6 +94,7 @@ class LauncherHandler(BaseHTTPRequestHandler):
                 "service": "gcs-watchdog",
                 "runtimeUp": runtime_healthy(),
                 "bridgeUp": bridge_healthy(),
+                "tileServerUp": tile_server_healthy(),
             })
             return
         self.send_response(404)
@@ -106,6 +109,7 @@ class LauncherHandler(BaseHTTPRequestHandler):
                 "ok": ok,
                 "runtimeUp": runtime_healthy(),
                 "bridgeUp": bridge_healthy(),
+                "tileServerUp": tile_server_healthy(),
             })
             return
         self.send_response(404)

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="100%" height="100%">
+  <g transform="translate(400, 430)"> 
+    <path d="
+      M 0,-280 
+      C 45,-280 75,-160 75,-40 
+      L 310,60 
+      C 325,70 310,110 280,100 
+      L 75,20 
+      L 75,150 
+      L 150,220 
+      C 160,230 145,260 120,250 
+      L 0,190 
+      L -120,250 
+      C -145,260 -160,230 -150,220 
+      L -75,150 
+      L -75,20 
+      L -280,100 
+      C -310,110 -325,70 -310,60 
+      L -75,-40 
+      C -75,-160 -45,-280 0,-280 
+      Z" 
+      fill="none" 
+      stroke="#fbc28b" 
+      stroke-width="24" 
+      stroke-linejoin="round" 
+      stroke-linecap="round"
+    />
+  </g>
+</svg>

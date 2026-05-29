@@ -9,9 +9,16 @@
   https://autotest.ardupilot.org/Parameters/ArduSub/apm.pdef.json
 
 输出：JS/data/apm-param-db.json
-  每条：PARAM_NAME → { "n": 显示名, "d": 说明正文, "u": 单位(可选), "rb": 是否需重启, "src": 来源机型 }
+  每条：PARAM_NAME → { "n", "d", "u", "rb", "src", "grp", "grpBySrc" }
 
 合并规则：同名参数保留「说明字段 d 更长」的一条；长度相同时保留显示名 n 更长的一条。
+grpBySrc 始终合并各机型命名空间（支持参数树 Scheme C）。
+
+中文高质量翻译流程（仅 d「说明」字段，reviewable）：
+  1. python tools/fetch_apm_param_db.py          # 产出英文 + grp
+  2. python translate_params_ai.py --review      # 仅 d，生成 review JSON
+  3. 人工 review tools/translation-review/*.json
+  4. python tools/apply-reviewed-translations.py <review-file>   # 合并到 cache + db
 
 用法（在项目根目录执行）：
   python tools/fetch_apm_param_db.py
@@ -38,28 +45,28 @@ SOURCES = [
 PARAM_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
-def iter_param_blocks(root: object) -> dict[str, dict]:
-    """遍历 pdef 根对象，收集所有参数块（兼容顶层空字符串 "" 作为命名空间包裹）。"""
-    out: dict[str, dict] = {}
+def is_param_block(obj: object) -> bool:
+    return isinstance(obj, dict) and ("Description" in obj or "DisplayName" in obj)
+
+
+def iter_param_blocks(root: object) -> dict[str, tuple[dict, str]]:
+    """遍历 pdef 根对象，收集 (参数块, 官方命名空间 grp)。"""
+    out: dict[str, tuple[dict, str]] = {}
     if not isinstance(root, dict):
         return out
 
-    def consider(name: str, block: object) -> None:
-        if not isinstance(name, str) or not PARAM_KEY_RE.match(name):
-            return
-        if not isinstance(block, dict):
-            return
-        if "Description" not in block and "DisplayName" not in block:
-            return
-        out[name] = block
-
-    for k, v in root.items():
-        if isinstance(v, dict):
-            if "Description" in v or "DisplayName" in v:
-                consider(k, v)
+    def walk(node: dict, grp: str) -> None:
+        for key, val in node.items():
+            if not isinstance(val, dict):
+                continue
+            if is_param_block(val):
+                if isinstance(key, str) and PARAM_KEY_RE.match(key):
+                    out[key] = (val, grp)
             else:
-                for sk, sv in v.items():
-                    consider(sk, sv)
+                child_grp = key if isinstance(key, str) else ""
+                walk(val, child_grp)
+
+    walk(root, "")
     return out
 
 
@@ -119,7 +126,7 @@ def enrich_description(block: dict) -> str:
     return "\n\n".join(parts) if parts else ""
 
 
-def slim_entry(name: str, block: dict, src: str) -> dict:
+def slim_entry(name: str, block: dict, src: str, grp: str) -> dict:
     """将官方单条 pdef 压缩为输出 JSON 中的一条记录。"""
     dn = block.get("DisplayName")
     display = dn.strip() if isinstance(dn, str) else ""
@@ -130,7 +137,13 @@ def slim_entry(name: str, block: dict, src: str) -> dict:
     rb = None
     if isinstance(reboot, str) and reboot.lower() == "true":
         rb = True
-    entry: dict = {"n": display or name, "d": desc, "src": src}
+    entry: dict = {
+        "n": display or name,
+        "d": desc,
+        "src": src,
+        "grp": grp,
+        "grpBySrc": {src: grp},
+    }
     if u:
         entry["u"] = u
     if rb:
@@ -138,21 +151,17 @@ def slim_entry(name: str, block: dict, src: str) -> dict:
     return entry
 
 
-def merge_prefer_longer(
-    merged: dict[str, dict],
-    name: str,
-    entry: dict,
-) -> None:
-    """同名参数合并：优先保留说明更长的条目。"""
+def merge_entries(merged: dict[str, dict], name: str, entry: dict) -> None:
+    """同名参数合并：优先保留说明更长的条目；grpBySrc 始终合并。"""
     if name not in merged:
         merged[name] = entry
         return
     old = merged[name]
+    grp_by = {**(old.get("grpBySrc") or {}), **(entry.get("grpBySrc") or {})}
     ld, nd = len(old.get("d") or ""), len(entry.get("d") or "")
-    if nd > ld:
-        merged[name] = entry
-    elif nd == ld and len(entry.get("n") or "") > len(old.get("n") or ""):
-        merged[name] = entry
+    pick_new = nd > ld or (nd == ld and len(entry.get("n") or "") > len(old.get("n") or ""))
+    base = entry if pick_new else old
+    merged[name] = {**base, "grpBySrc": grp_by}
 
 
 def download(url: str, dest: Path, offline: bool) -> dict | None:
@@ -205,9 +214,9 @@ def main() -> int:
             continue
         blocks = iter_param_blocks(data)
         print(f"  {label}: {len(blocks)} 条参数")
-        for pname, block in blocks.items():
-            entry = slim_entry(pname, block, label)
-            merge_prefer_longer(merged, pname, entry)
+        for pname, (block, grp) in blocks.items():
+            entry = slim_entry(pname, block, label, grp)
+            merge_entries(merged, pname, entry)
 
     if not merged:
         print("未解析到任何参数元数据。", file=sys.stderr)

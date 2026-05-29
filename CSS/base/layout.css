@@ -14,11 +14,11 @@ body {
   --gap: 10px;
   /* 左列宽度：HUD/快速面板同宽，随窗口自适应 */
   --left-pane: clamp(320px, 35vw, 640px);
-  /* 底部最小高度：其余高度由 flex 自动填满 */
-  --bottom-min: 220px;
+  /* 日志区最小高度 */
+  --log-min: 220px;
   --splitter-w: 8px;
-  /* 上半区高度：由 JS 动态设置，确保 HUD 正方形 */
-  --main-pane-h: auto;
+  /* HUD 高度：由 JS 动态设置 */
+  --hud-height: 400px;
 }
 
 .top-bar {
@@ -3168,18 +3168,29 @@ select option {
   to { transform: rotate(360deg); }
 }
 
-.main-area {
+.flight-data-layout {
   display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
   gap: var(--gap);
   padding: 10px;
-  flex: 0 0 auto;
-  height: var(--main-pane-h);
+  align-items: stretch;
+}
+
+.flight-data-left {
+  flex: 0 0 var(--left-pane);
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  align-items: stretch;     /* 让 HUD 和地图高度一致 */
+  min-width: 0;
 }
 
 .hud-container {
-  flex: 0 0 var(--left-pane);  /* HUD 左列宽度 */
+  flex: 0 0 var(--hud-height);
+  height: var(--hud-height);
+  min-height: 160px;
+  width: 100%;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -3187,8 +3198,6 @@ select option {
   position: relative;
   overflow: hidden;
   background: #000;
-  height: 100%;
-  min-height: 0;
 }
 
 #hud {
@@ -3201,14 +3210,14 @@ select option {
 }
 
 .map-container {
-  flex: 1;                  /* 地图占剩余空间 */
+  flex: 1;
   border: 1px solid #333;
   overflow: hidden;
   min-width: 300px;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;             /* 始终和 HUD 同高 */
-  min-height: 0;
 }
 
 #map {
@@ -3217,32 +3226,16 @@ select option {
   flex: 1;
 }
 
-.bottom-area {
-  display: flex;
-  gap: var(--gap);
-  padding: 10px;
-  flex: 1;
-  min-height: var(--bottom-min);
-}
-
-/* 关键修改：让日志区域和HUD宽度一致 */
 .log-container {
-  flex: 0 0 var(--left-pane);  /* 和HUD宽度完全一致 */
+  flex: 1;
+  min-height: var(--log-min);
   border: 1px solid #333;
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.params-container {
-  flex: 1;                  /* 参数区域占剩余空间 */
-  border: 1px solid #333;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-/* draggable vertical splitter */
+/* draggable vertical splitter (left pane width) */
 .v-splitter{
   flex: 0 0 var(--splitter-w);
   cursor: col-resize;
@@ -3252,13 +3245,30 @@ select option {
   position: relative;
 }
 .v-splitter:hover{ background: rgba(42,161,152,0.22); border-color: rgba(42,161,152,0.45); }
+
+/* draggable horizontal splitter (HUD / log height) */
+.h-splitter{
+  flex: 0 0 8px;
+  cursor: row-resize;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.06);
+  position: relative;
+}
+.h-splitter:hover{ background: rgba(42,161,152,0.22); border-color: rgba(42,161,152,0.45); }
+
 body.resizing,
 body.resizing *{
   cursor: col-resize !important;
   user-select: none !important;
 }
+body.resizing-h,
+body.resizing-h *{
+  cursor: row-resize !important;
+  user-select: none !important;
+}
 
-#log, #params {
+#log {
   flex: 1;
   overflow: auto;
   background: #000;

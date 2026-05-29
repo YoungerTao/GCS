@@ -170,6 +170,30 @@ async function bridgeReadLoop() {
   }
 }
 
+let _bridgeDataWatchdog = null;
+function startBridgeDataWatchdog() {
+  if (_bridgeDataWatchdog) clearInterval(_bridgeDataWatchdog);
+  _bridgeDataWatchdog = setInterval(async () => {
+    if (!window._bridgeConnActive) {
+      clearInterval(_bridgeDataWatchdog);
+      _bridgeDataWatchdog = null;
+      return;
+    }
+    try {
+      const st = await bridgeFetch("/bridge-status", null, { skipEnsure: true });
+      const readerDead = st?.readerAlive === false;
+      const noRecentSerialRx = typeof st?.lastRxAgeSec === "number" && st.lastRxAgeSec > 12;
+      const noMavlink = !window._lastMavlinkRxMs || (Date.now() - window._lastMavlinkRxMs > 8000);
+      if ((readerDead || noRecentSerialRx) && noMavlink) {
+        log("⚠️ 桥接串口读线程或数据已停止流动（readerAlive/lastRx 异常），链路疑似中断。建议：检查飞控供电与USB线缆、确认波特率正确、或断开后重连 / 重启 GCS 后台。", "bridge");
+        // Do not auto force-close here (user may be mid-flight); just surface the diagnostic.
+      }
+    } catch (_) {
+      // ignore transient status poll errors
+    }
+  }, 7000);
+}
+
 // ========== 串口生命周期管理 ==========
 
 /**
@@ -192,6 +216,10 @@ async function closeSerialResources() {
   if (window._postConnectInfoRetryTimer) {
     clearTimeout(window._postConnectInfoRetryTimer);
     window._postConnectInfoRetryTimer = null;
+  }
+  if (_bridgeDataWatchdog) {
+    clearInterval(_bridgeDataWatchdog);
+    _bridgeDataWatchdog = null;
   }
   if (typeof window.endParamLoadingUI === "function" && window._paramLoadActive) {
     window.endParamLoadingUI(false, "disconnect");
@@ -485,6 +513,7 @@ async function connectImpl() {
         sendHeartbeat().catch(() => {});
         setTimeout(() => sendHeartbeat().catch(() => {}), 250);
         bridgeReadLoop();
+        startBridgeDataWatchdog();
         bumpConnectionSession();
         setConnectionUI("connected");
         if (typeof window.rememberSelectedPort === "function") {

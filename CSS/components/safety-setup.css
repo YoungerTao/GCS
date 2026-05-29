@@ -57,6 +57,129 @@
   margin: 0 0 10px;
 }
 
+.safety-linkfs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.safety-linkfs-grid > .safety-card--sub {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.safety-card--sub {
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(116, 146, 187, 0.25);
+  box-shadow: none;
+}
+
+.safety-card--sub h5 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #c8d8f0;
+}
+
+.safety-form-grid--stack {
+  grid-template-columns: 1fr;
+}
+
+/* 子卡片较窄：表单单列 + 控件不溢出 */
+#safety-linkfs-card .safety-form-grid {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+#safety-linkfs-card .safety-form-grid label {
+  min-width: 0;
+}
+
+#safety-linkfs-card .safety-form-grid input,
+#safety-linkfs-card .safety-form-grid select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+#safety-linkfs-card .safety-form-grid select {
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+#safety-linkfs-card .safety-form-grid select:focus,
+#safety-linkfs-card .safety-form-grid input:focus {
+  outline: 2px solid rgba(77, 163, 255, 0.5);
+  outline-offset: 0;
+}
+
+#safety-linkfs-card .rtl-field-hint {
+  margin-top: 4px;
+}
+
+#safety-linkfs-card .safety-param-tag {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.safety-param-tag {
+  font-size: 11px;
+  color: #7a94b8;
+  font-weight: 400;
+}
+
+.safety-fs-options-heading {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #c8d8f0;
+  letter-spacing: 0.02em;
+}
+
+.safety-fs-options-intro {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.safety-fs-options-bits {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.safety-fs-options-bit {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #c8d8f0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.safety-fs-options-bit input {
+  width: auto;
+  height: auto;
+  margin: 4px 0 0;
+  flex-shrink: 0;
+}
+
+#safety-fs-options-readout {
+  font-size: 12px;
+}
+
+#safety-fs-detect-banner {
+  margin-bottom: 8px;
+}
+
 .safety-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -82,9 +205,98 @@
   box-sizing: border-box;
 }
 
+.rtl-type-banner {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(77, 163, 255, 0.1);
+  border: 1px solid rgba(77, 163, 255, 0.25);
+}
+
+.rtl-type-banner-warn {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.rtl-field-hint {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+
 .safety-note {
   margin: 0;
   line-height: 1.5;
+}
+
+.safety-arming-intro {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.safety-arming-bits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin-bottom: 10px;
+}
+
+.safety-arming-bits.is-skip-all {
+  opacity: 0.65;
+}
+
+.safety-arming-bit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #c8d8f0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.safety-arming-bit input {
+  width: auto;
+  height: auto;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.safety-arming-bit-hint {
+  border-left: 3px solid rgba(245, 158, 11, 0.75);
+  padding-left: 6px;
+}
+
+.safety-arming-skip-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #fbbf24;
+  margin: 0 0 8px;
+  cursor: pointer;
+}
+
+.safety-arming-skip-all input {
+  width: auto;
+  height: auto;
+  margin: 0;
+}
+
+#safety-arming-mask-readout {
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 840px) {
+  .safety-arming-bits {
+    grid-template-columns: 1fr;
+  }
 }
 
 .safety-link-btn,
@@ -119,6 +331,12 @@
 
 @media (max-width: 840px) {
   .safety-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .safety-linkfs-grid {
+    grid-template-columns: 1fr;
+  }
+  #safety-linkfs-card .safety-form-grid {
     grid-template-columns: 1fr;
   }
   .safety-write-actions {

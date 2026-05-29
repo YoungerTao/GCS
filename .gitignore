@@ -27,6 +27,10 @@ yarn-error.log*
 
 .venv/
 
+# Offline map tile cache (user home ~/.gcs/map-tiles by default)
+map-tiles/
+.gcs/map-tiles/
+
 # Local-only
 .DS_Store?
 ._*

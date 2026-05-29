@@ -168,9 +168,26 @@ _PORT_PROBE_CACHE = {"at": 0.0, "ports": []}
 _PORT_PROBE_LOCK = threading.Lock()
 
 
+def _is_port_actively_bridged(dev_id):
+    """Return True if this device is currently opened by the main MAVLink or SLCAN hub (avoid double-open during probe)."""
+    if not dev_id:
+        return False
+    d = str(dev_id).strip()
+    for hub in (MAVLINK_HUB, SLCAN_HUB):
+        try:
+            if hub and hub.port and str(hub.port).strip() == d:
+                st = hub.status()
+                if st.get("open"):
+                    return True
+        except Exception:
+            pass
+    return False
+
 def _should_probe_port(item):
     dev = str(item.get("deviceId", "")).lower()
     if any(x in dev for x in ("bluetooth", "incoming-port", "debug-console")):
+        return False
+    if _is_port_actively_bridged(item.get("deviceId")):
         return False
     return any(x in dev for x in ("usbmodem", "usbserial", "ttyacm", "cu.", "com"))
 
@@ -435,6 +452,12 @@ def _apply_port_role_probes(ports, baudrate=115200):
         for item in group:
             if item.get("probeRole") in ("mavlink", "slcan"):
                 continue
+            if _is_port_actively_bridged(item.get("deviceId")):
+                item["probeRole"] = _classify_port_item(item)
+                item["probeConfidence"] = "n/a"
+                item["probeDetail"] = "in-use-by-bridge"
+                _sync_port_role_fields(item)
+                continue
             analysis = _analyze_port_sample(_collect_port_sample(item.get("deviceId"), baudrate))
             _apply_probe_analysis(item, analysis)
 
@@ -487,14 +510,22 @@ class SerialHub:
         self.baudrate = 115200
         self.rx_buffer = bytearray()
         self.reader_thread = None
+        self._last_rx_at = 0.0
+        self._rx_bytes_total = 0
+        self._reader_alive = False
 
     def status(self):
         with self.lock:
+            now = time.time()
+            last_rx_age = (now - self._last_rx_at) if getattr(self, "_last_rx_at", 0) else 999
             return {
                 "label": self.label,
                 "open": self.serial is not None and getattr(self.serial, "is_open", False),
                 "port": self.port,
                 "baudrate": self.baudrate,
+                "lastRxAgeSec": round(last_rx_age, 2) if last_rx_age < 999 else None,
+                "rxBytesTotal": getattr(self, "_rx_bytes_total", 0),
+                "readerAlive": getattr(self, "_reader_alive", False),
             }
 
     def open(self, port, baudrate):
@@ -502,11 +533,20 @@ class SerialHub:
             raise RuntimeError("pyserial is not installed")
         self.close()
         s = serial.Serial(port, baudrate=baudrate, timeout=0.2, write_timeout=0.5)
+        # Prevent USB-serial adapters from asserting DTR/RTS which often resets ArduPilot/CUAV/etc flight controllers
+        try:
+            s.dtr = False
+            s.rts = False
+        except Exception:
+            pass
         with self.lock:
             self.serial = s
             self.port = port
             self.baudrate = baudrate
             self.rx_buffer = bytearray()
+            self._last_rx_at = 0.0
+            self._rx_bytes_total = 0
+            self._reader_alive = True
         self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.reader_thread.start()
         return self.status()
@@ -517,6 +557,9 @@ class SerialHub:
             self.serial = None
             self.port = None
             self.rx_buffer = bytearray()
+            self._last_rx_at = 0.0
+            self._rx_bytes_total = 0
+            self._reader_alive = False
         if s is not None:
             try:
                 s.close()
@@ -544,15 +587,22 @@ class SerialHub:
             with self.lock:
                 s = self.serial
             if s is None or not getattr(s, "is_open", False):
+                with self.lock:
+                    self._reader_alive = False
                 return
             try:
                 data = s.read(4096)
                 if data:
+                    now = time.time()
                     with self.lock:
                         self.rx_buffer.extend(data)
+                        self._last_rx_at = now
+                        self._rx_bytes_total = getattr(self, "_rx_bytes_total", 0) + len(data)
                     if self.label in ("slcan", "bridge"):
                         SLCAN_MONITOR.feed(data)
             except Exception:
+                with self.lock:
+                    self._reader_alive = False
                 return
 
 
@@ -932,7 +982,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            send_json(self, 200, {"ok": True, "service": "com-bridge"})
+            mav = MAVLINK_HUB.status() if 'MAVLINK_HUB' in globals() else {}
+            send_json(self, 200, {
+                "ok": True,
+                "service": "com-bridge",
+                "mavlinkBridge": {
+                    "open": mav.get("open", False),
+                    "port": mav.get("port"),
+                    "lastRxAgeSec": mav.get("lastRxAgeSec"),
+                    "readerAlive": mav.get("readerAlive"),
+                },
+            })
             return
         if self.path.startswith("/com-ports"):
             try:

@@ -977,11 +977,11 @@
   }
 
   function normalizeFlightPlanPlatform(platform) {
-    const p = String(platform || "multirotor");
-    if (p === "plane" || p === "vtol" || p === "rover") {
-      return p;
+    const VMI = window.VehicleMarkerIcons;
+    if (VMI && typeof VMI.normalizeVehicleMarkerKind === "function") {
+      return VMI.normalizeVehicleMarkerKind(platform);
     }
-    return "multirotor";
+    return "multirotor-x";
   }
 
   function createHomeMarkerIcon(homeSource) {
@@ -1000,42 +1000,11 @@
 
   function vehicleMarkerSvg(platform) {
     const kind = normalizeFlightPlanPlatform(platform);
-    if (kind === "plane") {
-      return (
-        '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true">' +
-        '<path fill="currentColor" d="M16 3 L20 14 L29 16 L20 18 L18 29 L16 24 L14 29 L12 18 L3 16 L12 14 Z"/>' +
-        "</svg>"
-      );
+    const VMI = window.VehicleMarkerIcons;
+    if (VMI && typeof VMI.vehicleMarkerSvg === "function") {
+      return VMI.vehicleMarkerSvg(kind);
     }
-    if (kind === "vtol") {
-      return (
-        '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true">' +
-        '<path fill="currentColor" d="M16 4 L19 13 L28 15 L19 17 L17 26 L16 22 L15 26 L13 17 L4 15 L13 13 Z"/>' +
-        '<circle fill="currentColor" cx="8" cy="20" r="2.5"/>' +
-        '<circle fill="currentColor" cx="24" cy="20" r="2.5"/>' +
-        "</svg>"
-      );
-    }
-    if (kind === "rover") {
-      return (
-        '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true">' +
-        '<rect fill="currentColor" x="5" y="12" width="22" height="10" rx="3"/>' +
-        '<circle fill="#0e141b" cx="10" cy="24" r="3.5"/>' +
-        '<circle fill="#0e141b" cx="22" cy="24" r="3.5"/>' +
-        "</svg>"
-      );
-    }
-    return (
-      '<svg class="fp-vehicle-marker-svg" viewBox="0 0 32 32" aria-hidden="true">' +
-      '<circle fill="currentColor" cx="16" cy="16" r="3"/>' +
-      '<rect fill="currentColor" x="3" y="14.5" width="26" height="3" rx="1.5"/>' +
-      '<rect fill="currentColor" x="14.5" y="3" width="3" height="26" rx="1.5"/>' +
-      '<circle fill="#0e141b" cx="6" cy="6" r="2.2"/>' +
-      '<circle fill="#0e141b" cx="26" cy="6" r="2.2"/>' +
-      '<circle fill="#0e141b" cx="6" cy="26" r="2.2"/>' +
-      '<circle fill="#0e141b" cx="26" cy="26" r="2.2"/>' +
-      "</svg>"
-    );
+    return "";
   }
 
   function createVehicleMapIcon(platform, headingDeg) {
@@ -1051,8 +1020,8 @@
         vehicleMarkerSvg(platform) +
         "</span>" +
         "</span>",
-      iconSize: [40, 40],
-      iconAnchor: [20, 20]
+      iconSize: [80, 80],
+      iconAnchor: [40, 40]
     });
   }
 
@@ -1910,10 +1879,15 @@
       function () {
         const VT = window.VehicleTemplates;
         const detect = VT && VT.detectVehiclePlatform ? VT.detectVehiclePlatform() : "multirotor";
-        if (connected) {
-          return detect;
+        const base = connected ? detect : platformOverride || detect;
+        const VMI = window.VehicleMarkerIcons;
+        if (connected && VMI && typeof VMI.detectVehicleMarkerKind === "function") {
+          return VMI.detectVehicleMarkerKind({ requireConnected: false });
         }
-        return platformOverride || detect;
+        if (VMI && base === "multirotor" && typeof VMI.detectMultirotorFrameKind === "function") {
+          return VMI.detectMultirotorFrameKind();
+        }
+        return base;
       },
       [platformOverride, connected, fcParamRevision]
     );
@@ -2351,6 +2325,9 @@
         }).setView(center, 13);
 
         addFlightPlanBaseLayers(map);
+        if (window.GcsMapPrefetch && typeof window.GcsMapPrefetch.setupMap === "function") {
+          window.GcsMapPrefetch.setupMap(map);
+        }
 
         layersRef.current = {
           pathGroup: window.L.layerGroup().addTo(map),

@@ -1,0 +1,50 @@
+{
+  "_meta": {
+    "description": "Reviewable AI translations — 仅 d（说明）字段。编辑 'proposed' 为最终接受的译文，删除不接受的条目。",
+    "instructions": "完成后运行 apply-reviewed-translations.py 合并到 cache + db（保留 grp）。",
+    "generated_at": "20260529-010124",
+    "count": 5
+  },
+  "items": [
+    {
+      "id": "d-1",
+      "param": "AEROM_ALT_ABORT",
+      "field": "d",
+      "source": "Maximum allowable loss in altitude during a trick or sequence from its starting altitude.",
+      "proposed": "特技或动作序列期间相对于起始高度的最大允许高度损失。",
+      "status": "pending"
+    },
+    {
+      "id": "d-2",
+      "param": "AEROM_ANG_ACCEL",
+      "field": "d",
+      "source": "Maximum angular acceleration in maneuvers",
+      "proposed": "机动中的最大角加速度。",
+      "status": "pending"
+    },
+    {
+      "id": "d-3",
+      "param": "AEROM_ANG_TC",
+      "field": "d",
+      "source": "This is the time over which we filter the desired roll to smooth it",
+      "proposed": "这是对期望横滚进行滤波以使其平滑的时间常数。",
+      "status": "pending"
+    },
+    {
+      "id": "d-4",
+      "param": "AEROM_BOX_WIDTH",
+      "field": "d",
+      "source": "Length of aerobatic \"box\"",
+      "proposed": "特技飞行区域（\"box\"）的长度。",
+      "status": "pending"
+    },
+    {
+      "id": "d-5",
+      "param": "AEROM_DEBUG",
+      "field": "d",
+      "source": "This controls the printing of extra debug information on paths",
+      "proposed": "控制是否打印路径的额外调试信息。",
+      "status": "pending"
+    }
+  ]
+}

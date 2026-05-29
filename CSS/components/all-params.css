@@ -43,12 +43,86 @@
 }
 
 .cfg-all-params-wrap {
-  /* 工具栏 + 状态行 + 表格纵向排布 */
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 10px 12px 12px;
+  gap: 8px;
+}
+
+.cfg-ap-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.cfg-ap-tree-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #2d3138;
+  border-radius: 6px;
+  background: rgba(12, 14, 18, 0.85);
+  overflow: hidden;
+}
+
+.cfg-ap-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 4px;
+}
+
+.cfg-ap-tree-empty {
+  padding: 10px 8px;
+  font-size: 12px;
+}
+
+.cfg-ap-tree-node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 2px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #c4cad4;
+  cursor: pointer;
+}
+
+.cfg-ap-tree-node:hover {
+  background: rgba(79, 154, 223, 0.12);
+  color: #eceff3;
+}
+
+.cfg-ap-tree-node.is-active {
+  background: linear-gradient(180deg, rgba(79, 154, 223, 0.35) 0%, rgba(42, 100, 171, 0.4) 100%);
+  color: #fff;
+}
+
+.cfg-ap-tree-count {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.cfg-ap-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -292,4 +366,15 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+@media (max-width: 840px) {
+  .cfg-ap-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .cfg-ap-tree-panel {
+    max-height: 180px;
+  }
 }
