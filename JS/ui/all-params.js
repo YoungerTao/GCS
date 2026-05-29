@@ -313,6 +313,50 @@
     if (wr) wr.disabled = !fcConnected();
   }
 
+  /** 用户正在编辑时推迟的表格重建 */
+  let pendingRebuildAfterEdit = false;
+
+  function isParamInputFocused() {
+    const ae = document.activeElement;
+    return !!(ae && ae.classList && ae.classList.contains("cfg-ap-val-input"));
+  }
+
+  /** 重建前把输入框里未提交的数值写入 drafts，避免被刷掉 */
+  function captureInputDraftsFromDom() {
+    const tbody = el("cfg-ap-tbody");
+    if (!tbody) return;
+    const pmap = window.params;
+    if (!(pmap instanceof Map)) return;
+    tbody.querySelectorAll(".cfg-ap-val-input").forEach(function (inp) {
+      const k = inp.dataset.param;
+      if (!k) return;
+      const v = parseNumLoose(inp.value);
+      if (!Number.isFinite(v)) return;
+      const fc = pmap.get(k);
+      if (valuesClose(v, fc)) drafts.delete(k);
+      else drafts.set(k, v);
+    });
+  }
+
+  function flushPendingRebuildIfNeeded() {
+    if (!pendingRebuildAfterEdit || isParamInputFocused()) return;
+    pendingRebuildAfterEdit = false;
+    rebuildTable();
+  }
+
+  /** 输入过程中即写入草稿，不必等 change/blur */
+  function onInputLive(mapKey, inp) {
+    const pmap = window.params;
+    if (!(pmap instanceof Map)) return;
+    const v = parseNumLoose(inp.value);
+    if (!Number.isFinite(v)) return;
+    const fc = pmap.get(mapKey);
+    if (valuesClose(v, fc)) drafts.delete(mapKey);
+    else drafts.set(mapKey, v);
+    syncRowClasses(mapKey);
+    updateStatus();
+  }
+
   /** 按名称与说明全文筛选表格行 */
   function applyRowFilter() {
     const q = (el("cfg-ap-filter")?.value || "").trim().toLowerCase();
@@ -334,6 +378,13 @@
   function rebuildTable() {
     clearTimeout(debounceRebuildTimer);
     debounceRebuildTimer = null;
+    captureInputDraftsFromDom();
+    if (isParamInputFocused()) {
+      pendingRebuildAfterEdit = true;
+      updateStatus();
+      return;
+    }
+    pendingRebuildAfterEdit = false;
     const scroll = document.querySelector(".cfg-ap-table-scroll");
     const tbody = el("cfg-ap-tbody");
     if (!scroll || !tbody) return;
@@ -386,7 +437,16 @@
       inp.value = formatParamNum(draft);
       inp.autocomplete = "off";
       inp.dataset.param = k;
-      inp.addEventListener("change", () => onInputCommit(k, inp));
+      inp.addEventListener("input", function () {
+        onInputLive(k, inp);
+      });
+      inp.addEventListener("change", function () {
+        onInputCommit(k, inp);
+      });
+      inp.addEventListener("blur", function () {
+        onInputCommit(k, inp);
+        flushPendingRebuildIfNeeded();
+      });
       inp.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
           ev.preventDefault();
@@ -492,9 +552,33 @@
     }
   }
 
+  /** 单行同步飞控值（有草稿或正在编辑时跳过） */
+  function syncSingleParamRow(mapKey) {
+    const tbody = el("cfg-ap-tbody");
+    const pmap = window.params;
+    if (!tbody || !(pmap instanceof Map) || !pmap.has(mapKey)) return false;
+    if (drafts.has(mapKey)) return false;
+    const tr = tbody.querySelector(`tr[data-p="${CSS.escape(mapKey)}"]`);
+    if (!tr) return false;
+    const inp = tr.querySelector(".cfg-ap-val-input");
+    if (!inp || inp === document.activeElement) return false;
+    const fc = pmap.get(mapKey);
+    const shown = parseNumLoose(inp.value);
+    if (Number.isFinite(shown) && valuesClose(shown, fc)) return true;
+    inp.value = formatParamNum(fc);
+    syncRowClasses(mapKey);
+    updateStatus();
+    return true;
+  }
+
   /** 节流：连续 PARAM_VALUE 时合并为一次重建 */
   let debounceRebuildTimer = null;
+
   function scheduleDebouncedRebuild() {
+    if (isParamInputFocused()) {
+      pendingRebuildAfterEdit = true;
+      return;
+    }
     clearTimeout(debounceRebuildTimer);
     debounceRebuildTimer = setTimeout(() => {
       debounceRebuildTimer = null;
@@ -513,8 +597,20 @@
       rebuildTable();
       return;
     }
+    if (isParamInputFocused()) {
+      pendingRebuildAfterEdit = true;
+      updateStatus();
+      return;
+    }
+    const touch = window._lastParamTableTouch;
+    if (touch && syncSingleParamRow(touch)) {
+      window._lastParamTableTouch = null;
+      return;
+    }
     scheduleDebouncedRebuild();
   };
+
+  window.syncAllParamsSingleRow = syncSingleParamRow;
 
   /** 从飞控重新拉取参数列表（会清空本地草稿） */
   async function onRefresh() {

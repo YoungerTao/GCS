@@ -178,6 +178,40 @@
 
       this.renderGrid();
       this.startUpdater();
+      this.initValueFitObserver();
+    }
+
+    initValueFitObserver(){
+      if (!this.container || typeof ResizeObserver === 'undefined') return;
+      this._valueFitObserver = new ResizeObserver(() => this.fitAllCellValues());
+      this._valueFitObserver.observe(this.container);
+      window.addEventListener('resize', () => this.fitAllCellValues());
+    }
+
+    fitAllCellValues(){
+      if (!this.container) return;
+      Array.from(this.container.children).forEach((cell) => this.fitCellValueRow(cell));
+    }
+
+    fitCellValueRow(cell){
+      const row = cell.querySelector('.cell-value-row');
+      const valEl = cell.querySelector('.cell-value');
+      const unitEl = cell.querySelector('.cell-unit');
+      if (!row || !valEl || !unitEl) return;
+
+      const maxPx = 28;
+      const minPx = 12;
+      const unitScale = 0.52;
+      let size = maxPx;
+
+      valEl.style.fontSize = `${size}px`;
+      unitEl.style.fontSize = `${Math.max(10, Math.round(size * unitScale))}px`;
+
+      while (size > minPx && row.scrollWidth > row.clientWidth) {
+        size -= 1;
+        valEl.style.fontSize = `${size}px`;
+        unitEl.style.fontSize = `${Math.max(10, Math.round(size * unitScale))}px`;
+      }
     }
 
     loadConfig(){
@@ -268,7 +302,7 @@
     renderGrid(){
       const r=this.config.rows||3;const c=this.config.cols||3;
       this.resizeCells(r,c);
-      this.container.style.gridTemplateColumns = `repeat(${c}, 1fr)`;
+      this.container.style.gridTemplateColumns = `repeat(${c}, minmax(0, 1fr))`;
       this.container.style.gridTemplateRows = `repeat(${r}, 1fr)`;
       this.container.innerHTML='';
       this.config.cells.forEach((param,idx)=>{
@@ -276,7 +310,7 @@
         cell.className='quick-cell';
         cell.dataset.index=idx;
         // 只保留一个显示位置：参数名（.cell-top）位于数值之上，居中显示
-        cell.innerHTML = `<div class="cell-top"></div><div class="cell-value">--</div><div class="cell-unit"></div>`;
+        cell.innerHTML = `<div class="cell-top"></div><div class="cell-value-row"><span class="cell-value">--</span><span class="cell-unit"></span></div>`;
         // set per-cell background from palette (gradient)
         const paletteIndex = this.determinePaletteIndexForKey(param, idx);
         const p = this.palette[paletteIndex % this.palette.length];
@@ -297,6 +331,7 @@
         this.container.appendChild(cell);
       });
       this.saveConfig();
+      this.fitAllCellValues();
     }
 
     openModal(index){
@@ -388,17 +423,28 @@
       return value;
     }
 
-    formatValueWithUnit(key, value){
+    formatDisplayParts(key, value){
       const displayValue = this.toDisplayValue(key, value);
       const unit = this.getUnitForKey(key);
       if(typeof displayValue === 'number' && isFinite(displayValue)){
         const decimals = unit === 'm' || unit === 'V' || unit === 'A' || unit === 'm/s' ? 2 : 2;
-        return unit ? `${Number(displayValue).toFixed(decimals)} ${unit}` : Number(displayValue).toFixed(decimals);
+        return {
+          valueText: Number(displayValue).toFixed(decimals),
+          unitText: unit || '',
+        };
       }
       if(typeof displayValue !== 'undefined' && displayValue !== null){
-        return unit ? `${String(displayValue)} ${unit}` : String(displayValue);
+        return {
+          valueText: String(displayValue),
+          unitText: unit || '',
+        };
       }
-      return '--';
+      return { valueText: '--', unitText: '' };
+    }
+
+    formatValueWithUnit(key, value){
+      const { valueText, unitText } = this.formatDisplayParts(key, value);
+      return unitText ? `${valueText} ${unitText}` : valueText;
     }
 
     startUpdater(){
@@ -421,6 +467,7 @@
             top.textContent = '';
             valEl.textContent = '--';
             unitEl.textContent = '';
+            this.fitCellValueRow(cell);
             cell.classList.remove('status-low','status-warn','status-ok');
             return;
           }
@@ -429,8 +476,10 @@
           if(typeof v === 'string' && v.trim() !== '' && !isNaN(parseFloat(v))){
             v = parseFloat(v);
           }
-          valEl.textContent = this.formatValueWithUnit(key, v);
-          unitEl.textContent = '';
+          const parts = this.formatDisplayParts(key, v);
+          valEl.textContent = parts.valueText;
+          unitEl.textContent = parts.unitText;
+          this.fitCellValueRow(cell);
           const cls = this.determineStatusClass(key,v);
           cell.classList.remove('status-low','status-warn','status-ok');
           if(cls) cell.classList.add(cls);

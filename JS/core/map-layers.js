@@ -106,6 +106,21 @@
     return window.L.tileLayer(tileUrlTemplate(layer, useServer), opts);
   }
 
+  function removeBaseLayers(map, bundle) {
+    if (!map || !bundle) {
+      return;
+    }
+    if (bundle.imagery) {
+      map.removeLayer(bundle.imagery);
+    }
+    if (bundle.roads) {
+      map.removeLayer(bundle.roads);
+    }
+    if (bundle.places) {
+      map.removeLayer(bundle.places);
+    }
+  }
+
   function addGcsMapBaseLayers(map) {
     if (!map || typeof window.L === "undefined") {
       return null;
@@ -132,6 +147,16 @@
       return { imagery, roads, places, useServer };
     }
 
+    function swapLayers(bundle, useServer) {
+      removeBaseLayers(map, bundle);
+      const next = mount(useServer);
+      bundle.imagery = next.imagery;
+      bundle.roads = next.roads;
+      bundle.places = next.places;
+      bundle.useServer = next.useServer;
+      return bundle;
+    }
+
     if (tileServerOk === true) {
       return mount(true);
     }
@@ -139,13 +164,17 @@
       return mount(false);
     }
 
-    const pending = mount(true);
+    const layers = mount(false);
     probeTileServer().then(function (ok) {
-      if (!ok && pending && pending.useServer !== false) {
-        console.warn("[GCS map] 探测瓦片服务失败，后续浏览可能无图；可刷新或启动 tile_server。");
+      if (ok) {
+        swapLayers(layers, true);
+        return;
       }
+      console.warn(
+        "[GCS map] 本地瓦片服务离线，已使用 Esri 直连。请通过 GCS 启动器或运行 tools/map-tiles/tile_server.py。"
+      );
     });
-    return pending;
+    return layers;
   }
 
   window.TILE_SERVER = TILE_SERVER;

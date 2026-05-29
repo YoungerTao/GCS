@@ -340,12 +340,20 @@
       if (pathRole && !last.pathRole) {
         last.pathRole = pathRole;
       }
+      if (point.row != null && last.row == null) {
+        last.row = point.row;
+      }
+      if (point.segment != null && last.segment == null) {
+        last.segment = point.segment;
+      }
       return;
     }
     corners.push({
       lng: point.lng,
       lat: point.lat,
-      pathRole: pathRole || point.role || ""
+      pathRole: pathRole || point.role || "",
+      row: point.row,
+      segment: point.segment
     });
   }
 
@@ -366,6 +374,35 @@
     return out;
   }
 
+  function shouldDensifyFwSurveyLeg(from, to) {
+    return !(
+      from.pathRole === "line-start" &&
+      to.pathRole === "line-end"
+    );
+  }
+
+  function resolveFwSurveySegmentRole(pathRole) {
+    if (pathRole === "line-start" || pathRole === "line-end") {
+      return "transect";
+    }
+    if (pathRole === "overshoot-entry" || pathRole === "overshoot-exit") {
+      return "connector";
+    }
+    return "turn";
+  }
+
+  function resolveFwDensifySegmentRole(from, to) {
+    const fromRole = resolveFwSurveySegmentRole(from.pathRole || "");
+    const toRole = resolveFwSurveySegmentRole(to.pathRole || "");
+    if (fromRole === "connector" || toRole === "connector") {
+      return "connector";
+    }
+    if (fromRole === "turn" || toRole === "turn") {
+      return "turn";
+    }
+    return "transect";
+  }
+
   function extractSurveyRouteWaypoints(path, platform) {
     if (!Array.isArray(path) || !path.length) {
       return [];
@@ -376,7 +413,9 @@
           lng: path[0].lng,
           lat: path[0].lat,
           pathRole: path[0].role || "",
-          segmentRole: "transect"
+          segmentRole: "transect",
+          row: path[0].row,
+          segment: path[0].segment
         }
       ];
     }
@@ -416,18 +455,24 @@
     for (let i = 0; i < corners.length; i += 1) {
       const pt = corners[i];
       dense.push(Object.assign({}, pt, {
-        segmentRole: i === 0 || i === corners.length - 1 ? "transect" : "turn"
+        segmentRole: resolveFwSurveySegmentRole(pt.pathRole || "")
       }));
       if (i < corners.length - 1) {
-        const midPts = densifySegment(pt, corners[i + 1], FW_MAX_SEGMENT_M);
-        midPts.slice(0, -1).forEach(function (m) {
-          dense.push(
-            Object.assign({}, m, {
-              segmentRole: "transect",
-              pathRole: ""
-            })
-          );
-        });
+        const nextCorner = corners[i + 1];
+        if (shouldDensifyFwSurveyLeg(pt, nextCorner)) {
+          const legRole = resolveFwDensifySegmentRole(pt, nextCorner);
+          const midPts = densifySegment(pt, nextCorner, FW_MAX_SEGMENT_M);
+          midPts.slice(0, -1).forEach(function (m) {
+            dense.push(
+              Object.assign({}, m, {
+                segmentRole: legRole,
+                pathRole: "",
+                row: pt.row,
+                segment: pt.segment
+              })
+            );
+          });
+        }
       }
     }
     return dense;
@@ -467,8 +512,10 @@
 
         if (pathRole === "overshoot-entry") {
           label = isFirstTransect ? "测区起点" : "转弯";
+          segmentRole = "connector";
         } else if (pathRole === "overshoot-exit") {
           label = isLastTransect ? "测区终点" : "转弯";
+          segmentRole = "connector";
         } else if (pathRole === "line-start") {
           label = "测线起点";
         } else if (pathRole === "line-end") {

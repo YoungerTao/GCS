@@ -12,13 +12,11 @@ body {
 
 :root{
   --gap: 10px;
-  /* 左列宽度：HUD/快速面板同宽，随窗口自适应 */
-  --left-pane: clamp(320px, 35vw, 640px);
+  /* 左列与 HUD 固定宽度（正方形） */
+  --left-pane: 400px;
+  --hud-size: 400px;
   /* 日志区最小高度 */
   --log-min: 220px;
-  --splitter-w: 8px;
-  /* HUD 高度：由 JS 动态设置 */
-  --hud-height: 400px;
 }
 
 .top-bar {
@@ -721,6 +719,7 @@ body {
   grid-template-columns: minmax(320px, 2fr) minmax(480px, 3fr);
   gap: 12px;
   height: 100%;
+  min-height: 0;
 }
 
 .card-dark {
@@ -731,17 +730,90 @@ body {
   min-height: 0;
 }
 
+#setup-panel-rc.active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#setup-panel-rc .rc-page {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .rc-monitor {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .rc-channel-list {
+  flex: 1 1 0;
+  min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding-right: 4px;
+}
+
+.rc-calib-result {
+  flex: 0 0 auto;
+  margin-top: 10px;
+}
+
+.rc-calib-result-card {
+  background: #141b2e;
+  border: 1px solid #323b5e;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.rc-calib-result-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9aabd8;
+  margin-bottom: 6px;
+}
+
+.rc-calib-table-wrap {
+  overflow: visible;
+}
+
+.rc-calib-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  table-layout: fixed;
+}
+
+.rc-calib-table th,
+.rc-calib-table td {
+  border-bottom: 1px solid #273152;
+  padding: 4px 8px;
+  color: #dce2fb;
+  white-space: nowrap;
+}
+
+.rc-calib-table th:first-child,
+.rc-calib-table td:first-child {
+  width: 36%;
+  text-align: left;
+}
+
+.rc-calib-table th:not(:first-child),
+.rc-calib-table td:not(:first-child) {
+  width: 21.33%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rc-calib-table th {
+  color: #9aabd8;
+  font-weight: 600;
+  background: #141b2e;
 }
 
 .rc-row {
@@ -820,10 +892,23 @@ body {
   font-size: 13px;
 }
 
+#rc-guide-text {
+  color: #facc15;
+  font-size: 26px;
+  line-height: 1.35;
+}
+
 .rc-btn-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.rc-btn-row button.rc-btn-highlight {
+  border-color: #f59e0b;
+  background: #422006;
+  color: #fde68a;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35);
 }
 
 .tx-body {
@@ -3182,15 +3267,16 @@ select option {
   flex: 0 0 var(--left-pane);
   display: flex;
   flex-direction: column;
+  gap: var(--gap);
   min-height: 0;
   min-width: 0;
 }
 
 .hud-container {
-  flex: 0 0 var(--hud-height);
-  height: var(--hud-height);
-  min-height: 160px;
+  flex: 0 0 var(--hud-size);
   width: 100%;
+  height: var(--hud-size);
+  box-sizing: border-box;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -3203,9 +3289,6 @@ select option {
 #hud {
   width: 100%;
   height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
   display: block;
 }
 
@@ -3228,44 +3311,13 @@ select option {
 
 .log-container {
   flex: 1;
+  width: 100%;
+  box-sizing: border-box;
   min-height: var(--log-min);
   border: 1px solid #333;
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-/* draggable vertical splitter (left pane width) */
-.v-splitter{
-  flex: 0 0 var(--splitter-w);
-  cursor: col-resize;
-  border-radius: 6px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.06);
-  position: relative;
-}
-.v-splitter:hover{ background: rgba(42,161,152,0.22); border-color: rgba(42,161,152,0.45); }
-
-/* draggable horizontal splitter (HUD / log height) */
-.h-splitter{
-  flex: 0 0 8px;
-  cursor: row-resize;
-  border-radius: 6px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.06);
-  position: relative;
-}
-.h-splitter:hover{ background: rgba(42,161,152,0.22); border-color: rgba(42,161,152,0.45); }
-
-body.resizing,
-body.resizing *{
-  cursor: col-resize !important;
-  user-select: none !important;
-}
-body.resizing-h,
-body.resizing-h *{
-  cursor: row-resize !important;
-  user-select: none !important;
 }
 
 #log {
@@ -3303,6 +3355,8 @@ body.resizing-h *{
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  min-width: 0;
 }
 .log-panel {
   display: none;

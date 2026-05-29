@@ -200,7 +200,16 @@
     return label ? label + " (type=" + code + ")" : "MISSION_ACK type=" + code;
   }
 
+  function missionIoActive() {
+    return (
+      window._missionUploadActive === true ||
+      (window._missionTransfer &&
+        (window._missionTransfer.mode === "upload" || window._missionTransfer.mode === "download"))
+    );
+  }
+
   function waitMissionEvent(predicate, timeoutMs, timeoutMessage) {
+    const pollMs = missionIoActive() ? 8 : 40;
     return new Promise(function (resolve, reject) {
       const deadline = Date.now() + (timeoutMs || 15000);
       function tick() {
@@ -226,7 +235,7 @@
           reject(new Error(timeoutMessage || "任务传输超时"));
           return;
         }
-        setTimeout(tick, 40);
+        setTimeout(tick, pollMs);
       }
       tick();
     });
@@ -404,7 +413,7 @@
           await sendMissionCount(items.length, activeT);
           await sendMissionCount(items.length, activeT);
           await new Promise(function (r) {
-            setTimeout(r, 150);
+            setTimeout(r, 60);
           });
           if (attempt > 0 && typeof log === "function") {
             log(
@@ -450,7 +459,8 @@
       }
 
       for (let seq = 0; seq < items.length; seq++) {
-        if (window._missionTransfer.requestedSeq !== seq) {
+        const transfer = window._missionTransfer;
+        if (!transfer || transfer.requestedSeq !== seq) {
           await waitMissionRequestSeq(seq, 20000);
         }
         const item = items[seq];
@@ -459,7 +469,9 @@
         if (onProgress) {
           onProgress(seq + 1, items.length);
         }
-        window._missionTransfer.requestedSeq = null;
+        if (window._missionTransfer && window._missionTransfer.requestedSeq === seq) {
+          window._missionTransfer.requestedSeq = null;
+        }
       }
 
       window._missionTransfer.expectFinalAck = true;

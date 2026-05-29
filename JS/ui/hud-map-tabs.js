@@ -632,6 +632,12 @@ window.addEventListener('load', () => {
   }, 800);
 });
 
+window.addEventListener('resize', () => {
+  try {
+    if (window.mapInstance?.invalidateSize) window.mapInstance.invalidateSize();
+  } catch (_) { /* ignore */ }
+});
+
 // ==================== 日志面板选项卡切换逻辑 ====================
 function initLogTabs() {
   const tabs = document.querySelectorAll('.log-tab');

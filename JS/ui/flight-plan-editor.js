@@ -172,6 +172,17 @@
     surveyHeadingAuto: true
   };
 
+  const TURN_AROUND_DEFAULT_MULTIROTOR_M = 20;
+  const TURN_AROUND_DEFAULT_FIXED_WING_M = 100;
+
+  function getDefaultTurnAroundMeters(platform) {
+    const FWP = window.FixedWingParams;
+    if (FWP && FWP.isFixedWingPlatform(platform)) {
+      return TURN_AROUND_DEFAULT_FIXED_WING_M;
+    }
+    return TURN_AROUND_DEFAULT_MULTIROTOR_M;
+  }
+
   const SURVEY_ENTRY_CORNER_OPTIONS = [
     { id: "top-left", label: "左上" },
     { id: "top-right", label: "右上" },
@@ -1262,22 +1273,118 @@
     }).addTo(layerGroup);
   }
 
-  function groupSurveyTransectMissionItems(waypoints) {
-    const groups = {};
-    const keyOrder = [];
+  function isSurveyPhotoLegSegment(a, b) {
+    return (
+      a.source === "survey" &&
+      b.source === "survey" &&
+      a.pathRole === "line-start" &&
+      b.pathRole === "line-end"
+    );
+  }
+
+  function isSurveyPhotoLegInteriorWaypoint(wp) {
+    return (
+      wp.source === "survey" &&
+      !wp.pathRole &&
+      wp.segmentRole === "transect"
+    );
+  }
+
+  function shouldSkipSurveyMapSegment(a, b) {
+    if (isSurveyPhotoLegSegment(a, b)) {
+      return true;
+    }
+    if (a.pathRole === "line-start" && isSurveyPhotoLegInteriorWaypoint(b)) {
+      return true;
+    }
+    if (isSurveyPhotoLegInteriorWaypoint(a) && b.pathRole === "line-end") {
+      return true;
+    }
+    if (isSurveyPhotoLegInteriorWaypoint(a) && isSurveyPhotoLegInteriorWaypoint(b)) {
+      return true;
+    }
+    return false;
+  }
+
+  function isSurveyConnectorSegment(a, b) {
+    if (a.source !== "survey" || b.source !== "survey") {
+      return false;
+    }
+    if (shouldSkipSurveyMapSegment(a, b)) {
+      return false;
+    }
+    const overshootRoles = {
+      "overshoot-entry": true,
+      "overshoot-exit": true
+    };
+    if (overshootRoles[a.pathRole] || overshootRoles[b.pathRole]) {
+      return true;
+    }
+    if (a.segmentRole === "turn" || b.segmentRole === "turn") {
+      return true;
+    }
+    if (a.segmentRole === "connector" || b.segmentRole === "connector") {
+      return true;
+    }
+    if (a.label === "转弯" || b.label === "转弯") {
+      return true;
+    }
+    return false;
+  }
+
+  function forEachSurveyPhotoLegFromMission(waypoints, callback) {
     (waypoints || []).forEach(function (wp, index) {
-      if (wp.source !== "survey") {
+      if (wp.source !== "survey" || wp.pathRole !== "line-start") {
         return;
       }
-      const key = String(wp.blockId || "") + ":" + String(wp.row != null ? wp.row : 0);
-      if (!groups[key]) {
-        groups[key] = [];
-        keyOrder.push(key);
+      const blockId = wp.blockId || "";
+      let entry = null;
+      let entryIndex = -1;
+      for (let j = index - 1; j >= 0; j -= 1) {
+        const prev = waypoints[j];
+        if (prev.source === "camera") {
+          continue;
+        }
+        if (prev.source !== "survey" || (prev.blockId || "") !== blockId) {
+          break;
+        }
+        if (prev.pathRole === "overshoot-entry") {
+          entry = prev;
+          entryIndex = j;
+          break;
+        }
+        if (prev.pathRole === "line-end" || prev.pathRole === "line-start") {
+          break;
+        }
       }
-      groups[key].push({ wp: wp, index: index });
-    });
-    return keyOrder.map(function (key) {
-      return groups[key];
+      let lineEnd = null;
+      let lineEndIndex = -1;
+      for (let j = index + 1; j < waypoints.length; j += 1) {
+        const next = waypoints[j];
+        if (next.source === "camera") {
+          continue;
+        }
+        if (next.source !== "survey" || (next.blockId || "") !== blockId) {
+          break;
+        }
+        if (next.pathRole === "line-end") {
+          lineEnd = next;
+          lineEndIndex = j;
+          break;
+        }
+      }
+      if (!lineEnd) {
+        return;
+      }
+      callback({
+        lineStart: wp,
+        lineStartIndex: index,
+        lineEnd: lineEnd,
+        lineEndIndex: lineEndIndex,
+        entry: entry,
+        entryIndex: entryIndex,
+        row: wp.row
+      });
     });
   }
 
@@ -1290,37 +1397,24 @@
       lineJoin: "round"
     };
 
-    groupSurveyTransectMissionItems(waypoints).forEach(function (items) {
-      const lineStart = items.find(function (item) {
-        return item.wp.pathRole === "line-start";
-      });
-      const lineEnd = items.find(function (item) {
-        return item.wp.pathRole === "line-end";
-      });
-      const entry = items.find(function (item) {
-        return item.wp.pathRole === "overshoot-entry";
-      });
-      if (!lineStart || !lineEnd) {
-        return;
-      }
-
-      const rowIndex = lineStart.wp.row != null ? lineStart.wp.row : 0;
+    forEachSurveyPhotoLegFromMission(waypoints, function (leg) {
+      const rowIndex = leg.row != null ? leg.row : 0;
       const alongRatio = rowIndex % 2 === 0 ? 0.42 : 0.58;
-      const arrowFromIdx = entry ? entry.index : lineStart.index;
-      const arrowToIdx = lineStart.index + 1;
+      const arrowFromIdx = leg.entryIndex >= 0 ? leg.entryIndex : leg.lineStartIndex;
+      const arrowToIdx = leg.lineStartIndex + 1;
       const arrowFrom = waypoints[arrowFromIdx];
-      const arrowTo = waypoints[arrowToIdx] || lineStart.wp;
+      const arrowTo = waypoints[arrowToIdx] || leg.lineStart;
 
       addSurveyHeadingArrow(layerGroup, arrowFrom, arrowTo, {
         alongRatio: alongRatio,
-        anchorFrom: lineStart.wp,
-        anchorTo: lineEnd.wp
+        anchorFrom: leg.lineStart,
+        anchorTo: leg.lineEnd
       });
 
       window.L.polyline(
         [
-          [lineStart.wp.lat, lineStart.wp.lng],
-          [lineEnd.wp.lat, lineEnd.wp.lng]
+          [leg.lineStart.lat, leg.lineStart.lng],
+          [leg.lineEnd.lat, leg.lineEnd.lng]
         ],
         photoPathOptions
       ).addTo(layerGroup);
@@ -1465,10 +1559,16 @@
       for (let i = 1; i < mapWaypoints.length; i++) {
         const a = mapWaypoints[i - 1];
         const b = mapWaypoints[i];
+        if (a.source === "survey" && b.source === "survey" && shouldSkipSurveyMapSegment(a, b)) {
+          if (a.source !== "template" || b.source !== "template") {
+            leadingTemplateChain = false;
+          }
+          continue;
+        }
         let color = "#4fc3f7";
         let weight = 3;
         if (a.source === "survey" && b.source === "survey") {
-          if (a.segmentRole === "turn" || b.segmentRole === "turn" || a.label === "转弯" || b.label === "转弯") {
+          if (isSurveyConnectorSegment(a, b)) {
             color = "#7a8fa3";
             weight = 2;
           }
@@ -1717,6 +1817,7 @@
       surveyCommitted: Boolean(draft.surveyCommitted),
       appendRtl: Boolean(draft.appendRtl),
       surveyAltitudeCustomized: Boolean(draft.surveyAltitudeCustomized),
+      turnAroundCustomized: Boolean(draft.turnAroundCustomized),
       surveyBlocks: Array.isArray(draft.surveyBlocks) ? draft.surveyBlocks : []
     };
   }
@@ -1739,6 +1840,9 @@
     const surveyAltitudeCustomizedRef = useRef(
       initialDraft ? initialDraft.surveyAltitudeCustomized : false
     );
+    const turnAroundCustomizedRef = useRef(
+      initialDraft ? initialDraft.turnAroundCustomized : false
+    );
     const missionBootstrappedRef = useRef(
       Boolean(
         initialDraft &&
@@ -1758,6 +1862,7 @@
     const surveyCommittedRef = useRef(initialDraft ? initialDraft.surveyCommitted : false);
     const mapSyncRafRef = useRef(0);
     const mapSyncScopeRef = useRef("all");
+    const syncTakeoffToVehicleRef = useRef(null);
     const latestPlatformRef = useRef("multirotor");
     const fileInputRef = useRef(null);
     const [activeTab, setActiveTab] = useState(
@@ -1897,23 +2002,26 @@
     }, [resolvedPlatform]);
 
     useEffect(function () {
+      if (turnAroundCustomizedRef.current) {
+        return;
+      }
+      const next = getDefaultTurnAroundMeters(resolvedPlatform);
+      setSettings(function (prev) {
+        if (prev.turnAroundMeters === next) {
+          return prev;
+        }
+        return Object.assign({}, prev, {
+          turnAroundMeters: formatMissionSettingValue("turnAroundMeters", next)
+        });
+      });
+    }, [resolvedPlatform]);
+
+    useEffect(function () {
       if (!layersRef.current) {
         return;
       }
       syncFlightPlanMapOverlays(layersRef.current, resolvedPlatform);
     }, [connected, resolvedPlatform]);
-
-    useEffect(function () {
-      const timer = window.setInterval(function () {
-        if (!isFlightPlanViewActive() || !layersRef.current) {
-          return;
-        }
-        syncFlightPlanMapOverlays(layersRef.current, latestPlatformRef.current);
-      }, 500);
-      return function () {
-        window.clearInterval(timer);
-      };
-    }, []);
 
     useEffect(function () {
       function onAirframeParams() {
@@ -1932,6 +2040,38 @@
 
     const onWaypointMovedRef = useRef(null);
     const onSurveyVertexMovedRef = useRef(null);
+
+    const applyTakeoffVehicleSync = useCallback(function () {
+      const VT = window.VehicleTemplates;
+      if (!VT || window._gcsConnState !== "connected") {
+        return;
+      }
+      setMissionWaypoints(function (prev) {
+        if (!prev.length) {
+          return prev;
+        }
+        return VT.syncTakeoffFromVehicle(prev, true);
+      });
+    }, []);
+
+    useEffect(function () {
+      syncTakeoffToVehicleRef.current = applyTakeoffVehicleSync;
+    }, [applyTakeoffVehicleSync]);
+
+    useEffect(function () {
+      const timer = window.setInterval(function () {
+        if (!isFlightPlanViewActive() || !layersRef.current) {
+          return;
+        }
+        syncFlightPlanMapOverlays(layersRef.current, latestPlatformRef.current);
+        if (window._gcsConnState === "connected" && syncTakeoffToVehicleRef.current) {
+          syncTakeoffToVehicleRef.current();
+        }
+      }, 500);
+      return function () {
+        window.clearInterval(timer);
+      };
+    }, []);
 
     const handleWaypointMoved = useCallback(function (index, lng, lat) {
       setMissionWaypoints(function (previous) {
@@ -2188,6 +2328,7 @@
         surveyCommitted: surveyCommitted,
         appendRtl: appendRtl,
         surveyAltitudeCustomized: surveyAltitudeCustomizedRef.current,
+        turnAroundCustomized: turnAroundCustomizedRef.current,
         surveyBlocks: surveyBlocks
       });
     }, [
@@ -2260,16 +2401,26 @@
         const next = event && event.detail && event.detail.state === "connected";
         setConnected(next);
         const VT = window.VehicleTemplates;
-        const MM = window.MissionModel;
         if (next) {
           setPlatformOverride("");
-          if (MM && VT) {
+          if (VT) {
             setMissionWaypoints(function (prev) {
+              if (!prev.length) {
+                return prev;
+              }
               return VT.syncTakeoffFromVehicle(prev, true);
             });
           }
         } else if (VT) {
-          setPlatformOverride(VT.detectVehiclePlatform ? VT.detectVehiclePlatform() : "multirotor");
+          setPlatformOverride(
+            VT.detectVehiclePlatform ? VT.detectVehiclePlatform() : "multirotor"
+          );
+          setMissionWaypoints(function (prev) {
+            if (!prev.length) {
+              return prev;
+            }
+            return VT.syncTakeoffFromVehicle(prev, false);
+          });
         }
       }
       document.addEventListener("gcs-connection", onConn);
@@ -2277,19 +2428,6 @@
         document.removeEventListener("gcs-connection", onConn);
       };
     }, []);
-
-    useEffect(function () {
-      if (!connected || !missionWaypoints.length) {
-        return;
-      }
-      const VT = window.VehicleTemplates;
-      if (!VT) {
-        return;
-      }
-      setMissionWaypoints(function (prev) {
-        return VT.syncTakeoffFromVehicle(prev, true);
-      });
-    }, [connected]);
 
     useEffect(function () {
       let disposed = false;
@@ -2466,6 +2604,9 @@
             latestSurveyAreaRef.current,
             latestSurveyPathRef.current
           );
+          if (syncTakeoffToVehicleRef.current) {
+            syncTakeoffToVehicleRef.current();
+          }
         });
       }
 
@@ -2573,6 +2714,10 @@
 
         if (key === "surveyAltitude") {
           surveyAltitudeCustomizedRef.current = true;
+        }
+
+        if (key === "turnAroundMeters") {
+          turnAroundCustomizedRef.current = true;
         }
 
         if (key === "altitude" && !surveyAltitudeCustomizedRef.current) {
@@ -2748,6 +2893,10 @@
           uploadList = FWP.normalizeWaypointsForPlatform(uploadList, resolvedPlatform);
         }
         await window.MavlinkMission.uploadMission(uploadList, function (cur, tot) {
+          const isLast = cur >= tot;
+          if (!isLast && tot > 8 && cur % 3 !== 0) {
+            return;
+          }
           setMissionIoProgress({
             mode: "upload",
             current: cur,
@@ -2791,6 +2940,10 @@
       setMissionIoNote("正在读取飞控任务…");
       try {
         const list = await window.MavlinkMission.downloadMission(function (cur, tot) {
+          const isLast = cur >= tot;
+          if (!isLast && tot > 8 && cur % 3 !== 0) {
+            return;
+          }
           setMissionIoProgress({
             mode: "download",
             current: cur,

@@ -27,12 +27,35 @@
     );
   }
 
+  function findFirstTakeoffWaypoint(waypoints) {
+    const list = waypoints || [];
+    for (let i = 0; i < list.length; i += 1) {
+      const wp = list[i];
+      if (
+        wp.command === CMD.NAV_TAKEOFF ||
+        wp.command === CMD.NAV_VTOL_TAKEOFF
+      ) {
+        return wp;
+      }
+    }
+    return null;
+  }
+
   function homeFromContext(waypoints) {
     const first = waypoints && waypoints[0];
+    const takeoff = findFirstTakeoffWaypoint(waypoints);
     let lat;
     let lng;
     let alt = 30;
-    if (MM && MM.getFlightPlanHomeLatLng) {
+    if (
+      takeoff &&
+      Number.isFinite(takeoff.lat) &&
+      Number.isFinite(takeoff.lng)
+    ) {
+      lat = takeoff.lat;
+      lng = takeoff.lng;
+      alt = Number(takeoff.alt) || alt;
+    } else if (MM && MM.getFlightPlanHomeLatLng) {
       const h = MM.getFlightPlanHomeLatLng();
       lat = h.lat;
       lng = h.lng;

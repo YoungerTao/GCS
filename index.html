@@ -95,7 +95,6 @@
       <div class="hud-container">
         <canvas id="hud" width="800" height="800"></canvas>
       </div>
-      <div class="h-splitter" data-splitter="hud-log" aria-label="调整HUD高度" title="拖拽调整HUD高度"></div>
       <div class="log-container">
         <div class="log-tabs">
           <button class="log-tab active" data-panel="quick">快速</button>
@@ -149,7 +148,6 @@
         </div>
       </div>
     </div>
-    <div class="v-splitter" data-splitter="main" aria-label="调整HUD宽度" title="拖拽调整HUD宽度"></div>
     <div class="map-container">
       <div id="map"></div>
     </div>
@@ -313,16 +311,34 @@
               <span class="muted">1-14 CH / PWM(us)</span>
             </div>
             <div id="rc-channel-list" class="rc-channel-list"></div>
+            <div id="rc-calib-result" class="rc-calib-result hidden">
+              <div class="rc-calib-result-card">
+                <div class="rc-calib-result-head">校准结果</div>
+                <div class="rc-calib-table-wrap">
+                  <table class="rc-calib-table">
+                    <thead>
+                      <tr>
+                        <th>通道</th>
+                        <th>最小值</th>
+                        <th>中立值</th>
+                        <th>最大值</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rc-calib-table-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section class="rc-wizard card-dark">
             <div class="rc-card-head">
               <h3>遥控器配置与校准向导</h3>
-              <div id="rc-status-badge" class="rc-status-badge">IDLE</div>
+              <div id="rc-status-badge" class="rc-status-badge">空闲</div>
             </div>
 
             <div class="rc-wizard-controls">
-              <p id="rc-guide-text">点击“开始校准”进入摇杆校准流程。</p>
+              <p id="rc-guide-text">显示当前各个通道实时数据。点击「开始校准」进入流程。</p>
               <div class="rc-btn-row">
                 <button id="rc-start-btn">开始校准</button>
                 <button id="rc-next-btn" disabled>下一步</button>
@@ -939,7 +955,6 @@
 <script src="JS/mission/mavlink-mission.js?v=20260517e" defer></script>
 <script src="JS/ui/flight-plan-editor.js" defer></script>
 <script src="JS/ui/quick-grid.js" defer></script>
-<script src="JS/ui/splitter.js" defer></script>
 <script src="JS/ui/rc-setup.js" defer></script>
 <script src="JS/ui/serial-setup.js" defer></script>
 <script src="JS/ui/motor-maps.js" defer></script>

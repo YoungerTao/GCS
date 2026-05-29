@@ -116,7 +116,11 @@
 
   function buildBootstrapWaypoints(platform, origin, connected) {
     const takeoff = Object.assign({}, origin);
-    const locked = Boolean(connected);
+    const locked = Boolean(
+      connected &&
+      MM.hasFlightPlanVehiclePosition &&
+      MM.hasFlightPlanVehiclePosition()
+    );
     let list = [];
 
     if (platform === "multirotor") {
@@ -416,18 +420,66 @@
     return false;
   }
 
-  function syncTakeoffFromVehicle(waypoints, connected) {
-    if (!connected || !waypoints.length) {
-      return waypoints;
+  function findFirstTakeoffIndex(waypoints) {
+    const CMD = MM.MAV_CMD;
+    for (let i = 0; i < (waypoints || []).length; i += 1) {
+      const wp = waypoints[i];
+      if (
+        wp.command === CMD.NAV_TAKEOFF ||
+        wp.command === CMD.NAV_VTOL_TAKEOFF
+      ) {
+        return i;
+      }
     }
+    return -1;
+  }
+
+  function syncTakeoffFromVehicle(waypoints, connected) {
+    const list = waypoints || [];
+    if (!list.length) {
+      return list;
+    }
+
+    const takeoffIdx = findFirstTakeoffIndex(list);
+    if (takeoffIdx < 0) {
+      return list;
+    }
+
+    if (!connected) {
+      const wp = list[takeoffIdx];
+      if (!wp.locked) {
+        return list;
+      }
+      const next = list.slice();
+      next[takeoffIdx] = Object.assign({}, wp, { locked: false });
+      return next;
+    }
+
+    if (!MM.hasFlightPlanVehiclePosition || !MM.hasFlightPlanVehiclePosition()) {
+      const wp = list[takeoffIdx];
+      if (!wp.locked) {
+        return list;
+      }
+      const next = list.slice();
+      next[takeoffIdx] = Object.assign({}, wp, { locked: false });
+      return next;
+    }
+
     const origin = MM.getTakeoffLatLng();
-    const next = waypoints.slice();
-    const wp0 = Object.assign({}, next[0], {
+    const wp = list[takeoffIdx];
+    if (
+      wp.locked &&
+      horizontalDistanceM(wp, origin) < 1
+    ) {
+      return list;
+    }
+
+    const next = list.slice();
+    next[takeoffIdx] = Object.assign({}, wp, {
       lat: origin.lat,
       lng: origin.lng,
       locked: true
     });
-    next[0] = wp0;
     return next;
   }
 

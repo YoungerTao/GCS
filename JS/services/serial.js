@@ -51,9 +51,32 @@ function bridgeBase64ToBytes(text) {
   return out;
 }
 
+function missionBridgeFastWrite() {
+  return (
+    window._missionUploadActive === true ||
+    (window._missionTransfer &&
+      (window._missionTransfer.mode === "upload" || window._missionTransfer.mode === "download"))
+  );
+}
+
 async function bridgeWriteBytes(bytes) {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  await bridgeFetch("/bridge-write", { data: bridgeBytesToBase64(arr) });
+  const fast = missionBridgeFastWrite();
+  const writePromise = bridgeFetch(
+    "/bridge-write",
+    { data: bridgeBytesToBase64(arr) },
+    { skipEnsure: fast }
+  );
+  if (fast) {
+    writePromise.catch(function (err) {
+      const msg = err && err.message ? err.message : String(err);
+      if (window._missionTransfer && !window._missionTransfer.error) {
+        window._missionTransfer.error = "桥接写入失败: " + msg;
+      }
+    });
+    return;
+  }
+  await writePromise;
 }
 
 function resolveBridgeDeviceId(selectedValue, optionMeta, comSelect) {
@@ -141,7 +164,7 @@ async function bridgeReadLoop() {
   while (window._bridgeConnActive) {
     try {
       let bursts = 0;
-      const maxBursts = window._paramLoadActive ? 64 : 24;
+      const maxBursts = window._paramLoadActive ? 64 : missionBridgeFastWrite() ? 48 : 24;
       while (window._bridgeConnActive && bursts < maxBursts) {
         const resp = await bridgeFetch("/bridge-read", null, { skipEnsure: true });
         const chunk = bridgeBase64ToBytes(resp?.data || "");
@@ -158,7 +181,18 @@ async function bridgeReadLoop() {
           }
         }
       }
-      const waitMs = window._paramLoadActive ? (bursts ? 8 : 5) : (bursts ? 15 : 45);
+      const fastMissionIo = missionBridgeFastWrite();
+      const waitMs = window._paramLoadActive
+        ? bursts
+          ? 8
+          : 5
+        : fastMissionIo
+          ? bursts
+            ? 4
+            : 6
+          : bursts
+            ? 15
+            : 45;
       await new Promise((r) => setTimeout(r, waitMs));
     } catch (e) {
       const msg = e?.message || String(e);
@@ -1083,6 +1117,7 @@ async function readLoop() {
 // ========== 导出 ==========
 
 window.send_v2 = send_v2;
+window.sendMavlinkV2 = send_v2;
 window.sendCommandLong = sendCommandLong;
 window.sendHeartbeat = sendHeartbeat;
 window.sendAccelcalVehiclePos = sendAccelcalVehiclePos;
