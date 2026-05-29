@@ -34,3 +34,6 @@ map-tiles/
 # Local-only
 .DS_Store?
 ._*
+
+# Local-only archived resources
+_tmp_resources/

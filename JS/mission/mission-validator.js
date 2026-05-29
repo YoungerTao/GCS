@@ -28,10 +28,11 @@
     }).length;
   }
 
-  function validateMission(waypoints, platform) {
+  function validateMission(waypoints, platform, options) {
     const issues = [];
     const list = waypoints || [];
     const pf = platform || "multirotor";
+    const opts = options || {};
 
     if (!list.length) {
       pushIssue(issues, "error", "empty", "任务为空，无法写入飞控");
@@ -164,7 +165,94 @@
       pushIssue(issues, "warning", "no_survey", "任务中尚无测绘航点");
     }
 
+    const usesTerrainFrame = list.some(function (wp) {
+      return wp.frame === MM.MAV_FRAME_GLOBAL_TERRAIN_ALT;
+    });
+    if (usesTerrainFrame) {
+      const badSurvey = list.filter(function (wp) {
+        return wp.source === "survey" && wp.frame !== MM.MAV_FRAME_GLOBAL_TERRAIN_ALT;
+      });
+      if (badSurvey.length) {
+        pushIssue(
+          issues,
+          "error",
+          "terrain_frame_mixed",
+          "地形跟随任务中测绘航点应统一使用 frame 10"
+        );
+      }
+      if (window.params instanceof Map && window.params.has("TERRAIN_ENABLE")) {
+        const te = Number(window.params.get("TERRAIN_ENABLE"));
+        if (te !== 1) {
+          pushIssue(
+            issues,
+            "warning",
+            "terrain_enable_off",
+            "飞控 TERRAIN_ENABLE 未启用，地形跟随可能无效"
+          );
+        }
+      }
+    }
+
     return issues;
+  }
+
+  function validateMissionAsync(waypoints, platform, options) {
+    const opts = options || {};
+    const settings = opts.settings || {};
+    const surveyBlocks = opts.surveyBlocks || [];
+    const base = validateMission(waypoints, platform, opts);
+    const TPV = window.TerrainProfileValidator;
+    const TSP = window.TerrainSurveyPlanner;
+    if (!TPV) {
+      return Promise.resolve(base);
+    }
+
+    const usesTerrain =
+      settings.useTerrainFollowing ||
+      (waypoints || []).some(function (wp) {
+        return wp.frame === MM.MAV_FRAME_GLOBAL_TERRAIN_ALT;
+      });
+    if (!usesTerrain) {
+      return Promise.resolve(base);
+    }
+
+    return TPV.validateMissionTerrain(waypoints, settings, platform).then(function (terrainIssues) {
+      const issues = base.concat(terrainIssues || []);
+      if (!TSP || !surveyBlocks.length) {
+        return issues;
+      }
+      let chain = Promise.resolve(issues);
+      surveyBlocks.forEach(function (block) {
+        const snap = block.paramsSnapshot || settings;
+        if (!snap.useTerrainFollowing) {
+          return;
+        }
+        const path = (waypoints || [])
+          .filter(function (wp) {
+            return wp.blockId === block.id && wp.source === "survey";
+          })
+          .map(function (wp) {
+            return { lat: wp.lat, lng: wp.lng };
+          });
+        if (path.length < 2) {
+          return;
+        }
+        chain = chain.then(function (acc) {
+          return TSP.profileForPath(path, snap).then(function (profile) {
+            const profileIssues = TPV.validateTerrainProfile(profile, snap, platform) || [];
+            profileIssues.forEach(function (issue) {
+              acc.push(
+                Object.assign({}, issue, {
+                  message: "区域 " + (block.order + 1) + "：" + issue.message
+                })
+              );
+            });
+            return acc;
+          });
+        });
+      });
+      return chain;
+    });
   }
 
   function hasBlockingErrors(issues) {
@@ -175,6 +263,7 @@
 
   window.MissionValidator = {
     validateMission: validateMission,
+    validateMissionAsync: validateMissionAsync,
     hasBlockingErrors: hasBlockingErrors
   };
 })();

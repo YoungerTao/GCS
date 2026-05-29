@@ -169,7 +169,14 @@
     turnAroundMeters: 20,
     surveyEntryCorner: "top-left",
     surveyHeadingDeg: null,
-    surveyHeadingAuto: true
+    surveyHeadingAuto: true,
+    useTerrainFollowing: false,
+    terrainAgMarginM: 30,
+    terrainAutoPartition: true,
+    terrainMaxReliefM: 120,
+    terrainMaxClimbRateMps: 3,
+    terrainCruiseSpeedMps: 20,
+    terrainPrefetchOnDraw: true
   };
 
   const TURN_AROUND_DEFAULT_MULTIROTOR_M = 20;
@@ -535,6 +542,25 @@
       const hd = Number(source.surveyHeadingDeg);
       settings.surveyHeadingDeg = Number.isFinite(hd) ? Math.round(hd) % 360 : null;
     }
+
+    settings.useTerrainFollowing = Boolean(source.useTerrainFollowing);
+    settings.terrainAgMarginM =
+      Number(source.terrainAgMarginM) || DEFAULT_MISSION_SETTINGS.terrainAgMarginM;
+    settings.terrainAutoPartition =
+      source.terrainAutoPartition == null
+        ? DEFAULT_MISSION_SETTINGS.terrainAutoPartition
+        : Boolean(source.terrainAutoPartition);
+    settings.terrainMaxReliefM =
+      Number(source.terrainMaxReliefM) || DEFAULT_MISSION_SETTINGS.terrainMaxReliefM;
+    settings.terrainMaxClimbRateMps =
+      Number(source.terrainMaxClimbRateMps) || DEFAULT_MISSION_SETTINGS.terrainMaxClimbRateMps;
+    settings.terrainCruiseSpeedMps =
+      Number(source.terrainCruiseSpeedMps || source.speed) ||
+      DEFAULT_MISSION_SETTINGS.terrainCruiseSpeedMps;
+    settings.terrainPrefetchOnDraw =
+      source.terrainPrefetchOnDraw == null
+        ? DEFAULT_MISSION_SETTINGS.terrainPrefetchOnDraw
+        : Boolean(source.terrainPrefetchOnDraw);
 
     applyAutoFootprintFromCamera(settings);
 
@@ -1891,6 +1917,11 @@
     );
     const [validationIssues, setValidationIssues] = useState([]);
     const [surveyToast, setSurveyToast] = useState("");
+    const [terrainPlanning, setTerrainPlanning] = useState(false);
+    const [terrainPlanBlocks, setTerrainPlanBlocks] = useState([]);
+    const [terrainPlanIssues, setTerrainPlanIssues] = useState([]);
+    const [terrainPlanStats, setTerrainPlanStats] = useState(null);
+    const [terrainAdvisorText, setTerrainAdvisorText] = useState("");
     const [connected, setConnected] = useState(
       window._gcsConnState === "connected"
     );
@@ -2139,7 +2170,42 @@
 
     const handleConfirmSurveyGenerate = useCallback(function () {
       const MC = window.MissionComposer;
-      if (!MC || surveyArea.length < 3 || !surveyPath.length) {
+      if (!MC || surveyArea.length < 3) {
+        return;
+      }
+      if (terrainPlanBlocks.length && settings.useTerrainFollowing) {
+        let waypoints = missionWaypoints;
+        let blocks = surveyBlocks.slice();
+        let addedTotal = 0;
+        terrainPlanBlocks.forEach(function (previewBlock) {
+          const block = MC.createSurveyBlock(
+            previewBlock.polygon || surveyArea,
+            previewBlock.paramsSnapshot || settings,
+            blocks.length
+          );
+          const result = MC.appendBlockToMission(waypoints, block, resolvedPlatform, false);
+          waypoints = result.waypoints;
+          blocks = blocks.concat([result.block]);
+          addedTotal += result.addedCount;
+        });
+        if (appendRtl) {
+          const MM = window.MissionModel;
+          if (MM && MM.appendRtlWaypoint) {
+            waypoints = MM.appendRtlWaypoint(waypoints);
+          }
+        }
+        setMissionWaypoints(waypoints);
+        setSurveyBlocks(blocks);
+        setSurveyToast(
+          "已追加 " + terrainPlanBlocks.length + " 块地形测绘区域，+" + addedTotal + " 个航点"
+        );
+        setTerrainPlanBlocks([]);
+        setTerrainPlanIssues([]);
+        setSurveyArea([]);
+        setSurveyCommitted(false);
+        return;
+      }
+      if (!surveyPath.length) {
         return;
       }
       const block = MC.createSurveyBlock(surveyArea, settings, surveyBlocks.length);
@@ -2171,8 +2237,55 @@
       surveyBlocks.length,
       appendRtl,
       resolvedPlatform,
-      missionWaypoints
+      missionWaypoints,
+      terrainPlanBlocks
     ]);
+
+    const handleAutoTerrainPlan = useCallback(function () {
+      const TSP = window.TerrainSurveyPlanner;
+      if (!TSP || surveyArea.length < 3) {
+        return;
+      }
+      setTerrainPlanning(true);
+      setTerrainAdvisorText("");
+      const planSettings = Object.assign({}, settings, { useTerrainFollowing: true });
+      TSP.planAuto(surveyArea, planSettings, resolvedPlatform)
+        .then(function (result) {
+          setTerrainPlanBlocks(result.blocks || []);
+          setTerrainPlanIssues(result.issues || []);
+          setTerrainPlanStats(result.stats || null);
+          setSurveyToast(
+            "自动规划完成：" +
+              (result.blocks ? result.blocks.length : 0) +
+              " 块区域" +
+              ((result.issues || []).length ? "，" + result.issues.length + " 条校核提示" : "")
+          );
+        })
+        .catch(function (err) {
+          setSurveyToast(err.message || "地形自动规划失败");
+          setTerrainPlanBlocks([]);
+        })
+        .finally(function () {
+          setTerrainPlanning(false);
+        });
+    }, [surveyArea, settings, resolvedPlatform]);
+
+    const handleAnalyzeTerrainPlan = useCallback(function () {
+      const TPA = window.TerrainPlanAdvisor;
+      if (!TPA) {
+        return;
+      }
+      const summary = {
+        platform: resolvedPlatform,
+        settings: settings,
+        stats: terrainPlanStats,
+        blockCount: terrainPlanBlocks.length,
+        issues: terrainPlanIssues
+      };
+      TPA.analyzePlan(summary).then(function (res) {
+        setTerrainAdvisorText(res.text || "");
+      });
+    }, [resolvedPlatform, settings, terrainPlanStats, terrainPlanBlocks, terrainPlanIssues]);
 
     const handleDeleteLastSurveyBlock = useCallback(function () {
       const MC = window.MissionComposer;
@@ -2347,8 +2460,17 @@
       if (!MV) {
         return;
       }
-      setValidationIssues(MV.validateMission(missionWaypoints, resolvedPlatform));
-    }, [missionWaypoints, resolvedPlatform]);
+      if (MV.validateMissionAsync) {
+        MV.validateMissionAsync(missionWaypoints, resolvedPlatform, {
+          settings: settings,
+          surveyBlocks: surveyBlocks
+        }).then(function (issues) {
+          setValidationIssues(issues || []);
+        });
+        return;
+      }
+      setValidationIssues(MV.validateMission(missionWaypoints, resolvedPlatform, { settings: settings }));
+    }, [missionWaypoints, resolvedPlatform, settings, surveyBlocks]);
 
     useEffect(function () {
       if (activeTab !== "survey") {
@@ -2705,6 +2827,12 @@
             }
             next.surveyHeadingDeg = finalize ? Math.round(parsed) % 360 : parsed;
           }
+        } else if (
+          key === "useTerrainFollowing" ||
+          key === "terrainAutoPartition" ||
+          key === "terrainPrefetchOnDraw"
+        ) {
+          next[key] = Boolean(value);
         } else {
           next[key] = Number(value);
           if (finalize) {
@@ -2722,6 +2850,10 @@
 
         if (key === "altitude" && !surveyAltitudeCustomizedRef.current) {
           next.surveyAltitude = formatMissionSettingValue("surveyAltitude", next.altitude);
+        }
+
+        if (key === "speed") {
+          next.terrainCruiseSpeedMps = Number(next.speed) || DEFAULT_MISSION_SETTINGS.terrainCruiseSpeedMps;
         }
 
         if (
@@ -2816,7 +2948,34 @@
     const handleClearSurvey = useCallback(function () {
       setSurveyArea([]);
       setSurveyCommitted(false);
+      setTerrainPlanBlocks([]);
+      setTerrainPlanIssues([]);
+      setTerrainPlanStats(null);
+      setTerrainAdvisorText("");
     }, []);
+
+    useEffect(
+      function () {
+        if (!settings.useTerrainFollowing || settings.terrainPrefetchOnDraw === false) {
+          return;
+        }
+        if (surveyArea.length < 3) {
+          return;
+        }
+        const TS = window.TerrainService;
+        if (!TS || !TS.prefetchTerrain || !TS.polygonBbox) {
+          return;
+        }
+        const bbox = TS.polygonBbox(surveyArea);
+        if (!bbox) {
+          return;
+        }
+        TS.prefetchTerrain(bbox).catch(function () {
+          /* optional */
+        });
+      },
+      [surveyArea, settings.useTerrainFollowing, settings.terrainPrefetchOnDraw]
+    );
 
     const handleFitMission = useCallback(function () {
       if (mapRef.current) {
@@ -2866,7 +3025,12 @@
       }
       const MV = window.MissionValidator;
       if (MV) {
-        const issues = MV.validateMission(missionWaypoints, resolvedPlatform);
+        const issues = MV.validateMissionAsync
+          ? await MV.validateMissionAsync(missionWaypoints, resolvedPlatform, {
+              settings: settings,
+              surveyBlocks: surveyBlocks
+            })
+          : MV.validateMission(missionWaypoints, resolvedPlatform, { settings: settings });
         setValidationIssues(issues);
         if (MV.hasBlockingErrors(issues)) {
           setMissionIoNote("任务校验未通过，请修正后再写入飞控");
@@ -2874,6 +3038,13 @@
             log("❌ 航线校验未通过，已阻止写入飞控");
           }
           return;
+        }
+        const TM = window.TerrainMavlink;
+        if (settings.useTerrainFollowing && TM && TM.checkTerrainEnableBeforeUpload) {
+          const te = TM.checkTerrainEnableBeforeUpload();
+          if (te.warning && typeof log === "function") {
+            log("⚠️ " + te.warning);
+          }
         }
       }
       const total = missionWaypoints.length;
@@ -2923,7 +3094,7 @@
         setMissionIoBusy(false);
         setMissionIoProgress(null);
       }
-    }, [missionWaypoints, resolvedPlatform]);
+    }, [missionWaypoints, resolvedPlatform, settings, surveyBlocks]);
 
     const handleDownloadMission = useCallback(async function () {
       if (!window.MavlinkMission) {
@@ -3519,11 +3690,33 @@
               {
                 type: "button",
                 className: "fp-btn primary",
-                disabled: surveyArea.length < 3 || surveyCommitted,
+                disabled:
+                  surveyArea.length < 3 ||
+                  surveyCommitted ||
+                  terrainPlanning ||
+                  (settings.useTerrainFollowing
+                    ? !terrainPlanBlocks.length && !surveyPath.length
+                    : !surveyPath.length),
                 onClick: handleConfirmSurveyGenerate
               },
-              surveyCommitted ? "已生成测绘航线" : "确认生成测绘航线"
+              surveyCommitted
+                ? "已生成测绘航线"
+                : settings.useTerrainFollowing && terrainPlanBlocks.length
+                  ? "确认生成（" + terrainPlanBlocks.length + " 块）"
+                  : "确认生成测绘航线"
             ),
+            settings.useTerrainFollowing
+              ? e(
+                  "button",
+                  {
+                    type: "button",
+                    className: "fp-btn accent",
+                    disabled: surveyArea.length < 3 || terrainPlanning,
+                    onClick: handleAutoTerrainPlan
+                  },
+                  terrainPlanning ? "自动规划中…" : "自动规划"
+                )
+              : null,
             e(
               "button",
               {
@@ -3556,12 +3749,79 @@
               { className: "fp-check-row" },
               e("input", {
                 type: "checkbox",
+                checked: settings.useTerrainFollowing,
+                onChange: function (event) {
+                  handleSettingChange("useTerrainFollowing", event.target.checked, true);
+                  if (!event.target.checked) {
+                    setTerrainPlanBlocks([]);
+                    setTerrainPlanIssues([]);
+                  }
+                }
+              }),
+              e("span", null, "用地形跟随规划航线（AGL / frame 10）")
+            ),
+            settings.useTerrainFollowing
+              ? e(
+                  window.React.Fragment,
+                  null,
+                  e(
+                    "label",
+                    { className: "fp-check-row" },
+                    e("input", {
+                      type: "checkbox",
+                      checked: settings.terrainAutoPartition,
+                      onChange: function (event) {
+                        handleSettingChange("terrainAutoPartition", event.target.checked, true);
+                      }
+                    }),
+                    e("span", null, "自动切块（高差超限）")
+                  ),
+                  e(
+                    "label",
+                    { className: "fp-check-row" },
+                    e("input", {
+                      type: "checkbox",
+                      checked: settings.terrainPrefetchOnDraw,
+                      onChange: function (event) {
+                        handleSettingChange("terrainPrefetchOnDraw", event.target.checked, true);
+                      }
+                    }),
+                    e("span", null, "画完测区自动预取地形")
+                  ),
+                  e(
+                    "label",
+                    { htmlFor: "fp-terrain-margin" },
+                    "安全离地裕度 (m)"
+                  ),
+                  e("input", {
+                    id: "fp-terrain-margin",
+                    type: "number",
+                    min: 0,
+                    step: 5,
+                    value: settings.terrainAgMarginM,
+                    onChange: function (event) {
+                      handleSettingChange("terrainAgMarginM", event.target.value, true);
+                    }
+                  })
+                )
+              : null,
+            e(
+              "label",
+              { className: "fp-check-row" },
+              e("input", {
+                type: "checkbox",
                 checked: settings.surveyHeadingAuto,
                 onChange: function (event) {
                   handleSettingChange("surveyHeadingAuto", event.target.checked, true);
                 }
               }),
-              e("span", null, "自动优选主航向（最短航程）")
+              e(
+                "span",
+                null,
+                settings.useTerrainFollowing
+                  ? "自动优选主航向（航程 + 地形起伏）"
+                  : "自动优选主航向（最短航程）"
+              )
             ),
             e(
               "label",
@@ -3590,6 +3850,91 @@
               }
             })
           ),
+          terrainPlanIssues.length
+            ? e(
+                "div",
+                { className: "fp-validation-list", style: { marginTop: "8px" } },
+                terrainPlanIssues.map(function (issue, idx) {
+                  return e(
+                    "div",
+                    {
+                      key: "tpi-" + idx,
+                      className:
+                        "fp-validation-item fp-validation-item--" + (issue.level || "warning")
+                    },
+                    issue.message
+                  );
+                })
+              )
+            : null,
+          terrainPlanBlocks.length
+            ? e(
+                "div",
+                { className: "fp-block-list", style: { marginTop: "8px" } },
+                e(
+                  "div",
+                  { className: "fp-block-list-title" },
+                  "自动规划预览 (" + terrainPlanBlocks.length + " 块)"
+                ),
+                terrainPlanStats
+                  ? e(
+                      "div",
+                      { className: "fp-card-note" },
+                      "高程 " +
+                        (terrainPlanStats.min != null ? Math.round(terrainPlanStats.min) : "?") +
+                        "–" +
+                        (terrainPlanStats.max != null ? Math.round(terrainPlanStats.max) : "?") +
+                        " m，高差约 " +
+                        Math.round(terrainPlanStats.relief || 0) +
+                        " m"
+                    )
+                  : null,
+                terrainPlanBlocks.map(function (block, idx) {
+                  const prof = block.previewProfile || [];
+                  const maxClimb = (block.previewIssues || []).some(function (i) {
+                    return i.level === "error";
+                  });
+                  return e(
+                    "div",
+                    { key: "tpb-" + idx, className: "fp-block-item" },
+                    e(
+                      "span",
+                      null,
+                      "块 " +
+                        (idx + 1) +
+                        " · " +
+                        (block.previewPath ? block.previewPath.length : 0) +
+                        " 路径点" +
+                        (maxClimb ? " · 校核未通过" : "")
+                    ),
+                    prof.length
+                      ? e(
+                          "span",
+                          { className: "fp-field-hint" },
+                          "剖面 " + prof.length + " 点"
+                        )
+                      : null
+                  );
+                }),
+                e(
+                  "button",
+                  {
+                    type: "button",
+                    className: "fp-btn fp-btn--tiny",
+                    style: { marginTop: "6px" },
+                    onClick: handleAnalyzeTerrainPlan
+                  },
+                  "分析规划（LLM）"
+                ),
+                terrainAdvisorText
+                  ? e(
+                      "div",
+                      { className: "fp-card-note", style: { marginTop: "6px", whiteSpace: "pre-wrap" } },
+                      terrainAdvisorText
+                    )
+                  : null
+              )
+            : null,
           surveyBlocks.length
             ? e(
                 "div",
@@ -3935,7 +4280,7 @@
             e(
               "div",
               { className: "fp-field" },
-              e("label", { htmlFor: "fp-survey-altitude" }, "航测高度"),
+              e("label", { htmlFor: "fp-survey-altitude" }, settings.useTerrainFollowing ? "航测高度 (AGL)" : "航测高度"),
               e(
                 "input",
                 Object.assign(

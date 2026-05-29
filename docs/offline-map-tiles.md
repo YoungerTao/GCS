@@ -26,12 +26,20 @@ python3 tools/map-tiles/download_map_tiles.py \
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/health` | 服务状态、`cachedTiles`、预取进度 |
+| GET | `/health` | 服务状态、`cachedTiles`、地形 `terrainReady`、预取进度 |
 | GET | `/tiles/{layer}/{z}/{x}/{y}.png` | 本地瓦片；`?cacheOnly=1` 无缓存则 404 |
 | POST | `/prefetch?dryRun=1` | 估算瓦片数与体积（JSON 见下） |
-| POST | `/prefetch` | 后台预取 |
-| GET | `/prefetch/status` | 预取进度 |
-| POST | `/prefetch/cancel` | 取消预取 |
+| POST | `/prefetch` | 后台预取影像 |
+| GET | `/prefetch/status` | 影像预取进度 |
+| POST | `/prefetch/cancel` | 取消影像预取 |
+| GET | `/elevation?lat=&lng=` | 单点 AMSL 高程（米） |
+| POST | `/elevation/batch` | 批量高程 `{ "points": [{lat,lng}] }` |
+| POST | `/elevation/profile` | 沿折线剖面 `{ "points", "stepM" }` |
+| POST | `/terrain/stats` | 测区统计 `{ "polygon": [...] }` |
+| POST | `/terrain/prefetch` | 预下载 SRTM Skadi 瓦片 |
+| GET | `/terrain/prefetch/status` | 地形预取进度 |
+| POST | `/terrain/prefetch/cancel` | 取消地形预取 |
+| GET/POST | `/terrain/grid` | MAVLink 地形网格行（`lat`/`lon` degE7、`grid_spacing`、`mask`） |
 
 预取 JSON 体示例：
 
@@ -53,4 +61,11 @@ python3 tools/map-tiles/download_map_tiles.py \
 - 顶栏「预取地图」「仅缓存」由 `map-tile-settings.js` 驱动。
 - 地图上 **Shift+拖拽** 选区打开预取对话框（`map-prefetch.js`）。
 
-环境变量 `GCS_MAP_TILE_ROOT` 可覆盖默认缓存路径。
+环境变量 `GCS_MAP_TILE_ROOT` 可覆盖默认影像缓存路径；`GCS_TERRAIN_ROOT` 可覆盖地形缓存（默认 `~/.gcs/terrain`）。
+
+地形 CLI：
+
+```bash
+python3 tools/map-tiles/download_terrain.py \
+  --south 29.5 --west 106.1 --north 29.7 --east 106.4 --dry-run
+```

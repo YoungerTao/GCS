@@ -1,6 +1,8 @@
 (function () {
   const MAV_FRAME_GLOBAL_RELATIVE_ALT_INT = 6;
 
+  const MAV_FRAME_GLOBAL_TERRAIN_ALT = 10;
+
   const MAV_FRAME_MISSION = 2;
 
   const MAV_CMD = {
@@ -299,6 +301,7 @@
     MAV_CMD: MAV_CMD,
     MAV_VTOL_STATE: MAV_VTOL_STATE,
     MAV_FRAME_GLOBAL_RELATIVE_ALT_INT: MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+    MAV_FRAME_GLOBAL_TERRAIN_ALT: MAV_FRAME_GLOBAL_TERRAIN_ALT,
     createWaypoint: createWaypoint,
     getCommandLabel: getCommandLabel,
     getMapRoleLabel: getMapRoleLabel,

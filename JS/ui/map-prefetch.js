@@ -89,6 +89,32 @@
     };
   }
 
+  function terrainBboxPayload(bounds) {
+    return {
+      south: bounds.getSouth(),
+      west: bounds.getWest(),
+      north: bounds.getNorth(),
+      east: bounds.getEast()
+    };
+  }
+
+  function startTerrainPrefetch(bounds) {
+    const body = terrainBboxPayload(bounds);
+    return fetchJson(TILE_API + "/terrain/prefetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  }
+
+  function pollTerrainPrefetchStatus() {
+    return fetchJson(TILE_API + "/terrain/prefetch/status", { method: "GET", cache: "no-store" });
+  }
+
+  function prefetchTerrainForBounds(bounds) {
+    return startTerrainPrefetch(bounds);
+  }
+
   function boundsPayload(bounds) {
     const south = bounds.getSouth();
     const west = bounds.getWest();
@@ -227,6 +253,13 @@
       btn.disabled = true;
     }
     setProgress("启动预取…");
+    const terrainCb = $("gcsPrefetchTerrain");
+    const wantTerrain = terrainCb ? terrainCb.checked : false;
+    if (wantTerrain) {
+      startTerrainPrefetch(currentBounds).catch(function () {
+        /* terrain optional */
+      });
+    }
     startPrefetch(boundsPayload(currentBounds))
       .then(function (res) {
         if (!res.ok || !res.body || !res.body.ok) {
@@ -391,6 +424,7 @@
     openPrefetchDialog: openPrefetchDialog,
     setupMap: setupMap,
     startPrefetch: runPrefetch,
+    prefetchTerrainForBounds: prefetchTerrainForBounds,
     estimatePrefetch: estimatePrefetch,
     pollPrefetchStatus: pollPrefetchStatus,
     cancelPrefetch: cancelPrefetch

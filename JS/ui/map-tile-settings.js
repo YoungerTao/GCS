@@ -30,12 +30,18 @@
           return;
         }
         const cached = data.cachedTiles != null ? data.cachedTiles : 0;
+        const terrainCached = data.cachedTerrainTiles != null ? data.cachedTerrainTiles : 0;
         const pf = data.prefetch || {};
+        const tpf = data.terrainPrefetch || {};
         let extra = "";
         if (pf.running) {
-          extra = " · 预取 " + (pf.done || 0) + "/" + (pf.total || 0);
+          extra = " · 影像 " + (pf.done || 0) + "/" + (pf.total || 0);
         }
-        setStatus("缓存 " + cached + " 张" + extra, true);
+        if (tpf.running) {
+          extra += " · 地形 " + (tpf.done || 0) + "/" + (tpf.total || 0);
+        }
+        const terrainNote = data.terrainReady ? " · 地形就绪" : terrainCached ? " · 地形 " + terrainCached : "";
+        setStatus("缓存 " + cached + " 张" + terrainNote + extra, true);
       })
       .catch(function () {
         setStatus("瓦片服务离线", false);

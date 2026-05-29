@@ -901,6 +901,10 @@
       <label>最大级别 <input type="number" id="gcsPrefetchZoomMax" min="0" max="19" value="17"></label>
     </div>
     <div id="gcsPrefetchEstimate" class="gcs-prefetch-estimate"></div>
+    <label class="gcs-prefetch-terrain-row">
+      <input type="checkbox" id="gcsPrefetchTerrain" checked>
+      同时预取地形高程（SRTM）
+    </label>
     <div id="gcsPrefetchProgress" class="gcs-prefetch-progress"></div>
     <div class="gcs-prefetch-actions">
       <button type="button" id="gcsPrefetchStopBtn">停止</button>
@@ -923,6 +927,12 @@
 <script src="JS/ui/status-messages.js" defer></script>
 <script src="JS/core/mavlink-crc-ardupilot.js" defer></script>
 <script src="JS/core/battery-registry.js" defer></script>
+<script src="JS/services/terrain-service.js" defer></script>
+<script src="JS/mission/terrain-polygon-split.js" defer></script>
+<script src="JS/mission/terrain-profile-validator.js" defer></script>
+<script src="JS/mission/terrain-survey-planner.js" defer></script>
+<script src="JS/mission/terrain-plan-advisor.js" defer></script>
+<script src="JS/services/terrain-mavlink.js" defer></script>
 <script src="JS/core/mavlink.js" defer></script>
 <script src="JS/core/mavlink-helpers.js" defer></script>
 <script src="JS/core/ardupilot-telemetry.js" defer></script>

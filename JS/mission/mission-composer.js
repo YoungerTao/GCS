@@ -35,8 +35,23 @@
       footprintWidthMeters: Number(settings.footprintWidthMeters) || 60,
       footprintHeightMeters: footprintHeightMeters,
       triggerDistanceMeters: triggerDistanceMeters,
-      lineSpacingMeters: Number(settings.lineSpacingMeters) || null
+      lineSpacingMeters: Number(settings.lineSpacingMeters) || null,
+      useTerrainFollowing: Boolean(settings.useTerrainFollowing),
+      terrainAgMarginM: Number(settings.terrainAgMarginM) || 30,
+      terrainAutoPartition: settings.terrainAutoPartition !== false,
+      terrainMaxReliefM: Number(settings.terrainMaxReliefM) || 120,
+      terrainMaxClimbRateMps: Number(settings.terrainMaxClimbRateMps) || 3,
+      terrainCruiseSpeedMps:
+        Number(settings.terrainCruiseSpeedMps || settings.speed) || 20,
+      terrainPrefetchOnDraw: settings.terrainPrefetchOnDraw !== false
     };
+  }
+
+  function resolveSurveyFrame(snapshot) {
+    if (snapshot && snapshot.useTerrainFollowing) {
+      return MM.MAV_FRAME_GLOBAL_TERRAIN_ALT;
+    }
+    return MM.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT;
   }
 
   function pathOptionsFromSnapshot(snapshot, lineSpacingMeters) {
@@ -68,10 +83,11 @@
     return points && points.length ? points[0] : null;
   }
 
-  function buildConnectorWaypoints(from, to, altitude, platform, blockId) {
+  function buildConnectorWaypoints(from, to, altitude, platform, blockId, snapshot) {
     if (!from || !to || !SP) {
       return [];
     }
+    const frame = resolveSurveyFrame(snapshot);
     const mids = SP.buildConnectorPoints(from, to, CONNECTOR_THRESHOLD_M);
     const list = [];
 
@@ -81,6 +97,7 @@
           lng: p.lng,
           lat: p.lat,
           alt: altitude,
+          frame: frame,
           command: MM.MAV_CMD.NAV_WAYPOINT,
           source: "connector",
           segmentRole: "connector",
@@ -94,8 +111,9 @@
     return list;
   }
 
-  function surveyPointsToWaypoints(points, altitude, platform, blockId) {
+  function surveyPointsToWaypoints(points, altitude, platform, blockId, snapshot) {
     const isFw = platform === "plane" || platform === "vtol";
+    const frame = resolveSurveyFrame(snapshot);
     return (points || []).map(function (point, index) {
       const role = point.segmentRole || "transect";
       const pathRole = point.pathRole || "";
@@ -103,6 +121,7 @@
         lng: point.lng,
         lat: point.lat,
         alt: altitude,
+        frame: frame,
         source: "survey",
         segmentRole: role,
         pathRole: pathRole,
@@ -199,7 +218,7 @@
 
     if (prev && first) {
       next = next.concat(
-        buildConnectorWaypoints(prev, first, altitude, platform, block.id)
+        buildConnectorWaypoints(prev, first, altitude, platform, block.id, snapshot)
       );
     }
 
@@ -207,7 +226,8 @@
       routePoints,
       altitude,
       platform,
-      block.id
+      block.id,
+      snapshot
     );
     next = next.concat(
       surveyWaypointsWithCameraCommands(surveyNavWaypoints, snapshot)
@@ -355,6 +375,7 @@
     removeBlockById: removeBlockById,
     recalcBlock: recalcBlock,
     cloneParamsSnapshot: cloneParamsSnapshot,
+    resolveSurveyFrame: resolveSurveyFrame,
     migrateLegacySurveyWaypoints: migrateLegacySurveyWaypoints,
     CONNECTOR_THRESHOLD_M: CONNECTOR_THRESHOLD_M
   };

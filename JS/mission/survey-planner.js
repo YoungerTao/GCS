@@ -334,6 +334,107 @@
     return bestHeadingDeg;
   }
 
+  function terrainVarianceAlongPath(path, elevations) {
+    if (!path || path.length < 2 || !elevations || !elevations.length) {
+      return 0;
+    }
+    let sum = 0;
+    let count = 0;
+    for (let i = 1; i < elevations.length; i += 1) {
+      const a = elevations[i - 1];
+      const b = elevations[i];
+      if (a == null || b == null) {
+        continue;
+      }
+      sum += Math.abs(b - a);
+      count += 1;
+    }
+    return count ? sum / count : 0;
+  }
+
+  function maxClimbRateAlongPath(path, elevations, speedMps) {
+    const speed = Math.max(1, Number(speedMps) || 20);
+    let maxRate = 0;
+    for (let i = 1; i < path.length && i < elevations.length; i += 1) {
+      const a = elevations[i - 1];
+      const b = elevations[i];
+      if (a == null || b == null) {
+        continue;
+      }
+      const dist = distanceMetersBetween(path[i - 1], path[i]);
+      if (dist < 1) {
+        continue;
+      }
+      maxRate = Math.max(maxRate, Math.abs(b - a) / (dist / speed));
+    }
+    return maxRate;
+  }
+
+  function pickBestSurveyHeadingWithTerrain(polygonVertices, overlapRate, settings, platform) {
+    const base = {
+      turnAroundMeters: settings.turnAroundMeters,
+      entryCorner: settings.surveyEntryCorner,
+      footprintWidthMeters: settings.footprintWidthMeters,
+      lineSpacingMeters: settings.lineSpacingMeters
+    };
+    const vertices = Array.isArray(polygonVertices) ? polygonVertices : [];
+    if (vertices.length < 3) {
+      return Promise.resolve(null);
+    }
+    const origin = getSurveyOrigin(vertices);
+    const localPolygon = vertices.map(function (vertex) {
+      return projectLngLatToMeters(vertex, origin);
+    });
+    const seedDeg =
+      Math.round(((getLongestEdgeHeading(localPolygon) * 180) / Math.PI + 360) % 180) % 180;
+    const candidateSet = {};
+    candidateSet[seedDeg] = true;
+    for (let offset = 15; offset < 90; offset += 15) {
+      candidateSet[(seedDeg + offset) % 180] = true;
+      candidateSet[(seedDeg - offset + 180) % 180] = true;
+    }
+    const isFw = platform === "plane" || platform === "vtol";
+    const w1 = 1;
+    const w2 = isFw ? 8 : 3;
+    const w3 = isFw ? 12 : 4;
+    const speed = Number(settings.terrainCruiseSpeedMps || settings.speed) || 20;
+    const TS = window.TerrainService;
+    const keys = Object.keys(candidateSet);
+    if (!TS || !TS.sampleElevationBatch) {
+      return Promise.resolve(pickBestSurveyHeadingDegrees(vertices, overlapRate, base));
+    }
+    const tasks = keys.map(function (key) {
+      const deg = Number(key);
+      const path = generateSurveyPath(vertices, overlapRate, Object.assign({}, base, {
+        headingDegrees: deg
+      }));
+      const pts = path.map(function (p) {
+        return { lat: p.lat, lng: p.lng };
+      });
+      return TS.sampleElevationBatch(pts, { cacheOnly: true }).then(function (samples) {
+        const elevs = samples.map(function (s) {
+          return s.elevation;
+        });
+        const len = estimatePathLengthMeters(path);
+        const variance = terrainVarianceAlongPath(path, elevs);
+        const climb = maxClimbRateAlongPath(path, elevs, speed);
+        const score = w1 * len + w2 * variance + w3 * climb;
+        return { deg: deg, score: score };
+      });
+    });
+    return Promise.all(tasks).then(function (results) {
+      let asyncBest = seedDeg;
+      let asyncScore = Infinity;
+      results.forEach(function (r) {
+        if (r.score < asyncScore) {
+          asyncScore = r.score;
+          asyncBest = r.deg;
+        }
+      });
+      return asyncBest;
+    });
+  }
+
   function pushUniqueCorner(corners, point, pathRole) {
     const last = corners[corners.length - 1];
     if (last && distanceMetersBetween(last, point) < CONNECTOR_MIN_DIST_M) {
@@ -565,6 +666,7 @@
   window.SurveyPlanner = {
     generateSurveyPath: generateSurveyPath,
     pickBestSurveyHeadingDegrees: pickBestSurveyHeadingDegrees,
+    pickBestSurveyHeadingWithTerrain: pickBestSurveyHeadingWithTerrain,
     extractSurveyRouteWaypoints: extractSurveyRouteWaypoints,
     buildSurveyMissionLegsFromPath: buildSurveyMissionLegsFromPath,
     buildConnectorPoints: buildConnectorPoints,
