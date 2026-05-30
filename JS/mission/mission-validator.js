@@ -216,7 +216,7 @@
       return Promise.resolve(base);
     }
 
-    return TPV.validateMissionTerrain(waypoints, settings, platform).then(function (terrainIssues) {
+    return Promise.resolve(TPV.validateMissionTerrain(waypoints, settings, platform)).then(function (terrainIssues) {
       const issues = base.concat(terrainIssues || []);
       if (!TSP || !surveyBlocks.length) {
         return issues;

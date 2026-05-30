@@ -16,7 +16,7 @@ const CRC_EXTRA = {
   36:222, 39:254, 40:230, 42:28, 43:132, 44:221, 45:232, 47:153, 51:196, 62:183, 65:118, 73:38,
   74:20, 75:152, 76:152, 77:143, 83:53, 105:158, 110:115, 111:34, 116:76, 124:87, 125:203,
   129:46, 132:85, 133:6, 136:1, 137:0, 147:154, 148:178, 152:208, 163:127, 167:106, 178:47,
-  191:92, 192:36, 193:71, 226:207, 241:90, 253:83,
+  191:92, 192:36, 193:71, 226:207, 241:90, 253:83, 295:234,
   11030:144, 11031:133, 11032:85, 11033:195, 11039:142
 };
 
@@ -91,6 +91,17 @@ const PARSE_MAX_FRAMES_PER_SLICE = 160;
 const PARSE_MAX_FRAMES_PARAM_LOAD = 320;
 const PARSE_MAX_RESYNC_BYTES = 8192;
 
+function shouldSuppressCrcWarn(now) {
+  const sessionStart = window._mavlinkCrcSessionStartMs;
+  if (!sessionStart) return false;
+  if (window._mavlinkCrcGraceUntil && now < window._mavlinkCrcGraceUntil) {
+    return true;
+  }
+  const synced =
+    window._lastMavlinkRxMs && window._lastMavlinkRxMs >= sessionStart;
+  return !synced;
+}
+
 function logCrcOnce(msgid) {
   const now = Date.now();
   const diag = window._crcDiag || {
@@ -115,6 +126,13 @@ function logCrcOnce(msgid) {
     diag.sampleIds.push(msgid);
   }
   if (diag.count >= 4 && now - diag.lastLogMs > 5000) {
+    if (shouldSuppressCrcWarn(now)) {
+      diag.count = 0;
+      diag.sampleIds = [];
+      diag.firstSeenMs = now;
+      window._crcDiag = diag;
+      return;
+    }
     const sampleText = diag.sampleIds.length
       ? "，样本 msg=" + diag.sampleIds.join(",")
       : "";

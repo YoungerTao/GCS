@@ -120,18 +120,18 @@
   function validateMissionTerrain(waypoints, settings, platform) {
     const issues = [];
     if (!settings || !settings.useTerrainFollowing) {
-      return issues;
+      return Promise.resolve(issues);
     }
     const MM = window.MissionModel;
     if (!MM) {
-      return issues;
+      return Promise.resolve(issues);
     }
     const list = waypoints || [];
     const survey = list.filter(function (wp) {
       return wp.source === "survey";
     });
     if (!survey.length) {
-      return issues;
+      return Promise.resolve(issues);
     }
 
     const wrongFrame = survey.some(function (wp) {

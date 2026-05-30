@@ -17,6 +17,16 @@
       return null;
     }
     const dv = payloadView(payload);
+    if (payload.length >= 18) {
+      const maskLow = dv.getUint32(0, true);
+      const maskHigh = dv.getUint32(4, true);
+      return {
+        mask: maskLow + maskHigh * 4294967296,
+        lat: dv.getInt32(8, true),
+        lon: dv.getInt32(12, true),
+        grid_spacing: dv.getUint16(16, true)
+      };
+    }
     return {
       lat: dv.getInt32(0, true),
       lon: dv.getInt32(4, true),
@@ -74,7 +84,12 @@
     if (!req) {
       return Promise.resolve();
     }
-    return fetchTerrainRows(req).then(sendTerrainDataRows);
+    terrainRequestCount += 1;
+    terrainLastRequestAt = Date.now();
+    return fetchTerrainRows(req).then(function (rows) {
+      terrainDataRowCount += rows.length;
+      return sendTerrainDataRows(rows);
+    });
   }
 
   function checkTerrainEnableBeforeUpload() {
@@ -89,6 +104,26 @@
       ok: enabled,
       warning: enabled ? null : "飞控 TERRAIN_ENABLE 未启用，地形跟随可能无效"
     };
+  }
+
+  let terrainRequestCount = 0;
+  let terrainDataRowCount = 0;
+  let terrainLastRequestAt = 0;
+
+  function getTerrainGridStatus() {
+    return {
+      requestCount: terrainRequestCount,
+      rowsSent: terrainDataRowCount,
+      lastRequestAt: terrainLastRequestAt,
+      hookInstalled: !!window._terrainMavlinkHookInstalled,
+      connected: window._gcsConnState === "connected"
+    };
+  }
+
+  function resetTerrainGridStats() {
+    terrainRequestCount = 0;
+    terrainDataRowCount = 0;
+    terrainLastRequestAt = 0;
   }
 
   function installMavlinkHook() {
@@ -119,6 +154,8 @@
     parseTerrainRequest: parseTerrainRequest,
     packTerrainData: packTerrainData,
     handleTerrainRequest: handleTerrainRequest,
-    checkTerrainEnableBeforeUpload: checkTerrainEnableBeforeUpload
+    checkTerrainEnableBeforeUpload: checkTerrainEnableBeforeUpload,
+    getTerrainGridStatus: getTerrainGridStatus,
+    resetTerrainGridStats: resetTerrainGridStats
   };
 })();

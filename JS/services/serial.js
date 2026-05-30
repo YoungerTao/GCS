@@ -306,6 +306,15 @@ function bumpConnectionSession() {
   window._gcsConnSessionId = (window._gcsConnSessionId || 0) + 1;
   window._gcsParamsLoadedSessionId = null;
   window._gcsParamsLoadedOnce = false;
+  const rx = window.buf;
+  if (rx && rx.length) rx.length = 0;
+  window._crcDiag = null;
+  window._mavlinkCrcErrors = 0;
+  window._lastMavlinkRxMs = 0;
+  const now = Date.now();
+  const graceMs = window._gcsAutoConnectActive ? 3000 : 2000;
+  window._mavlinkCrcSessionStartMs = now;
+  window._mavlinkCrcGraceUntil = now + graceMs;
 }
 
 function setConnectionUI(state) {

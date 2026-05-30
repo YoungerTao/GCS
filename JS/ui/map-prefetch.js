@@ -37,6 +37,12 @@
     if (!modal) {
       return;
     }
+    if (!show) {
+      const active = document.activeElement;
+      if (active && modal.contains(active)) {
+        active.blur();
+      }
+    }
     modal.classList.toggle("hidden", !show);
     modal.setAttribute("aria-hidden", show ? "false" : "true");
   }

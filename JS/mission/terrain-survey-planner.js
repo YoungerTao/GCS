@@ -113,32 +113,48 @@
     return tps.autoPartitionByRelief(polygon, stats || {}, maxRelief);
   }
 
-  function planAuto(polygon, settings, platform) {
+  function planAuto(polygon, settings, platform, callbacks) {
     const ts = TS();
     if (!ts) {
       return Promise.reject(new Error("TerrainService 未加载"));
     }
-    const bbox = ts.polygonBbox(polygon);
-    if (!bbox) {
-      return Promise.reject(new Error("无效测区多边形"));
+    const cbs = callbacks || {};
+    const onProgress =
+      typeof cbs.onProgress === "function" ? cbs.onProgress : null;
+
+    function report(phase, detail) {
+      if (onProgress) {
+        onProgress(Object.assign({ phase: phase }, detail || {}));
+      }
     }
 
-    const prefetch =
-      settings.useTerrainFollowing && settings.terrainPrefetchOnDraw !== false
-        ? ts.prefetchTerrain(bbox).catch(function () {
-            return null;
-          })
-        : Promise.resolve(null);
+    const shouldPrefetch =
+      settings.useTerrainFollowing && settings.terrainPrefetchOnDraw !== false;
 
-    return prefetch
+    const terrainReady = shouldPrefetch
+      ? ts.ensureTerrainForPolygon(polygon, {
+          onProgress: function (status) {
+            report("prefetch", { status: status });
+          }
+        })
+      : Promise.resolve(null);
+
+    return terrainReady
       .then(function () {
+        report("stats", { message: "读取测区高程…" });
         return ts.getTerrainStats(polygon);
       })
       .then(function (stats) {
         const parts = autoPartition(polygon, settings, stats);
+        report("planning", { blockTotal: parts.length, blockIndex: 0 });
         let chain = Promise.resolve({ blocks: [], issues: [], stats: stats });
         parts.forEach(function (part, index) {
           chain = chain.then(function (acc) {
+            report("planning", {
+              blockTotal: parts.length,
+              blockIndex: index + 1,
+              message: "规划块 " + (index + 1) + "/" + parts.length
+            });
             return planBlock(part, settings, platform, index).then(function (block) {
               acc.blocks.push(block);
               (block.previewIssues || []).forEach(function (issue) {
@@ -153,6 +169,10 @@
           });
         });
         return chain;
+      })
+      .then(function (result) {
+        report("done", { stats: result.stats });
+        return result;
       });
   }
 
