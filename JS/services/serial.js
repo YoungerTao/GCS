@@ -233,8 +233,10 @@ function startBridgeDataWatchdog() {
 /**
  * 释放 Web Serial 读写锁并关闭端口。
  * Windows 上若未关闭就再次 open，会报 InvalidStateError。
+ * @param {{ fast?: boolean }} [opts] - fast=true：跳过延时与桥接请求（页面卸载时用，避免阻塞刷新）
  */
-async function closeSerialResources() {
+async function closeSerialResources(opts) {
+  const fast = !!(opts && opts.fast);
   if (window._heartbeatInterval) {
     clearInterval(window._heartbeatInterval);
     window._heartbeatInterval = null;
@@ -271,6 +273,28 @@ async function closeSerialResources() {
   const r = typeof reader !== "undefined" ? reader : null;
   const w = typeof writer !== "undefined" ? writer : null;
 
+  if (fast) {
+    reader = null;
+    window.reader = null;
+    writer = null;
+    window.writer = null;
+    try {
+      if (r) {
+        try { r.cancel().catch(() => {}); } catch (_) { /* ignore */ }
+        try { r.releaseLock(); } catch (_) { /* ignore */ }
+      } else if (p && p.readable && p.readable.locked) {
+        try { p.readable.cancel().catch(() => {}); } catch (_) { /* ignore */ }
+      }
+    } catch (_) { /* ignore */ }
+    try {
+      if (w) {
+        try { w.close().catch(() => {}); } catch (_) { /* ignore */ }
+        try { w.releaseLock(); } catch (_) { /* ignore */ }
+      } else if (p && p.writable && p.writable.locked) {
+        try { p.writable.abort().catch(() => {}); } catch (_) { /* ignore */ }
+      }
+    } catch (_) { /* ignore */ }
+  } else {
   try {
     if (r) {
       try { await r.cancel(); } catch (_) { /* ignore */ }
@@ -292,14 +316,36 @@ async function closeSerialResources() {
   } catch (_) { /* ignore */ }
   writer = null;
   window.writer = null;
+  }
 
   try {
-    if (p && typeof p.close === "function") await p.close();
+    if (p && typeof p.close === "function") {
+      if (fast) {
+        // 卸载路径：只发起 close，不 await，避免 Chrome 刷新时一直转圈
+        try { p.close().catch(() => {}); } catch (_) { /* ignore */ }
+      } else {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            await p.close();
+            break;
+          } catch (_) {
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 60));
+            }
+          }
+        }
+        await new Promise((r) => setTimeout(r, 110));
+      }
+    }
   } catch (_) { /* ignore */ }
+
+  window._lastPortCloseTs = Date.now();
   window.port = null;
-  try {
-    await bridgeFetch("/bridge-close", {}, { skipEnsure: true });
-  } catch (_) { /* ignore */ }
+  if (!fast) {
+    try {
+      await bridgeFetch("/bridge-close", {}, { skipEnsure: true });
+    } catch (_) { /* ignore */ }
+  }
 }
 
 function bumpConnectionSession() {
@@ -403,6 +449,10 @@ let _connectInFlight = null;
 
 async function connect() {
   if (_connectInFlight) return _connectInFlight;
+  if (window._baudProbeInFlight) {
+    log("⚠️ 正在探测波特率，请稍候…");
+    return;
+  }
 
   _connectInFlight = connectImpl().finally(() => {
     _connectInFlight = null;
@@ -424,15 +474,18 @@ async function connectImpl() {
   }
 
   let connectWatchdog = null;
+  const connectWatchdogMs =
+    typeof window.getConnectWatchdogMs === "function" ? window.getConnectWatchdogMs() : 25000;
   const armConnectWatchdog = () => {
     if (connectWatchdog) clearTimeout(connectWatchdog);
     connectWatchdog = setTimeout(() => {
       if (window._gcsConnState !== "connecting") return;
-      log("❌ 连接超时（25s），已释放串口；请改选带 [MAVLink] 的口或串口1 后重试");
+      const sec = Math.round(connectWatchdogMs / 1000);
+      log(`❌ 连接超时（${sec}s），已释放串口；请改选带 [MAVLink] 的口或串口1 后重试`);
       closeSerialResources()
         .catch(() => {})
         .finally(() => setConnectionUI("error"));
-    }, 25000);
+    }, connectWatchdogMs);
   };
   const disarmConnectWatchdog = () => {
     if (connectWatchdog) clearTimeout(connectWatchdog);
@@ -505,7 +558,6 @@ async function connectImpl() {
         }
       }
       try {
-        const baudRate = getSelectedBaudRate();
         const optionMeta = optionMetaEarly || window._comOptionMap?.get(selectedValue);
         if (optionMeta?.systemPort && typeof window.isNoiseSerialPort === "function" && window.isNoiseSerialPort(optionMeta.systemPort)) {
           log("❌ 当前选中的是蓝牙/调试口，无法连接飞控。请在下拉中选择 CUAV/Pixhawk 的 usbmodem 口");
@@ -535,6 +587,13 @@ async function connectImpl() {
           }
         } else if (!portRole && mavlinkPort) {
           portName = mavlinkPort;
+        }
+        let baudRate = getSelectedBaudRate();
+        if (typeof window.resolveConnectBaudRate === "function") {
+          baudRate = await window.resolveConnectBaudRate({
+            portName,
+            useBridge: true,
+          });
         }
         if (!portRole && !mavlinkPort && !window._gcsAutoConnectActive) {
           const siblings = getDuplicateVidPidSiblingPorts(portName);
@@ -708,7 +767,13 @@ async function connectImpl() {
 
     const port = selectedPort;
     if (!port) throw new Error("未获取到串口端口对象");
-    const baudRate = getSelectedBaudRate();
+    let baudRate = getSelectedBaudRate();
+    if (typeof window.resolveConnectBaudRate === "function") {
+      baudRate = await window.resolveConnectBaudRate({
+        serialPort: port,
+        useBridge: false,
+      });
+    }
     try {
       await openSerialPortWithTimeout(port, {
         baudRate, dataBits: 8, stopBits: 1, parity: "none",
@@ -790,9 +855,32 @@ async function connectImpl() {
     const name = e?.name || "Error";
     const msg = e?.message || String(e);
     log(`❌ 连接失败: ${name} - ${msg}`);
-    if (/open serial port|InvalidStateError|Access denied|端口|占用|being used|in use/i.test(msg)) {
-      log("💡 提示：请关闭 Mission Planner / QGC 等占用同一 COM 口的软件");
+
+    const looksLikeClaimStale =
+      /InvalidStateError|Access denied|already open|设备正忙|busy|in use|占用/i.test(msg) ||
+      /open serial port/i.test(msg);
+
+    if (looksLikeClaimStale) {
+      const isAuthPort = typeof selectedValue === "string" && selectedValue.startsWith("auth:");
+      const justReloaded = !!(window._gcsJustReloaded || (Date.now() - (window._gcsPageLoadTs || 0) < 8000));
+
+      if (isAuthPort && justReloaded) {
+        log("⚠️ 这很可能是浏览器刷新后 USB 串口仍被前一页面“持有”的已知问题（Windows + Web Serial 经典坑）。");
+        log("💡 推荐处理顺序：");
+        log("   1. 等待 15~30 秒后，再点一次「连接串口」（浏览器通常会慢慢释放 claim）");
+        log("   2. 点击顶部下拉里的「↻ 刷新 COM 列表」，然后再尝试连接");
+        log("   3. 仍不行的话，物理拔掉飞控 USB 线再插上（最彻底）");
+        log("   4. 或者尝试关闭“自动匹配”复选框，用固定波特率手动连接");
+      } else {
+        log("💡 提示：请关闭 Mission Planner / QGC / 其他串口工具，或等待几秒后重试。物理拔插 USB 通常能立即恢复。");
+      }
+    } else {
+      // 普通错误也给一个通用提示
+      if (/open serial port|端口|占用/i.test(msg)) {
+        log("💡 提示：请关闭其他占用串口的程序（如 Mission Planner / QGC）后重试");
+      }
     }
+
     try { await closeSerialResources(); } catch (_) { /* ignore */ }
     disarmConnectWatchdog();
     setConnectionUI("error");
@@ -1131,4 +1219,42 @@ window.sendCommandLong = sendCommandLong;
 window.sendHeartbeat = sendHeartbeat;
 window.sendAccelcalVehiclePos = sendAccelcalVehiclePos;
 
-console.log("✅ serial.js 已加载（精简版）");
+// 显式导出 close，供卸载处理器和调试使用
+window.closeSerialResources = closeSerialResources;
+
+// 页面刷新 / 关闭时主动释放 Web Serial（仅 pagehide，同步 fast 路径，不阻塞导航）。
+function installSerialUnloadHandlers() {
+  let unloadReleaseStarted = false;
+
+  const releaseOnUnload = () => {
+    if (unloadReleaseStarted) return;
+    unloadReleaseStarted = true;
+    try {
+      if (typeof closeSerialResources === "function") {
+        closeSerialResources({ fast: true }).catch(() => {});
+      }
+    } catch (_) { /* ignore */ }
+    // 桥接模式：keepalive fetch，不 await，避免刷新卡死
+    if (window._bridgeConnActive) {
+      try {
+        fetch("http://127.0.0.1:8765/bridge-close", {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: "{}",
+          keepalive: true,
+        }).catch(() => {});
+      } catch (_) { /* ignore */ }
+    }
+  };
+
+  window.addEventListener("pagehide", releaseOnUnload);
+
+  window.forceReleaseSerial = () => {
+    unloadReleaseStarted = false;
+    releaseOnUnload();
+  };
+}
+
+installSerialUnloadHandlers();
+
+console.log("✅ serial.js 已加载（精简版）+ 刷新释放保护已安装（pagehide fast）");

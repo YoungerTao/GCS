@@ -53,6 +53,8 @@
         "terrain_dem_missing",
         "地形数据缺失（" + missing + "/" + pts.length + " 点无高程），请预取地形"
       );
+      // 无 DEM 时不做爬升率/坡度校核，避免固定翼误报数百条
+      return issues;
     }
 
     let hMax = -Infinity;
@@ -65,7 +67,7 @@
     for (let i = 1; i < pts.length; i += 1) {
       const a = pts[i - 1];
       const b = pts[i];
-      if (a.elevation == null || b.elevation == null) {
+      if (!a.available || !b.available || a.elevation == null || b.elevation == null) {
         continue;
       }
       const targetA = a.elevation + agl;
@@ -115,6 +117,72 @@
     }
 
     return issues;
+  }
+
+  /** 合并重复校核项，避免 UI 刷屏（尤其固定翼爬升率逐段报错） */
+  function summarizeTerrainIssues(issues) {
+    const list = issues || [];
+    if (!list.length) {
+      return [];
+    }
+    const out = [];
+    const climbSegs = [];
+    const gradeSegs = [];
+    list.forEach(function (issue) {
+      if (!issue) {
+        return;
+      }
+      if (issue.code === "terrain_climb_rate") {
+        climbSegs.push(issue);
+        return;
+      }
+      if (issue.code === "terrain_grade") {
+        gradeSegs.push(issue);
+        return;
+      }
+      out.push(issue);
+    });
+    if (climbSegs.length) {
+      let maxRate = 0;
+      climbSegs.forEach(function (i) {
+        const m = String(i.message || "").match(/([\d.]+)\s*m\/s/);
+        if (m) {
+          maxRate = Math.max(maxRate, Number(m[1]) || 0);
+        }
+      });
+      const thresholdMatch = String(climbSegs[0].message || "").match(/超过\s*([\d.]+)\s*m\/s/);
+      const threshold = thresholdMatch ? thresholdMatch[1] : "3";
+      out.push({
+        level: climbSegs[0].level || "error",
+        code: "terrain_climb_rate_summary",
+        message:
+          climbSegs.length +
+          " 个剖面段所需爬升率超过 " +
+          threshold +
+          " m/s" +
+          (maxRate > 0 ? "（最大约 " + maxRate.toFixed(1) + " m/s）" : "") +
+          "；固定翼请增大航向优化权重、启用自动切块、降低测区高差或改用更高 AGL"
+      });
+    }
+    if (gradeSegs.length) {
+      let maxGrade = 0;
+      gradeSegs.forEach(function (i) {
+        const m = String(i.message || "").match(/([\d.]+)°/);
+        if (m) {
+          maxGrade = Math.max(maxGrade, Number(m[1]) || 0);
+        }
+      });
+      out.push({
+        level: gradeSegs[0].level || "warning",
+        code: "terrain_grade_summary",
+        message:
+          gradeSegs.length +
+          " 个剖面段坡度偏大" +
+          (maxGrade > 0 ? "（最大约 " + Math.round(maxGrade) + "°）" : "") +
+          "；建议沿等高线方向测线或拆分测区"
+      });
+    }
+    return out;
   }
 
   function validateMissionTerrain(waypoints, settings, platform) {
@@ -177,6 +245,7 @@
 
   window.TerrainProfileValidator = {
     validateTerrainProfile: validateTerrainProfile,
-    validateMissionTerrain: validateMissionTerrain
+    validateMissionTerrain: validateMissionTerrain,
+    summarizeTerrainIssues: summarizeTerrainIssues
   };
 })();

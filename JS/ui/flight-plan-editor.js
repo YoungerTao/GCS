@@ -1882,6 +1882,14 @@
     });
   }
 
+  function summarizeBlockTerrainIssues(issues) {
+    const TPV = window.TerrainProfileValidator;
+    if (TPV && typeof TPV.summarizeTerrainIssues === "function") {
+      return TPV.summarizeTerrainIssues(issues);
+    }
+    return issues || [];
+  }
+
   function collectTerrainProfilesForMap(planBlocks, committedBlocks) {
     const out = [];
     (planBlocks || []).forEach(function (block) {
@@ -4817,7 +4825,7 @@
             ? e(
                 "div",
                 { className: "fp-validation-list", style: { marginTop: "8px" } },
-                terrainPlanIssues.map(function (issue, idx) {
+                summarizeBlockTerrainIssues(terrainPlanIssues).map(function (issue, idx) {
                   return e(
                     "div",
                     {
@@ -4863,7 +4871,7 @@
                     settings,
                     resolvedPlatform
                   );
-                  const blockIssues = block.previewIssues || [];
+                  const blockIssues = summarizeBlockTerrainIssues(block.previewIssues || []);
                   return e(
                     "div",
                     { key: "tpb-" + idx, className: "fp-block-item-wrap" },

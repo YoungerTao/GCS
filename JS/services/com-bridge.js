@@ -626,8 +626,22 @@ async function tryAutoConnect() {
 
 function scheduleAutoReconnectAfterRefresh() {
   if (!shouldAutoReconnectOnLoad()) return;
-  const delays = [0, 600, 1800, 4000, ...AUTO_CONNECT_LATE_RETRY_MS];
-  delays.forEach((ms) => {
+
+  let baseDelays = [0, 600, 1800, 4000, ...AUTO_CONNECT_LATE_RETRY_MS];
+
+  // 刷新后对 Web Serial 已授权口（auth:）做额外保护：
+  // 给浏览器/USB 栈更多时间释放 claim，避免刚 load 就猛冲过去 open 失败。
+  const justReloaded = !!window._gcsJustReloaded;
+  const comSelectForCheck = document.getElementById("comPort");
+  const currentVal = comSelectForCheck ? comSelectForCheck.value : "";
+  const targetingAuthPort = typeof currentVal === "string" && currentVal.startsWith("auth:");
+
+  if (justReloaded && targetingAuthPort) {
+    // 把最早的几次尝试往后挪（第一次真正尝试大概在 900ms+）
+    baseDelays = [900, 1600, 2800, 4500, ...AUTO_CONNECT_LATE_RETRY_MS];
+  }
+
+  baseDelays.forEach((ms) => {
     setTimeout(() => {
       if (window._gcsConnState === "connected" || window._gcsConnState === "connecting") return;
       refreshPorts({ probeBridge: ms > 0, forceBridgeProbe: ms >= 4000 })
@@ -872,6 +886,12 @@ async function requestAllPortsInteractive() {
 }
 
 function initComPortAutoRefresh() {
+  // 记录页面加载时刻，用于后续判断“刚刷新不久”，给 Web Serial auth 口更宽松的连接策略
+  window._gcsPageLoadTs = Date.now();
+  window._gcsJustReloaded = true;
+  // 8 秒后自动清除“刚刷新”标记
+  setTimeout(() => { window._gcsJustReloaded = false; }, 8000);
+
   window.addEventListener("load", () => {
     const startRefresh = async () => {
       if (window.__gcsRuntimeNative && typeof ensureComBridgeRunning === "function") {
@@ -883,9 +903,18 @@ function initComPortAutoRefresh() {
         await refreshPorts({ probeBridge: true, forceBridgeProbe: !!window.__gcsRuntimeNative });
       } catch (_) { /* ignore */ }
       scheduleAutoReconnectAfterRefresh();
-      try {
-        await tryAutoConnect();
-      } catch (_) { /* ignore */ }
+
+      // 刷新后对 auth: Web Serial 口，延迟第一次直接自动连接尝试
+      const immediateAutoConnect = async () => {
+        const justReloaded = !!window._gcsJustReloaded;
+        const sel = document.getElementById("comPort");
+        const val = sel ? sel.value : "";
+        if (justReloaded && typeof val === "string" && val.startsWith("auth:")) {
+          await new Promise((r) => setTimeout(r, 750));
+        }
+        try { await tryAutoConnect(); } catch (_) {}
+      };
+      immediateAutoConnect();
     };
     if (window.__gcsBootstrapPromise) {
       window.__gcsBootstrapPromise.then(startRefresh).catch(startRefresh);

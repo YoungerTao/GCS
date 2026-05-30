@@ -10,23 +10,19 @@ function crc_calculate(buffer){
   return crc;
 }
 
-// ArduPilot 常用 CRC_EXTRA（缺项会误用 0 导致丢帧，如 AHRS2 msg=178）
+// MAVLINK_CRC_ARDUPILOT 未收录消息的 CRC_EXTRA 补充（勿写与 AP 方言冲突的 common 值，如 137:0）
 const CRC_EXTRA = {
-  0:50, 1:124, 2:137, 4:237, 21:159, 22:220, 24:24, 26:170, 27:144, 29:115, 30:39, 33:104,
-  36:222, 39:254, 40:230, 42:28, 43:132, 44:221, 45:232, 47:153, 51:196, 62:183, 65:118, 73:38,
-  74:20, 75:152, 76:152, 77:143, 83:53, 105:158, 110:115, 111:34, 116:76, 124:87, 125:203,
-  129:46, 132:85, 133:6, 136:1, 137:0, 147:154, 148:178, 152:208, 163:127, 167:106, 178:47,
-  191:92, 192:36, 193:71, 226:207, 241:90, 253:83, 295:234,
+  295:234,
   11030:144, 11031:133, 11032:85, 11033:195, 11039:142
 };
 
 function getCrcExtra(msgid) {
-  if (CRC_EXTRA[msgid] != null) {
-    return CRC_EXTRA[msgid];
-  }
   const ap = window.MAVLINK_CRC_ARDUPILOT;
   if (ap && ap[msgid] != null) {
     return ap[msgid];
+  }
+  if (CRC_EXTRA[msgid] != null) {
+    return CRC_EXTRA[msgid];
   }
   return 0;
 }
@@ -92,6 +88,9 @@ const PARSE_MAX_FRAMES_PARAM_LOAD = 320;
 const PARSE_MAX_RESYNC_BYTES = 8192;
 
 function shouldSuppressCrcWarn(now) {
+  if (window._mavlinkCrcSuppressProbe) {
+    return true;
+  }
   const sessionStart = window._mavlinkCrcSessionStartMs;
   if (!sessionStart) return false;
   if (window._mavlinkCrcGraceUntil && now < window._mavlinkCrcGraceUntil) {

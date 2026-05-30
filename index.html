@@ -59,6 +59,10 @@
     <option value="2000000">2000000</option>
     <option value="3000000">3000000</option>
   </select>
+  <label class="top-bar-baud-auto" for="autoBaudProbe" title="连接前自动扫描多档波特率并选用最高可用档">
+    <input type="checkbox" id="autoBaudProbe" checked>
+    自动匹配
+  </label>
   <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
   <button id="loadParamsBtn" type="button" onclick="loadParams({ force: true })">加载参数</button>
   <span class="map-tile-controls">
@@ -939,7 +943,8 @@
 <script src="JS/core/ardupilot-telemetry.js" defer></script>
 <script src="JS/core/gcs-mission-debug.js" defer></script>
 <script src="JS/core/gcs-auto-start.js?v=9"></script>
-<script src="JS/services/serial.js?v=10" defer></script>
+<script src="JS/services/baud-probe.js?v=2" defer></script>
+<script src="JS/services/serial.js?v=11" defer></script>
 <script src="JS/services/com-bridge.js?v=13" defer></script>
 <script src="JS/services/slcan-web-serial.js?v=4" defer></script>
 <script src="JS/services/param-loader.js" defer></script>

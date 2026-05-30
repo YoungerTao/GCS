@@ -166,6 +166,10 @@ def read_ports():
 
 _PORT_PROBE_CACHE = {"at": 0.0, "ports": []}
 _PORT_PROBE_LOCK = threading.Lock()
+_BAUD_PROBE_LOCK = threading.Lock()
+
+DEFAULT_BAUD_PROBE_LIST = (921600, 460800, 230400, 115200, 57600)
+_BAUD_PROBE_MAX_ELAPSED_S = 12.0
 
 
 def _is_port_actively_bridged(dev_id):
@@ -271,6 +275,125 @@ def _collect_port_sample(port, baudrate=115200):
         except Exception:
             pass
     return bytes(buf)
+
+
+def _score_mavlink_sample(data):
+    """Return (score, analysis). score 0 = no MAVLink; slcan-only returns 0."""
+    if not data:
+        return 0, None
+    mav_frames, heartbeat, _stx_hits = _count_mavlink_frames(data)
+    analysis = _analyze_port_sample(data)
+    role = str(analysis.get("probeRole", "unknown"))
+    conf = str(analysis.get("probeConfidence", "low"))
+    mav_n = int(analysis.get("probeMavlinkFrames") or mav_frames or 0)
+    if role == "slcan":
+        return 0, analysis
+    if heartbeat:
+        return 1000, analysis
+    if role == "mavlink" and conf == "high" and mav_n >= 4:
+        return 500 + min(mav_n, 99), analysis
+    if mav_n >= 2:
+        return 100 + min(mav_n, 99), analysis
+    return 0, analysis
+
+
+def _collect_port_sample_mavlink_only(port, baudrate=115200):
+    """Passive MAVLink listen only (no SLCAN init commands)."""
+    if serial is None or not port:
+        return b""
+    hub = SerialHub("baud-probe")
+    buf = bytearray()
+    try:
+        hub.open(port, baudrate)
+        time.sleep(0.45)
+        buf.extend(hub.read_buffer(131072))
+    except Exception:
+        return b""
+    finally:
+        try:
+            hub.close()
+        except Exception:
+            pass
+    return bytes(buf)
+
+
+def probe_baud_for_port(port, baud_list=None):
+    """Try baud rates (high to low); return first with MAVLink score > 0."""
+    port = str(port or "").strip()
+    if not port:
+        return {"ok": False, "error": "port required"}
+    if serial is None:
+        return {"ok": False, "error": "pyserial unavailable"}
+    if _is_port_actively_bridged(port):
+        return {"ok": False, "error": "in-use"}
+
+    raw_list = baud_list if baud_list is not None else DEFAULT_BAUD_PROBE_LIST
+    bauds = []
+    seen = set()
+    for b in raw_list:
+        try:
+            n = int(b)
+        except (TypeError, ValueError):
+            continue
+        if n <= 0 or n in seen:
+            continue
+        seen.add(n)
+        bauds.append(n)
+    if not bauds:
+        bauds = list(DEFAULT_BAUD_PROBE_LIST)
+
+    t0 = time.time()
+    tried = []
+    best_slcan_score = 0
+    with _BAUD_PROBE_LOCK:
+        for baud in bauds:
+            if time.time() - t0 > _BAUD_PROBE_MAX_ELAPSED_S:
+                break
+            score = 0
+            analysis = None
+            err = None
+            try:
+                sample = _collect_port_sample_mavlink_only(port, baud)
+                score, analysis = _score_mavlink_sample(sample)
+            except Exception as exc:
+                err = str(exc)
+                score = 0
+            row = {"baud": baud, "score": score}
+            if err:
+                row["error"] = err
+            if analysis:
+                row["probeRole"] = analysis.get("probeRole")
+            tried.append(row)
+            if score > 0:
+                elapsed_ms = int((time.time() - t0) * 1000)
+                return {
+                    "ok": True,
+                    "baud": baud,
+                    "score": score,
+                    "probeRole": (analysis or {}).get("probeRole", "mavlink"),
+                    "tried": tried,
+                    "elapsedMs": elapsed_ms,
+                }
+            slcan_score = 0
+            if analysis and str(analysis.get("probeRole")) == "slcan":
+                slcan_score = int(analysis.get("probeSlcanLines") or 0) + 50
+            best_slcan_score = max(best_slcan_score, slcan_score)
+
+    elapsed_ms = int((time.time() - t0) * 1000)
+    if best_slcan_score > 0:
+        return {
+            "ok": False,
+            "reason": "slcan",
+            "error": "port looks like SLCAN adapter",
+            "tried": tried,
+            "elapsedMs": elapsed_ms,
+        }
+    return {
+        "ok": False,
+        "error": "no mavlink at tried baud rates",
+        "tried": tried,
+        "elapsedMs": elapsed_ms,
+    }
 
 
 def _analyze_port_sample(data):
@@ -1039,6 +1162,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            if self.path == "/bridge-probe-baud":
+                port = str(payload.get("port") or "").strip()
+                bauds = payload.get("bauds")
+                if bauds is not None and not isinstance(bauds, list):
+                    bauds = None
+                result = probe_baud_for_port(port, bauds)
+                send_json(self, 200, result)
+                return
             if self.path == "/bridge-open":
                 port = str(payload.get("port") or "").strip()
                 baudrate = int(payload.get("baudrate") or 115200)

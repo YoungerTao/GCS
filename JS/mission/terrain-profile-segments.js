@@ -30,6 +30,16 @@
     const isFw = platform === "plane" || platform === "vtol";
     const pts = profile || [];
 
+    let missing = 0;
+    pts.forEach(function (p) {
+      if (!p.available || p.elevation == null) {
+        missing += 1;
+      }
+    });
+    if (missing > pts.length * 0.2) {
+      return issues;
+    }
+
     for (let i = 1; i < pts.length; i += 1) {
       const a = pts[i - 1];
       const b = pts[i];

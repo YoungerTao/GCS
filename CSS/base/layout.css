@@ -53,6 +53,23 @@ body {
   cursor: not-allowed;
 }
 
+.top-bar-baud-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b8bec8;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.top-bar-baud-auto input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .main-tabs {
   display: flex;
   align-items: center;
