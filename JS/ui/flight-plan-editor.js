@@ -172,7 +172,7 @@
     surveyHeadingAuto: true,
     useTerrainFollowing: false,
     terrainAgMarginM: 30,
-    terrainAutoPartition: true,
+    terrainAutoPartition: false,
     terrainMaxReliefM: 120,
     terrainMaxClimbRateMps: 3,
     terrainCruiseSpeedMps: 20,
@@ -2063,6 +2063,510 @@
     );
   }
 
+  const FP3D_SAMPLE_STEP_M = 28;
+  const FP3D_SURVEY_STEP_M = 24;
+
+  function normalizePreviewPoint(point, fallbackAlt) {
+    if (!point) {
+      return null;
+    }
+    return {
+      lat: Number(point.lat),
+      lng: Number(point.lng),
+      alt: Number(point.alt != null ? point.alt : fallbackAlt) || 0,
+      frame: point.frame,
+      source: point.source || "survey",
+      command: point.command,
+      blockId: point.blockId || "",
+      pathRole: point.pathRole || point.role || "",
+      segmentRole: point.segmentRole || "",
+      label: point.label || ""
+    };
+  }
+
+  function effectivePreviewWaypointLatLng(wp, home) {
+    if (!wp) {
+      return null;
+    }
+    const MM = window.MissionModel;
+    if (
+      MM &&
+      wp.command === MM.MAV_CMD.NAV_RETURN_TO_LAUNCH &&
+      home &&
+      Number.isFinite(home.lat) &&
+      Number.isFinite(home.lng)
+    ) {
+      return {
+        lat: Number(home.lat),
+        lng: Number(home.lng),
+        alt: Number(home.alt) || 0
+      };
+    }
+    if (!Number.isFinite(Number(wp.lat)) || !Number.isFinite(Number(wp.lng))) {
+      return null;
+    }
+    return {
+      lat: Number(wp.lat),
+      lng: Number(wp.lng),
+      alt: Number(wp.alt) || 0
+    };
+  }
+
+  function classifyPreviewSegmentType(a, b) {
+    const MM = window.MissionModel;
+    if (MM && b && b.command === MM.MAV_CMD.NAV_RETURN_TO_LAUNCH) {
+      return "rtl";
+    }
+    if (a && b && a.source === "survey" && b.source === "survey") {
+      if (isSurveyConnectorSegment(a, b)) {
+        return "connector";
+      }
+      return "survey";
+    }
+    if (
+      (a && a.source === "connector") ||
+      (b && b.source === "connector") ||
+      (a && a.source === "survey") ||
+      (b && b.source === "survey")
+    ) {
+      return "connector";
+    }
+    return "other";
+  }
+
+  function buildPreviewResampledPoints(a, b, stepM) {
+    const pts = [];
+    if (!a || !b) {
+      return pts;
+    }
+    const total = Math.max(0, distanceMetersBetween(a, b));
+    const step = Math.max(8, Number(stepM) || FP3D_SAMPLE_STEP_M);
+    const divisions = Math.max(1, Math.ceil(total / step));
+    for (let i = 0; i <= divisions; i += 1) {
+      pts.push(pointOnSegment(a, b, divisions <= 0 ? 0 : i / divisions));
+    }
+    return pts;
+  }
+
+  function buildMissionPreviewSegments(waypoints, settings, home) {
+    const list = (waypoints || []).filter(function (wp) {
+      return wp && wp.source !== "camera";
+    });
+    const segments = [];
+    for (let i = 1; i < list.length; i += 1) {
+      const a = list[i - 1];
+      const b = list[i];
+      const pa = effectivePreviewWaypointLatLng(a, home);
+      const pb = effectivePreviewWaypointLatLng(b, home);
+      if (!pa || !pb) {
+        continue;
+      }
+      if (a.source === "survey" && b.source === "survey" && shouldSkipSurveyMapSegment(a, b)) {
+        continue;
+      }
+      segments.push({
+        id: "mission-" + i,
+        type: classifyPreviewSegmentType(a, b),
+        from: normalizePreviewPoint(Object.assign({}, a, pa), settings.surveyAltitude),
+        to: normalizePreviewPoint(Object.assign({}, b, pb), settings.surveyAltitude),
+        blockId: a.blockId || b.blockId || "",
+        ribbonWidth: Math.max(12, Number(settings.lineSpacingMeters) || computeLineSpacingMeters(
+          settings.sideOverlap,
+          settings.footprintWidthMeters
+        ))
+      });
+    }
+    return segments;
+  }
+
+  function buildPlanningPreviewSegments(terrainPlanBlocks, surveyPath, settings) {
+    const MM = window.MissionModel;
+    const previewFrame =
+      settings && settings.useTerrainFollowing && MM
+        ? MM.MAV_FRAME_GLOBAL_TERRAIN_ALT
+        : MM && MM.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT != null
+          ? MM.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT
+          : undefined;
+    const segments = [];
+    if (terrainPlanBlocks && terrainPlanBlocks.length) {
+      terrainPlanBlocks.forEach(function (block, index) {
+        const path = block && Array.isArray(block.previewPath) ? block.previewPath : [];
+        for (let i = 1; i < path.length; i += 1) {
+          const a = normalizePreviewPoint(
+            Object.assign({ frame: previewFrame }, path[i - 1]),
+            settings.surveyAltitude
+          );
+          const b = normalizePreviewPoint(
+            Object.assign({ frame: previewFrame }, path[i]),
+            settings.surveyAltitude
+          );
+          if (!a || !b) {
+            continue;
+          }
+          segments.push({
+            id: "plan-" + index + "-" + i,
+            type: "survey",
+            from: a,
+            to: b,
+            blockId: block && block.id ? block.id : "plan-" + index,
+            profile: block && Array.isArray(block.previewProfile) ? block.previewProfile : [],
+            ribbonWidth: Math.max(
+              12,
+              Number(settings.lineSpacingMeters) ||
+                computeLineSpacingMeters(settings.sideOverlap, settings.footprintWidthMeters)
+            )
+          });
+        }
+      });
+      return segments;
+    }
+
+    for (let i = 1; i < (surveyPath || []).length; i += 1) {
+      const a = normalizePreviewPoint(
+        Object.assign({ frame: previewFrame }, surveyPath[i - 1]),
+        settings.surveyAltitude
+      );
+      const b = normalizePreviewPoint(
+        Object.assign({ frame: previewFrame }, surveyPath[i]),
+        settings.surveyAltitude
+      );
+      if (!a || !b) {
+        continue;
+      }
+      segments.push({
+        id: "draft-" + i,
+        type: "survey",
+        from: a,
+        to: b,
+        blockId: "draft",
+        ribbonWidth: Math.max(
+          12,
+          Number(settings.lineSpacingMeters) ||
+            computeLineSpacingMeters(settings.sideOverlap, settings.footprintWidthMeters)
+        )
+      });
+    }
+    return segments;
+  }
+
+  function buildTerrainProfileLookup(planBlocks, surveyBlocks) {
+    const map = new Map();
+
+    function store(block, profile) {
+      if (!block || !Array.isArray(profile) || profile.length < 2) {
+        return;
+      }
+      if (block.id) {
+        map.set(String(block.id), profile);
+      }
+      if (block.order != null) {
+        map.set("order:" + String(block.order), profile);
+      }
+    }
+
+    (planBlocks || []).forEach(function (block) {
+      store(block, block.previewProfile);
+    });
+    (surveyBlocks || []).forEach(function (block) {
+      store(block, block.storedProfile || block.previewProfile);
+    });
+
+    return map;
+  }
+
+  function findNearestProfileIndex(profile, point) {
+    if (!Array.isArray(profile) || profile.length === 0 || !point) {
+      return -1;
+    }
+    let bestIndex = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < profile.length; i += 1) {
+      const sample = profile[i];
+      if (!sample) {
+        continue;
+      }
+      const lat = Number(sample.lat);
+      const lng = Number(sample.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        continue;
+      }
+      const dist = distanceMetersBetween(point, { lat: lat, lng: lng });
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIndex = i;
+      }
+    }
+    return bestIndex;
+  }
+
+  function sampleTerrainFromProfile(profile, fromPoint, toPoint, ratio) {
+    if (!Array.isArray(profile) || profile.length === 0) {
+      return null;
+    }
+    const startIndex = findNearestProfileIndex(profile, fromPoint);
+    const endIndex = findNearestProfileIndex(profile, toPoint);
+    if (startIndex < 0 || endIndex < 0) {
+      return null;
+    }
+    const targetIndex = Math.round(startIndex + (endIndex - startIndex) * ratio);
+    const lo = Math.max(0, Math.min(startIndex, endIndex, targetIndex) - 2);
+    const hi = Math.min(
+      profile.length - 1,
+      Math.max(startIndex, endIndex, targetIndex) + 2
+    );
+    for (let i = lo; i <= hi; i += 1) {
+      const sample = profile[i];
+      if (
+        sample &&
+        sample.elevation != null &&
+        Number.isFinite(Number(sample.elevation))
+      ) {
+        return {
+          elevation: Number(sample.elevation),
+          available: sample.available !== false
+        };
+      }
+    }
+    return null;
+  }
+
+  function buildPreviewSummary(data) {
+    const summary = {
+      segmentCount: 0,
+      waypointCount: 0,
+      terrainMin: null,
+      terrainMax: null,
+      flightMin: null,
+      flightMax: null,
+      aglMin: null,
+      aglMax: null
+    };
+    if (!data || !data.segments) {
+      return summary;
+    }
+    summary.segmentCount = data.segments.length;
+    data.segments.forEach(function (segment) {
+      summary.waypointCount += Math.max(2, segment.samples ? segment.samples.length : 0);
+      (segment.samples || []).forEach(function (sample) {
+        if (sample.terrainZ != null && Number.isFinite(sample.terrainZ)) {
+          summary.terrainMin =
+            summary.terrainMin == null ? sample.terrainZ : Math.min(summary.terrainMin, sample.terrainZ);
+          summary.terrainMax =
+            summary.terrainMax == null ? sample.terrainZ : Math.max(summary.terrainMax, sample.terrainZ);
+        }
+        if (sample.flightZ != null && Number.isFinite(sample.flightZ)) {
+          summary.flightMin =
+            summary.flightMin == null ? sample.flightZ : Math.min(summary.flightMin, sample.flightZ);
+          summary.flightMax =
+            summary.flightMax == null ? sample.flightZ : Math.max(summary.flightMax, sample.flightZ);
+        }
+        if (sample.agl != null && Number.isFinite(sample.agl)) {
+          summary.aglMin =
+            summary.aglMin == null ? sample.agl : Math.min(summary.aglMin, sample.agl);
+          summary.aglMax =
+            summary.aglMax == null ? sample.agl : Math.max(summary.aglMax, sample.agl);
+        }
+      });
+    });
+    return summary;
+  }
+
+  function buildPreviewRoutePoints(segments) {
+    const points = [];
+    const seen = new Set();
+    (segments || []).forEach(function (segment) {
+      (segment.samples || []).forEach(function (sample) {
+        const key =
+          Math.round((sample.lat || 0) * 1e6) +
+          ":" +
+          Math.round((sample.lng || 0) * 1e6) +
+          ":" +
+          Math.round((sample.flightZ || 0) * 100);
+        if (seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        points.push({
+          lat: sample.lat,
+          lng: sample.lng,
+          alt: sample.flightZ,
+          terrainZ: sample.terrainZ,
+          frame: sample.frame || null,
+          source: segment.source || segment.type || "survey"
+        });
+      });
+    });
+    return points;
+  }
+
+  function prepareFlightPlanPreviewData(options) {
+    const opts = options || {};
+    const settings = opts.settings || normalizeMissionSettings();
+    const home = opts.home || { lat: 0, lng: 0, alt: 0 };
+    const mode = opts.mode || "mission";
+    const terrainProfileLookup = buildTerrainProfileLookup(
+      opts.terrainPlanBlocks,
+      opts.surveyBlocks
+    );
+    const rawSegments =
+      mode === "planning"
+        ? buildPlanningPreviewSegments(opts.terrainPlanBlocks, opts.surveyPath, settings)
+        : buildMissionPreviewSegments(opts.missionWaypoints, settings, home);
+    if (!rawSegments.length) {
+      return Promise.resolve({
+        ok: false,
+        error: "暂无可预览的航线",
+        data: { mode: mode, segments: [], summary: buildPreviewSummary({ segments: [] }) }
+      });
+    }
+
+    const origin = {
+      lat: Number(home.lat) || Number(rawSegments[0].from.lat) || 0,
+      lng: Number(home.lng) || Number(rawSegments[0].from.lng) || 0
+    };
+    const TS = window.TerrainService;
+    const MM = window.MissionModel;
+    const homePoint = { lat: Number(home.lat) || origin.lat, lng: Number(home.lng) || origin.lng };
+    const step = mode === "planning" ? FP3D_SURVEY_STEP_M : FP3D_SAMPLE_STEP_M;
+
+    function sampleHomeTerrain() {
+      if (!TS || typeof TS.sampleElevationBatch !== "function") {
+        return Promise.resolve(null);
+      }
+      return TS.sampleElevationBatch([homePoint]).then(function (points) {
+        const first = points && points[0];
+        return first && first.elevation != null && Number.isFinite(first.elevation)
+          ? Number(first.elevation)
+          : null;
+      }).catch(function () {
+        return null;
+      });
+    }
+
+    function resolveSegmentProfile(segment) {
+      if (segment && Array.isArray(segment.profile) && segment.profile.length >= 2) {
+        return segment.profile;
+      }
+      if (segment && segment.blockId && terrainProfileLookup.has(String(segment.blockId))) {
+        return terrainProfileLookup.get(String(segment.blockId));
+      }
+      return null;
+    }
+
+    return sampleHomeTerrain().then(function (homeTerrain) {
+      return Promise.all(
+        rawSegments.map(function (segment) {
+          const densePoints = buildPreviewResampledPoints(segment.from, segment.to, step);
+          const segmentProfile = resolveSegmentProfile(segment);
+          const shouldSampleTerrain =
+            mode === "planning" &&
+            !(segmentProfile && segmentProfile.length >= 2) &&
+            TS &&
+            typeof TS.sampleElevationBatch === "function";
+          const terrainPromise =
+            shouldSampleTerrain
+                ? TS.sampleElevationBatch(
+                    densePoints.map(function (p) {
+                      return { lat: p.lat, lng: p.lng };
+                    })
+                  ).catch(function () {
+                    return [];
+                  })
+                : Promise.resolve([]);
+
+          return terrainPromise.then(function (terrainSamples) {
+            const samples = densePoints.map(function (point, index) {
+              let terrain = terrainSamples[index] || {};
+              const ratio = densePoints.length <= 1 ? 0 : index / (densePoints.length - 1);
+              if (
+                (!terrain || terrain.elevation == null || !Number.isFinite(Number(terrain.elevation))) &&
+                segmentProfile
+              ) {
+                terrain =
+                  sampleTerrainFromProfile(
+                    segmentProfile,
+                    segment.from,
+                    segment.to,
+                    ratio
+                  ) || terrain;
+              }
+              const terrainZ =
+                terrain && terrain.elevation != null && Number.isFinite(Number(terrain.elevation))
+                  ? Number(terrain.elevation)
+                  : homeTerrain != null
+                    ? homeTerrain
+                    : 0;
+              const available =
+                !!terrain &&
+                terrain.elevation != null &&
+                Number.isFinite(Number(terrain.elevation)) &&
+                terrain.available !== false;
+              const interpolatedAlt =
+                Number(segment.from.alt) + (Number(segment.to.alt) - Number(segment.from.alt)) * ratio;
+              const segmentFrame =
+                segment.frame != null
+                  ? segment.frame
+                  : segment.from && segment.from.frame != null
+                    ? segment.from.frame
+                    : segment.to && segment.to.frame != null
+                      ? segment.to.frame
+                      : null;
+              let flightZ = interpolatedAlt;
+              if (segmentFrame === MM.MAV_FRAME_GLOBAL_TERRAIN_ALT) {
+                flightZ = terrainZ + interpolatedAlt;
+              } else if (segmentFrame === MM.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT) {
+                flightZ = (homeTerrain != null ? homeTerrain : terrainZ) + interpolatedAlt;
+              }
+              const local = projectLngLatToMeters(point, origin);
+              let bearingRad = 0;
+              if (index < densePoints.length - 1) {
+                const nextLocal = projectLngLatToMeters(densePoints[index + 1], origin);
+                bearingRad = Math.atan2(nextLocal.x - local.x, nextLocal.y - local.y);
+              } else if (index > 0) {
+                const prevLocal = projectLngLatToMeters(densePoints[index - 1], origin);
+                bearingRad = Math.atan2(local.x - prevLocal.x, local.y - prevLocal.y);
+              }
+              return {
+                lat: point.lat,
+                lng: point.lng,
+                x: local.x,
+                z: local.y,
+                terrainZ: terrainZ,
+                flightZ: flightZ,
+                agl: Math.max(0, flightZ - terrainZ),
+                available: available,
+                bearingRad: bearingRad
+              };
+            });
+            return Object.assign({}, segment, {
+              samples: samples,
+              terrainAvailable: samples.some(function (sample) {
+                return sample.available;
+              })
+            });
+          });
+        })
+      ).then(function (segments) {
+        const summary = buildPreviewSummary({ segments: segments });
+        return {
+          ok: true,
+          error: segments.some(function (segment) {
+            return !segment.terrainAvailable;
+          })
+            ? "部分地形高程缺失，已降级显示航线/参考地表。"
+            : "",
+          data: {
+            mode: mode,
+            platform: opts.platform || settings.platform || null,
+            segments: segments,
+            routePoints: buildPreviewRoutePoints(segments),
+            summary: summary
+          }
+        };
+      });
+    });
+  }
+
   function loadInitialFlightPlanDraft() {
     if (!window.FlightPlanDraft || typeof window.FlightPlanDraft.load !== "function") {
       return null;
@@ -2130,6 +2634,8 @@
     const latestSettingsRef = useRef(normalizeMissionSettings());
     const latestTerrainPlanBlocksRef = useRef([]);
     const fileInputRef = useRef(null);
+    const previewThreeCanvasRef = useRef(null);
+    const previewThreeApiRef = useRef(null);
     const [activeTab, setActiveTab] = useState(
       initialDraft && initialDraft.activeTab ? initialDraft.activeTab : "waypoint"
     );
@@ -2179,6 +2685,16 @@
     const [missionIoNote, setMissionIoNote] = useState("");
     const [missionIoProgress, setMissionIoProgress] = useState(null);
     const [fcParamRevision, setFcParamRevision] = useState(0);
+    const [preview3dOpen, setPreview3dOpen] = useState(false);
+    const [preview3dLoading, setPreview3dLoading] = useState(false);
+    const [preview3dError, setPreview3dError] = useState("");
+    const [preview3dNotice, setPreview3dNotice] = useState("");
+    const [preview3dData, setPreview3dData] = useState(null);
+    const [preview3dMode, setPreview3dMode] = useState("mission");
+    const [preview3dView, setPreview3dView] = useState("iso");
+    const [preview3dShowTerrain, setPreview3dShowTerrain] = useState(true);
+    const [preview3dShowConnectors, setPreview3dShowConnectors] = useState(true);
+    const [preview3dShowVerticals, setPreview3dShowVerticals] = useState(true);
     const resolvedSurveyHeadingDeg = useMemo(
       function () {
         if (surveyArea.length < 3) {
@@ -2261,6 +2777,29 @@
       [surveyPath, settings.surveyAltitude, surveyCommitted, missionWaypoints.length]
     );
 
+    const canPreviewMission3d = useMemo(function () {
+      return (missionWaypoints || []).some(function (wp) {
+        return wp && wp.source !== "camera";
+      });
+    }, [missionWaypoints]);
+
+    const canPreviewPlanning3d = useMemo(function () {
+      return (
+        (terrainPlanBlocks && terrainPlanBlocks.length > 0) ||
+        (surveyPath && surveyPath.length > 1)
+      );
+    }, [terrainPlanBlocks, surveyPath]);
+
+    const preferPlanning3d = useMemo(function () {
+      if (terrainPlanBlocks && terrainPlanBlocks.length) {
+        return true;
+      }
+      if (surveyPath && surveyPath.length > 1 && missionWaypoints.length <= 4) {
+        return true;
+      }
+      return !surveyCommitted && surveyPath && surveyPath.length > 1;
+    }, [terrainPlanBlocks, surveyCommitted, surveyPath, missionWaypoints.length]);
+
     const resolvedPlatform = useMemo(
       function () {
         const VT = window.VehicleTemplates;
@@ -2281,6 +2820,57 @@
     useEffect(function () {
       latestPlatformRef.current = resolvedPlatform;
     }, [resolvedPlatform]);
+
+    useEffect(function () {
+      if (!preview3dOpen) {
+        return;
+      }
+      function onResize() {
+        if (previewThreeApiRef.current && typeof previewThreeApiRef.current.resize === "function") {
+          previewThreeApiRef.current.resize();
+        }
+      }
+      window.addEventListener("resize", onResize);
+      return function () {
+        window.removeEventListener("resize", onResize);
+      };
+    }, [preview3dOpen]);
+
+    useEffect(function () {
+      if (!preview3dOpen || !preview3dData || !previewThreeCanvasRef.current) {
+        return;
+      }
+      if (!previewThreeApiRef.current && window.FlightPlanPreviewThree) {
+        previewThreeApiRef.current = window.FlightPlanPreviewThree.create(previewThreeCanvasRef.current);
+      }
+      if (!previewThreeApiRef.current) {
+        return;
+      }
+      previewThreeApiRef.current.update(preview3dData, {
+        showTerrain: preview3dShowTerrain,
+        showConnectors: preview3dShowConnectors,
+        showVerticals: preview3dShowVerticals,
+        showFixedWingCurve: resolvedPlatform === "plane" || resolvedPlatform === "vtol",
+        view: preview3dView
+      });
+    }, [
+      preview3dOpen,
+      preview3dData,
+      preview3dShowTerrain,
+      preview3dShowConnectors,
+      preview3dShowVerticals,
+      preview3dView,
+      resolvedPlatform
+    ]);
+
+    useEffect(function () {
+      return function () {
+        if (previewThreeApiRef.current && typeof previewThreeApiRef.current.dispose === "function") {
+          previewThreeApiRef.current.dispose();
+          previewThreeApiRef.current = null;
+        }
+      };
+    }, []);
 
     useEffect(function () {
       if (turnAroundCustomizedRef.current) {
@@ -2558,16 +3148,84 @@
       [connected, surveyBlocks, appendRtl]
     );
 
-    const handleConfirmSurveyGenerate = useCallback(function () {
+    const runTerrainAutoPlan = useCallback(function (polygon, options) {
+      const TSP = window.TerrainSurveyPlanner;
+      if (!TSP || !polygon || polygon.length < 3) {
+        return Promise.reject(new Error("请先绘制测区"));
+      }
+      const opts = options || {};
+      setTerrainPlanning(true);
+      setTerrainPlanPhase("prefetch");
+      setTerrainPlanProgressMessage(opts.progressMessage || "准备地形数据…");
+      if (!opts.keepAdvisorText) {
+        setTerrainAdvisorText("");
+      }
+      const planSettings = Object.assign({}, settings, { useTerrainFollowing: true });
+      return TSP.planAuto(polygon, planSettings, resolvedPlatform, {
+        onProgress: function (progress) {
+          if (!progress) {
+            return;
+          }
+          if (progress.phase === "prefetch") {
+            setTerrainPlanPhase("prefetch");
+            if (progress.status) {
+              setTerrainPrefetchStatus(progress.status);
+            }
+            setTerrainPlanProgressMessage("下载测区地形…");
+          } else if (progress.phase === "stats") {
+            setTerrainPlanPhase("stats");
+            setTerrainPlanProgressMessage(progress.message || "读取测区高程…");
+          } else if (progress.phase === "planning") {
+            setTerrainPlanPhase("planning");
+            setTerrainPlanProgressMessage(
+              progress.message ||
+                "规划块 " +
+                  (progress.blockIndex || 0) +
+                  "/" +
+                  (progress.blockTotal || 0)
+            );
+          } else if (progress.phase === "done") {
+            setTerrainPlanPhase("");
+            setTerrainPlanProgressMessage("");
+          }
+        }
+      })
+        .finally(function () {
+          setTerrainPlanning(false);
+          setTerrainPlanPhase("");
+          setTerrainPlanProgressMessage("");
+        });
+    }, [settings, resolvedPlatform]);
+
+    const handleConfirmSurveyGenerate = useCallback(async function () {
       const MC = window.MissionComposer;
       if (!MC || surveyArea.length < 3) {
         return;
       }
-      if (settings.useTerrainFollowing && !terrainPlanBlocks.length) {
-        setSurveyToast("请先点击「自动规划」完成地形预取与剖面校核");
-        return;
+      let plannedBlocks = terrainPlanBlocks;
+      let plannedIssues = terrainPlanIssues;
+      let plannedStats = terrainPlanStats;
+      if (settings.useTerrainFollowing && !plannedBlocks.length) {
+        try {
+          const result = await runTerrainAutoPlan(surveyArea, {
+            progressMessage: "确认前检查地形…",
+            keepAdvisorText: true
+          });
+          plannedBlocks = result.blocks || [];
+          plannedIssues = result.issues || [];
+          plannedStats = result.stats || null;
+          setTerrainPlanBlocks(plannedBlocks);
+          setTerrainPlanIssues(plannedIssues);
+          setTerrainPlanStats(plannedStats);
+        } catch (err) {
+          setSurveyToast((err && err.message) || "地形自动规划失败");
+          setTerrainPlanBlocks([]);
+          setTerrainPlanIssues([]);
+          setTerrainPlanStats(null);
+          return;
+        }
       }
-      if (settings.useTerrainFollowing && hasTerrainPlanBlockingErrors(terrainPlanIssues)) {
+      if (settings.useTerrainFollowing && hasTerrainPlanBlockingErrors(plannedIssues)) {
         if (
           !window.confirm(
             "存在地形校核错误（如 DEM 缺失或爬升率超限），仍要确认生成？"
@@ -2576,11 +3234,11 @@
           return;
         }
       }
-      if (terrainPlanBlocks.length && settings.useTerrainFollowing) {
+      if (plannedBlocks.length && settings.useTerrainFollowing) {
         let waypoints = missionWaypoints;
         let blocks = surveyBlocks.slice();
         let addedTotal = 0;
-        terrainPlanBlocks.forEach(function (previewBlock) {
+        plannedBlocks.forEach(function (previewBlock) {
           const block = MC.createSurveyBlock(
             previewBlock.polygon || surveyArea,
             previewBlock.paramsSnapshot || settings,
@@ -2603,10 +3261,11 @@
         setMissionWaypoints(waypoints);
         setSurveyBlocks(blocks);
         setSurveyToast(
-          "已追加 " + terrainPlanBlocks.length + " 块地形测绘区域，+" + addedTotal + " 个航点"
+          "已追加 " + plannedBlocks.length + " 块地形测绘区域，+" + addedTotal + " 个航点"
         );
         setTerrainPlanBlocks([]);
         setTerrainPlanIssues([]);
+        setTerrainPlanStats(null);
         setSurveyArea([]);
         setSurveyCommitted(false);
         return;
@@ -2645,48 +3304,16 @@
       resolvedPlatform,
       missionWaypoints,
       terrainPlanBlocks,
-      terrainPlanIssues
+      terrainPlanIssues,
+      terrainPlanStats,
+      runTerrainAutoPlan
     ]);
 
     const handleAutoTerrainPlan = useCallback(function () {
-      const TSP = window.TerrainSurveyPlanner;
-      if (!TSP || surveyArea.length < 3) {
+      if (surveyArea.length < 3) {
         return;
       }
-      setTerrainPlanning(true);
-      setTerrainPlanPhase("prefetch");
-      setTerrainPlanProgressMessage("准备地形数据…");
-      setTerrainAdvisorText("");
-      const planSettings = Object.assign({}, settings, { useTerrainFollowing: true });
-      TSP.planAuto(surveyArea, planSettings, resolvedPlatform, {
-        onProgress: function (progress) {
-          if (!progress) {
-            return;
-          }
-          if (progress.phase === "prefetch") {
-            setTerrainPlanPhase("prefetch");
-            if (progress.status) {
-              setTerrainPrefetchStatus(progress.status);
-            }
-            setTerrainPlanProgressMessage("下载测区地形…");
-          } else if (progress.phase === "stats") {
-            setTerrainPlanPhase("stats");
-            setTerrainPlanProgressMessage(progress.message || "读取测区高程…");
-          } else if (progress.phase === "planning") {
-            setTerrainPlanPhase("planning");
-            setTerrainPlanProgressMessage(
-              progress.message ||
-                "规划块 " +
-                  (progress.blockIndex || 0) +
-                  "/" +
-                  (progress.blockTotal || 0)
-            );
-          } else if (progress.phase === "done") {
-            setTerrainPlanPhase("");
-            setTerrainPlanProgressMessage("");
-          }
-        }
-      })
+      runTerrainAutoPlan(surveyArea)
         .then(function (result) {
           setTerrainPlanBlocks(result.blocks || []);
           setTerrainPlanIssues(result.issues || []);
@@ -2708,13 +3335,9 @@
           setSurveyToast(err.message || "地形自动规划失败");
           setTerrainPlanBlocks([]);
           setTerrainPlanIssues([]);
-        })
-        .finally(function () {
-          setTerrainPlanning(false);
-          setTerrainPlanPhase("");
-          setTerrainPlanProgressMessage("");
+          setTerrainPlanStats(null);
         });
-    }, [surveyArea, settings, resolvedPlatform]);
+    }, [surveyArea, runTerrainAutoPlan]);
 
     const handleManualTerrainPrefetch = useCallback(
       function () {
@@ -3519,6 +4142,72 @@
       []
     );
 
+    const close3dPreview = useCallback(function () {
+      setPreview3dOpen(false);
+      setPreview3dLoading(false);
+      if (previewThreeApiRef.current && typeof previewThreeApiRef.current.dispose === "function") {
+        previewThreeApiRef.current.dispose();
+        previewThreeApiRef.current = null;
+      }
+    }, []);
+
+    const open3dPreview = useCallback(function (mode) {
+      const MM = window.MissionModel;
+      const home =
+        MM && MM.getFlightPlanHomeLatLng
+          ? MM.getFlightPlanHomeLatLng()
+          : {
+              lat: window.DEFAULT_MAP_LAT || 29.59256,
+              lng: window.DEFAULT_MAP_LON || 106.22742,
+              alt: 30
+            };
+      setPreview3dMode(mode);
+      setPreview3dView("iso");
+      setPreview3dError("");
+      setPreview3dNotice("");
+      setPreview3dLoading(true);
+      setPreview3dOpen(true);
+      prepareFlightPlanPreviewData({
+        mode: mode,
+        missionWaypoints: missionWaypoints,
+        terrainPlanBlocks: terrainPlanBlocks,
+        surveyBlocks: surveyBlocks,
+        surveyPath: surveyPath,
+        settings: settings,
+        home: home,
+        platform: resolvedPlatform
+      })
+        .then(function (result) {
+          if (!result || !result.ok) {
+            setPreview3dData(result && result.data ? result.data : null);
+            setPreview3dError((result && result.error) || "暂无可预览的航线");
+            setPreview3dNotice("");
+            return;
+          }
+          setPreview3dData(result.data || null);
+          setPreview3dError("");
+          setPreview3dNotice(result.error || "");
+        })
+        .catch(function (err) {
+          setPreview3dData(null);
+          setPreview3dError((err && err.message) || "3D 预览准备失败");
+          setPreview3dNotice("");
+        })
+        .finally(function () {
+          setPreview3dLoading(false);
+        });
+    }, [missionWaypoints, terrainPlanBlocks, surveyBlocks, surveyPath, settings]);
+
+    const handleOpen3dPreview = useCallback(function () {
+      const mode =
+        preferPlanning3d
+          ? "planning"
+          : canPreviewMission3d
+            ? "mission"
+            : "planning";
+      open3dPreview(mode);
+    }, [canPreviewMission3d, open3dPreview, preferPlanning3d]);
+
     const handleClearWaypoints = useCallback(function () {
       setMissionWaypoints([]);
       missionBootstrappedRef.current = false;
@@ -4226,6 +4915,176 @@
       );
     }
 
+    function render3dPreviewModal() {
+      if (!preview3dOpen) {
+        return null;
+      }
+      const summary = preview3dData && preview3dData.summary ? preview3dData.summary : {};
+      return e(
+        "div",
+        {
+          className: "fp-preview3d-modal",
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-labelledby": "fp-preview3d-title",
+          onClick: function (event) {
+            if (event.target === event.currentTarget) {
+              close3dPreview();
+            }
+          }
+        },
+        e(
+          "div",
+          { className: "fp-preview3d-shell" },
+          e(
+            "div",
+            { className: "fp-preview3d-header" },
+            e(
+              "div",
+              null,
+              e(
+                "h3",
+                { id: "fp-preview3d-title", className: "fp-preview3d-title" },
+                preview3dMode === "mission" ? "任务 3D 预览" : "规划中 3D 预览"
+              ),
+              e(
+                "p",
+                { className: "fp-preview3d-subtitle" },
+                "段数 ",
+                String(summary.segmentCount || 0),
+                " · 航点 ",
+                String(summary.waypointCount || 0),
+                summary.terrainMin != null && summary.terrainMax != null
+                  ? " · 地形 " +
+                    Math.round(summary.terrainMin) +
+                    "–" +
+                    Math.round(summary.terrainMax) +
+                    " m"
+                  : "",
+                summary.aglMin != null && summary.aglMax != null
+                  ? " · AGL " +
+                    Math.round(summary.aglMin) +
+                    "–" +
+                    Math.round(summary.aglMax) +
+                    " m"
+                  : ""
+              )
+            ),
+            e(
+              "button",
+              {
+                type: "button",
+                className: "fp-preview3d-close",
+                onClick: close3dPreview,
+                "aria-label": "关闭 3D 预览"
+              },
+              "×"
+            )
+          ),
+          e(
+            "div",
+            { className: "fp-preview3d-toolbar" },
+            e(
+              "div",
+              { className: "fp-preview3d-toolbar-group" },
+              e(
+                "button",
+                {
+                  type: "button",
+                  className: "fp-btn fp-btn--tiny" + (preview3dView === "top" ? " is-active" : ""),
+                  onClick: function () {
+                    setPreview3dView("top");
+                  }
+                },
+                "俯视"
+              ),
+              e(
+                "button",
+                {
+                  type: "button",
+                  className: "fp-btn fp-btn--tiny" + (preview3dView === "iso" ? " is-active" : ""),
+                  onClick: function () {
+                    setPreview3dView("iso");
+                  }
+                },
+                "等轴"
+              ),
+              e(
+                "button",
+                {
+                  type: "button",
+                  className: "fp-btn fp-btn--tiny" + (preview3dView === "side" ? " is-active" : ""),
+                  onClick: function () {
+                    setPreview3dView("side");
+                  }
+                },
+                "侧视"
+              )
+            ),
+            e(
+              "div",
+              { className: "fp-preview3d-toolbar-group fp-preview3d-toolbar-group--checks" },
+              e(
+                "label",
+                { className: "fp-check-row fp-check-row--compact" },
+                e("input", {
+                  type: "checkbox",
+                  checked: preview3dShowTerrain,
+                  onChange: function (event) {
+                    setPreview3dShowTerrain(event.target.checked);
+                  }
+                }),
+                e("span", null, "显示地表")
+              ),
+              e(
+                "label",
+                { className: "fp-check-row fp-check-row--compact" },
+                e("input", {
+                  type: "checkbox",
+                  checked: preview3dShowConnectors,
+                  onChange: function (event) {
+                    setPreview3dShowConnectors(event.target.checked);
+                  }
+                }),
+                e("span", null, "显示连接段")
+              ),
+              e(
+                "label",
+                { className: "fp-check-row fp-check-row--compact" },
+                e("input", {
+                  type: "checkbox",
+                  checked: preview3dShowVerticals,
+                  onChange: function (event) {
+                    setPreview3dShowVerticals(event.target.checked);
+                  }
+                }),
+                e("span", null, "显示高度参考线")
+              )
+            )
+          ),
+          preview3dError
+            ? e("div", { className: "fp-preview3d-banner fp-preview3d-banner--error" }, preview3dError)
+            : null,
+          preview3dNotice
+            ? e("div", { className: "fp-preview3d-banner fp-preview3d-banner--note" }, preview3dNotice)
+            : null,
+          e(
+            "div",
+            { className: "fp-preview3d-stage-wrap" },
+            preview3dLoading
+              ? e("div", { className: "fp-preview3d-loading" }, "正在准备 3D 预览…")
+              : null,
+            e("canvas", { ref: previewThreeCanvasRef, className: "fp-preview3d-canvas" }),
+            e(
+              "div",
+              { className: "fp-preview3d-help" },
+              "左键旋转，滚轮缩放，右键或按住 Shift 拖拽可平移。"
+            )
+          )
+        )
+      );
+    }
+
     function renderSurveyTab() {
       const VT = window.VehicleTemplates;
       const platformOptions = VT ? VT.PLATFORM_OPTIONS : [];
@@ -4396,16 +5255,16 @@
                   surveyArea.length < 3 ||
                   surveyCommitted ||
                   terrainPlanning ||
-                  (settings.useTerrainFollowing
-                    ? !terrainPlanBlocks.length
-                    : !surveyPath.length),
+                  (!settings.useTerrainFollowing && !surveyPath.length),
                 onClick: handleConfirmSurveyGenerate
               },
               surveyCommitted
                 ? "已生成测绘航线"
                 : settings.useTerrainFollowing && terrainPlanBlocks.length
                   ? "确认生成（" + terrainPlanBlocks.length + " 块）"
-                  : "确认生成测绘航线"
+                  : settings.useTerrainFollowing
+                    ? "确认生成地形航线"
+                    : "确认生成测绘航线"
             ),
             settings.useTerrainFollowing
               ? e(
@@ -4788,7 +5647,7 @@
                     ? e(
                         "div",
                         { className: "fp-terrain-hint" },
-                        "测区已就绪，请点击「自动规划」预览地形航线与剖面校核。"
+                        "测区已就绪，可直接点「确认生成地形航线」；如需先看切块和剖面校核，再点「自动规划」。"
                       )
                     : null,
                   terrainSurveyFromCommitted && !terrainPlanBlocks.length && !terrainPlanning
@@ -5511,6 +6370,20 @@
             "div",
             { className: "fp-map-toolbar-right" },
             e(
+              "button",
+              {
+                type: "button",
+                className: "fp-btn fp-btn--tiny",
+                disabled: !canPreviewMission3d && !canPreviewPlanning3d,
+                onClick: handleOpen3dPreview,
+                title:
+                  canPreviewMission3d || canPreviewPlanning3d
+                    ? "打开 3D 预览"
+                    : "请先生成航线或绘制测区"
+              },
+              "3D 预览"
+            ),
+            e(
               "span",
               { className: "fp-chip fp-token-note" },
               window.L
@@ -5581,7 +6454,8 @@
             )
           )
         )
-      )
+      ),
+      render3dPreviewModal()
     );
   }
 

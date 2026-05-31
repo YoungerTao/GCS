@@ -150,15 +150,6 @@ async function ensureComBridgeRunning() {
     window._comBridgeBackoffUntil = 0;
     return true;
   }
-  if (liveDev) {
-    // Live Server 场景只做探测，不主动拉起后台桥接进程，避免弹出系统窗口。
-    markBridgeOffline(
-      hasWebSerialApi()
-        ? "COM 桥未运行，已保留浏览器 Web Serial 路径。"
-        : "COM 桥未运行，请先用桌面 GCS 启动，或改用 Web Serial。"
-    );
-    return false;
-  }
   if (isBridgeBackoffActive()) return false;
   const waitAttempts = liveDev ? 8 : 20;
   if (!ensureBridgePromise) {
@@ -173,9 +164,9 @@ async function ensureComBridgeRunning() {
         }
         await new Promise((resolve) => setTimeout(resolve, liveDev ? 400 : 300));
       }
-      const hint = liveDev && hasWebSerialApi()
-        ? "COM 桥 (8765) 未启动：可直接用 Web Serial 连飞控；DroneCAN/协议探测需运行 GCS.cmd"
-        : "本地 COM 桥接未就绪。请从桌面「GCS」图标打开。";
+      const hint = liveDev
+        ? "COM bridge 未启动或未就绪。请先启动本地 bridge 服务，再进行飞控连接。"
+        : "本地 COM bridge 未就绪。请从桌面「GCS」图标打开，或确认 8765/8766 启动器可用。";
       markBridgeOffline(hint);
       return false;
     })().finally(() => {
@@ -456,19 +447,14 @@ function setConnectSerialHint(text) {
   if (btn) btn.title = text || "";
 }
 
-/** 自动重连：auth 口或 COM 桥 sys 口（8766 由 connect 内拉起桥，不弹 requestPort） */
+/** 自动重连：仅主 bridge sys 口；不再对主飞控链路使用 auth: Web Serial */
 function canSilentAutoConnect(target) {
   if (!target || target.startsWith("__")) return false;
   const meta = window._comOptionMap?.get(target);
-  if (target.startsWith("auth:")) {
-    const idx = Number(meta?.authIndex);
-    const ports = window._knownPorts || [];
-    return Number.isFinite(idx) && idx >= 0 && idx < ports.length;
-  }
+  if (target.startsWith("auth:")) return false;
   if (meta?.systemPort?.deviceId) {
     if (isNoiseSerialPort(meta.systemPort)) return false;
     if (window._comBridgeOnline) return true;
-    if (window.__gcsRuntimeNative) return true;
     return !isBridgeBackoffActive();
   }
   return false;
@@ -488,8 +474,6 @@ function pickPreferredPortValueForAutoConnect(comSelect) {
     const role = getPortProbeRole(window._comOptionMap?.get(val)?.systemPort);
     if (role === "mavlink") return val;
   }
-  const auth0 = candidates.find((v) => v === "auth:0");
-  if (auth0) return auth0;
   for (const val of candidates) {
     const role = getPortProbeRole(window._comOptionMap?.get(val)?.systemPort);
     if (role !== "slcan") return val;
@@ -502,7 +486,6 @@ function preferMavlinkConnectTarget(comSelect, target) {
   const meta = window._comOptionMap?.get(target);
   const role = getPortProbeRole(meta?.systemPort);
   if (role === "mavlink") return target;
-  if (target.startsWith("auth:") && !meta?.systemPort) return target;
 
   const mavProbed = findPortByProbeRole("mavlink");
   if (mavProbed?.deviceId) {
@@ -517,9 +500,6 @@ function preferMavlinkConnectTarget(comSelect, target) {
   const preferred = pickPreferredPortValueForAutoConnect(comSelect);
   if (preferred && getPortProbeRole(window._comOptionMap?.get(preferred)?.systemPort) !== "slcan") {
     return preferred;
-  }
-  if (role === "slcan" && window._comOptionMap.has("auth:0") && canSilentAutoConnect("auth:0")) {
-    return "auth:0";
   }
   return target;
 }
@@ -629,18 +609,6 @@ function scheduleAutoReconnectAfterRefresh() {
 
   let baseDelays = [0, 600, 1800, 4000, ...AUTO_CONNECT_LATE_RETRY_MS];
 
-  // 刷新后对 Web Serial 已授权口（auth:）做额外保护：
-  // 给浏览器/USB 栈更多时间释放 claim，避免刚 load 就猛冲过去 open 失败。
-  const justReloaded = !!window._gcsJustReloaded;
-  const comSelectForCheck = document.getElementById("comPort");
-  const currentVal = comSelectForCheck ? comSelectForCheck.value : "";
-  const targetingAuthPort = typeof currentVal === "string" && currentVal.startsWith("auth:");
-
-  if (justReloaded && targetingAuthPort) {
-    // 把最早的几次尝试往后挪（第一次真正尝试大概在 900ms+）
-    baseDelays = [900, 1600, 2800, 4500, ...AUTO_CONNECT_LATE_RETRY_MS];
-  }
-
   baseDelays.forEach((ms) => {
     setTimeout(() => {
       if (window._gcsConnState === "connected" || window._gcsConnState === "connecting") return;
@@ -686,25 +654,9 @@ async function refreshPorts(opts = {}) {
         vidPidCounts.set(key, (vidPidCounts.get(key) || 0) + 1);
       }
     });
-    const usedAuth = new Set();
     sortedPorts.forEach((sp, i) => {
-      let authIndex = -1;
-      for (let j = 0; j < ports.length; j += 1) {
-        if (usedAuth.has(j)) continue;
-        const info = ports[j].getInfo ? ports[j].getInfo() : {};
-        if (
-          typeof sp.usbVendorId === "number" &&
-          typeof sp.usbProductId === "number" &&
-          info.usbVendorId === sp.usbVendorId &&
-          info.usbProductId === sp.usbProductId
-        ) {
-          authIndex = j;
-          usedAuth.add(j);
-          break;
-        }
-      }
       const option = document.createElement("option");
-      option.value = authIndex >= 0 ? `auth:${authIndex}` : `sys:${sp.deviceId || i}`;
+      option.value = `sys:${sp.deviceId || i}`;
       const label = sp.deviceId || sp.name || "Unknown";
       const dupHint =
         typeof sp.usbVendorId === "number" &&
@@ -714,12 +666,10 @@ async function refreshPorts(opts = {}) {
           : "";
       const noise = isNoiseSerialPort(sp);
       const roleTag = noise ? "" : portRoleSuffix(sp);
-      option.text = authIndex >= 0
-        ? `${label} (${sp.name || "Unknown"})${dupHint}${roleTag}${noise ? " [非飞控]" : ""}`
-        : `${label} (${sp.name || "Unknown"}) [桥接]${dupHint}${roleTag}${noise ? " [非飞控]" : ""}`;
+      option.text = `${label} (${sp.name || "Unknown"}) [桥接]${dupHint}${roleTag}${noise ? " [非飞控]" : ""}`;
       if (noise) option.disabled = true;
       comSelect.appendChild(option);
-      window._comOptionMap.set(option.value, { authIndex, systemPort: sp });
+      window._comOptionMap.set(option.value, { authIndex: -1, systemPort: sp });
     });
 
     const resolved = resolveRememberedPortValue(comSelect);
@@ -737,11 +687,7 @@ async function refreshPorts(opts = {}) {
     }
 
     appendPortPickerExtras(comSelect, canWebSerial);
-    setConnectSerialHint(
-      canWebSerial
-        ? "已自动探测各口协议；顶部连 [MAVLink]，DroneCAN 用 [SLCAN]"
-        : "已自动探测协议；顶部 [MAVLink][桥接] 连飞控，DroneCAN 用 [SLCAN]"
-    );
+    setConnectSerialHint("主飞控连接统一走 COM bridge；优先选择 [MAVLink]，DroneCAN 继续使用 [SLCAN]");
     const probed = window._systemComPorts.filter((p) => getPortProbeRole(p));
     if (probed.length && typeof window.log === "function") {
       const summary = probed
@@ -767,73 +713,28 @@ async function refreshPorts(opts = {}) {
     if (!canWebSerial) {
       const waitOpt = document.createElement("option");
       waitOpt.value = "";
-      waitOpt.text = systemPorts.length ? "请选择 COM 口" : "等待 COM 桥（请先 Open with Live Server）";
+      waitOpt.text = systemPorts.length ? "请选择 COM 口" : "等待 COM bridge（请先启动本地 bridge 服务）";
       waitOpt.disabled = true;
       comSelect.appendChild(waitOpt);
       appendPortPickerExtras(comSelect, false);
       comSelect.value = "__refresh_bridge__";
-      setConnectSerialHint("内置浏览器无 Web Serial 弹窗；先 Open with Live Server，再选 COM 连接");
+      setConnectSerialHint("主飞控连接统一走 COM bridge；请先确保 bridge 已启动，再选 [MAVLink] 口连接");
       return;
     }
-    const addOnly = document.createElement("option");
-    addOnly.value = "__add__";
-    addOnly.text = "＋ 选择飞控 USB 串口（首次连接）…";
-    comSelect.appendChild(addOnly);
-    comSelect.value = "__add__";
-    setConnectSerialHint("首次连接：点击“连接串口”，在浏览器弹窗中选择飞控 USB 串口");
+    const waitOpt = document.createElement("option");
+    waitOpt.value = "";
+    waitOpt.text = "未发现可用 COM bridge 端口";
+    waitOpt.disabled = true;
+    comSelect.appendChild(waitOpt);
+    appendPortPickerExtras(comSelect, canWebSerial);
+    comSelect.value = "__refresh_bridge__";
+    setConnectSerialHint("未发现 bridge 端口；请确认飞控已插入并且本地 COM bridge 正在运行");
     return;
   }
 
-  const authVidPidCounts = new Map();
-  ports.forEach((port) => {
-    const info = port.getInfo ? port.getInfo() : {};
-    if (typeof info.usbVendorId === "number" && typeof info.usbProductId === "number") {
-      const key = `${info.usbVendorId}:${info.usbProductId}`;
-      authVidPidCounts.set(key, (authVidPidCounts.get(key) || 0) + 1);
-    }
-  });
-
-  ports.forEach((port, index) => {
-    const option = document.createElement("option");
-    const info = port.getInfo ? port.getInfo() : {};
-    const vid = typeof info.usbVendorId === "number" ? info.usbVendorId.toString(16).toUpperCase().padStart(4, "0") : "----";
-    const pid = typeof info.usbProductId === "number" ? info.usbProductId.toString(16).toUpperCase().padStart(4, "0") : "----";
-    const dupKey = typeof info.usbVendorId === "number" && typeof info.usbProductId === "number"
-      ? `${info.usbVendorId}:${info.usbProductId}`
-      : "";
-    const dupHint = (authVidPidCounts.get(dupKey) || 0) > 1 ? ` · 同USB第${index + 1}路` : "";
-    option.value = `auth:${index}`;
-    option.text = `串口${index + 1} (VID_${vid}:PID_${pid})${dupHint}`;
-    comSelect.appendChild(option);
-    window._comOptionMap.set(option.value, {
-      authIndex: index,
-      systemPort: null,
-      usbVendorId: info.usbVendorId,
-      usbProductId: info.usbProductId,
-    });
-  });
-
   appendPortPickerExtras(comSelect, canWebSerial);
-
-  const rememberedKey = getRememberedPortKey();
-  const rememberedLabel = getRememberedPortLabel();
-  if (rememberedKey && window._comOptionMap.has(rememberedKey)) {
-    comSelect.value = rememberedKey;
-  } else if (rememberedLabel) {
-    const remembered = Array.from(comSelect.options).find((o) => String(o.text || "") === rememberedLabel);
-    if (remembered) comSelect.value = remembered.value;
-  } else if (currentValue && window._comOptionMap.has(currentValue)) {
-    comSelect.value = currentValue;
-  } else {
-    comSelect.value = comSelect.options[0]?.value || "__add__";
-  }
-
-  const cuavDual = ports.length >= 2 && authVidPidCounts.size === 1 && (authVidPidCounts.values().next().value || 0) >= 2;
-  setConnectSerialHint(
-    cuavDual
-      ? "CUAV 一根USB两路：顶部连一路 MAVLink；DroneCAN→SLCAN 请在下拉选「浏览器串口2」或先「＋添加串口」授权第二路"
-      : ""
-  );
+  comSelect.value = "__refresh_bridge__";
+  setConnectSerialHint("主飞控连接统一走 COM bridge；当前未识别到 bridge 端口，请刷新或检查 bridge");
   tryAutoConnect().catch(() => {});
 }
 
@@ -886,10 +787,8 @@ async function requestAllPortsInteractive() {
 }
 
 function initComPortAutoRefresh() {
-  // 记录页面加载时刻，用于后续判断“刚刷新不久”，给 Web Serial auth 口更宽松的连接策略
   window._gcsPageLoadTs = Date.now();
   window._gcsJustReloaded = true;
-  // 8 秒后自动清除“刚刷新”标记
   setTimeout(() => { window._gcsJustReloaded = false; }, 8000);
 
   window.addEventListener("load", () => {
@@ -903,35 +802,19 @@ function initComPortAutoRefresh() {
         await refreshPorts({ probeBridge: true, forceBridgeProbe: !!window.__gcsRuntimeNative });
       } catch (_) { /* ignore */ }
       scheduleAutoReconnectAfterRefresh();
-
-      // 刷新后对 auth: Web Serial 口，延迟第一次直接自动连接尝试
-      const immediateAutoConnect = async () => {
-        const justReloaded = !!window._gcsJustReloaded;
-        const sel = document.getElementById("comPort");
-        const val = sel ? sel.value : "";
-        if (justReloaded && typeof val === "string" && val.startsWith("auth:")) {
-          await new Promise((r) => setTimeout(r, 750));
-        }
-        try { await tryAutoConnect(); } catch (_) {}
-      };
-      immediateAutoConnect();
+      tryAutoConnect().catch(() => {});
     };
     if (window.__gcsBootstrapPromise) {
       window.__gcsBootstrapPromise.then(startRefresh).catch(startRefresh);
     } else {
       startRefresh();
     }
-    if (window.__gcsRuntimeNative) {
-      window._bridgeMode = "auto";
-    }
-    if (!hasWebSerialApi()) {
-      window._bridgeMode = "bridge";
-      [800, 2000, 4000].forEach((ms) => {
-        setTimeout(() => refreshPorts({ probeBridge: true }).catch(() => {}), ms);
-      });
-      if (typeof window.log === "function") {
-        window.log("内置浏览器：无 Web Serial，已启用 COM 桥接；请选飞控 USB 口（勿选蓝牙）", "info");
-      }
+    window._bridgeMode = "bridge";
+    [800, 2000, 4000].forEach((ms) => {
+      setTimeout(() => refreshPorts({ probeBridge: true }).catch(() => {}), ms);
+    });
+    if (typeof window.log === "function") {
+      window.log("主飞控连接已统一为 COM bridge 模式；请选择 [MAVLink] 口，勿选蓝牙/调试口。", "info");
     }
   });
 

@@ -9,8 +9,23 @@
   const HEALTH_TTL_MS = 4000;
 
   function fetchJson(url, options) {
-    return fetch(url, Object.assign({ mode: "cors", cache: "no-store" }, options || {})).then(
+    const opts = Object.assign({ mode: "cors", cache: "no-store" }, options || {});
+    const timeoutMs = Number(opts.timeoutMs);
+    delete opts.timeoutMs;
+    let controller = null;
+    let timer = 0;
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0 && typeof AbortController === "function") {
+      controller = new AbortController();
+      opts.signal = controller.signal;
+      timer = window.setTimeout(function () {
+        controller.abort();
+      }, timeoutMs);
+    }
+    return fetch(url, opts).then(
       function (r) {
+        if (timer) {
+          window.clearTimeout(timer);
+        }
         if (!r.ok) {
           return r.json().catch(function () {
             throw new Error("HTTP " + r.status);
@@ -19,6 +34,15 @@
           });
         }
         return r.json();
+      },
+      function (err) {
+        if (timer) {
+          window.clearTimeout(timer);
+        }
+        if (err && err.name === "AbortError") {
+          throw new Error("请求超时");
+        }
+        throw err;
       }
     );
   }
@@ -28,7 +52,9 @@
     if (!force && healthCache && now - healthAt < HEALTH_TTL_MS) {
       return Promise.resolve(healthCache);
     }
-    return fetchJson(TILE_SERVER + "/health")
+    return fetchJson(TILE_SERVER + "/health", {
+      timeoutMs: 5000
+    })
       .then(function (data) {
         healthCache = data;
         healthAt = now;
@@ -65,6 +91,7 @@
     return fetchJson(TILE_SERVER + "/elevation/batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      timeoutMs: opts.timeoutMs != null ? opts.timeoutMs : 60000,
       body: JSON.stringify({
         points: points || [],
         cacheOnly: !!opts.cacheOnly
@@ -79,6 +106,7 @@
     return fetchJson(TILE_SERVER + "/elevation/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      timeoutMs: opts.timeoutMs != null ? opts.timeoutMs : 60000,
       body: JSON.stringify({
         points: points || [],
         stepM: stepM || 50,
@@ -94,6 +122,7 @@
     return fetchJson(TILE_SERVER + "/terrain/stats", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      timeoutMs: opts.timeoutMs != null ? opts.timeoutMs : 60000,
       body: JSON.stringify({
         polygon: polygon || [],
         cacheOnly: !!opts.cacheOnly
@@ -109,22 +138,29 @@
       return fetchJson(TILE_SERVER + "/terrain/prefetch?dryRun=1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        timeoutMs: opts.timeoutMs != null ? opts.timeoutMs : 10000,
         body: JSON.stringify(bbox)
       });
     }
     return fetchJson(TILE_SERVER + "/terrain/prefetch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      timeoutMs: opts.timeoutMs != null ? opts.timeoutMs : 10000,
       body: JSON.stringify(bbox)
     });
   }
 
   function terrainPrefetchStatus() {
-    return fetchJson(TILE_SERVER + "/terrain/prefetch/status");
+    return fetchJson(TILE_SERVER + "/terrain/prefetch/status", {
+      timeoutMs: 5000
+    });
   }
 
   function cancelTerrainPrefetch() {
-    return fetchJson(TILE_SERVER + "/terrain/prefetch/cancel", { method: "POST" });
+    return fetchJson(TILE_SERVER + "/terrain/prefetch/cancel", {
+      method: "POST",
+      timeoutMs: 5000
+    });
   }
 
   function estimateTerrainPrefetch(bbox) {
@@ -166,6 +202,9 @@
           }
           if (status.message === "已取消") {
             return { ok: false, error: "预取已取消", status: status };
+          }
+          if (status.error) {
+            return { ok: false, error: status.error, status: status };
           }
           if (status.message === "完成" || (status.total > 0 && status.done >= status.total)) {
             return { ok: true, status: status };
@@ -222,8 +261,9 @@
     if (!bbox) {
       return Promise.reject(new Error("无效测区多边形"));
     }
-    return isTerrainAvailable().then(function (ready) {
-      if (ready && !opts.force) {
+    return probeHealth(false).then(function (health) {
+      const terrainReady = !!(health && health.ok && health.terrainReady);
+      if (terrainReady && !opts.force) {
         if (typeof opts.onProgress === "function") {
           opts.onProgress({ running: false, message: "完成", done: 0, total: 0, cached: true });
         }

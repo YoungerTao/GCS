@@ -7,7 +7,7 @@
  */
 
 window._pendingParamRequest = false;
-window._bridgeMode = window._bridgeMode || "auto";
+window._bridgeMode = window._bridgeMode || "bridge";
 window._bridgeConnActive = window._bridgeConnActive || false;
 
 function shouldAutoLoadParams() {
@@ -228,6 +228,33 @@ function startBridgeDataWatchdog() {
   }, 7000);
 }
 
+async function waitForFirstMavlinkPacket(opts = {}) {
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 8000;
+  const sessionId = Number(opts.sessionId || 0);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (window._lastMavlinkRxMs && window._lastMavlinkRxMs >= startedAt) {
+      return true;
+    }
+    try {
+      const st = await bridgeFetch("/bridge-status", null, { skipEnsure: true });
+      if (sessionId && Number(st?.sessionId || 0) !== sessionId) {
+        throw new Error("bridge session changed");
+      }
+      if (st?.readerAlive === false) {
+        throw new Error(st?.error || "bridge reader stopped");
+      }
+      if (typeof st?.bytesRx === "number" && st.bytesRx > 0 && typeof st?.lastRxAgeSec === "number" && st.lastRxAgeSec < 2) {
+        // 给解析器一点时间把原始串口字节转成首个 MAVLink 包
+      }
+    } catch (err) {
+      throw err;
+    }
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  throw new Error("首个 MAVLink 数据包超时未到达");
+}
+
 // ========== 串口生命周期管理 ==========
 
 /**
@@ -396,7 +423,7 @@ function setConnectionUI(state) {
   } else {
     comSelect.classList.add("com-disconnected");
     btn.disabled = false;
-    btn.textContent = "连接串口";
+    btn.textContent = comSelect.value === "__refresh_bridge__" ? "刷新串口" : "连接串口";
   }
 }
 
@@ -508,25 +535,33 @@ async function connectImpl() {
       if (typeof window.refreshPorts === "function") {
         await window.refreshPorts({ probeBridge: true });
       }
+      const comSelectAfterRefresh = document.getElementById("comPort");
+      const refreshedValue = comSelectAfterRefresh ? comSelectAfterRefresh.value : "";
+      const hasBridgePort = !!(
+        comSelectAfterRefresh &&
+        Array.from(comSelectAfterRefresh.options || []).some((opt) => opt.value && !opt.value.startsWith("__"))
+      );
+      if (!hasBridgePort || refreshedValue === "__refresh_bridge__") {
+        setConnectionUI("error");
+        log("❌ 当前未发现可用 COM bridge 串口。请先启动 bridge 服务，再刷新串口列表。");
+        if (typeof window.alert === "function") {
+          window.alert("未发现可用 COM bridge 串口。\n\n请先启动 bridge 服务（例如 GCS.cmd / GCS.app / 本地 watchdog），再回到页面点击“刷新串口”。");
+        }
+        return;
+      }
       setConnectionUI("disconnected");
-      log("↻ 已刷新 COM 列表，请从下拉选择端口后点击「连接串口」");
+      log("↻ 已刷新 COM 列表，请从下拉选择 [MAVLink] 端口后点击「连接串口」");
       return;
     }
 
-    if (!canWebSerial) {
-      window._bridgeMode = "bridge";
-      if (typeof window.ensureComBridgeRunning === "function") {
-        const bridgeOk = await window.ensureComBridgeRunning();
-        if (!bridgeOk) {
-          log("❌ COM 桥未就绪：请先 Open with Live Server，或确认 Python 服务已启动");
-          setConnectionUI("error");
-          return;
-        }
+    window._bridgeMode = "bridge";
+    if (typeof window.ensureComBridgeRunning === "function") {
+      const bridgeOk = await window.ensureComBridgeRunning();
+      if (!bridgeOk) {
+        log("❌ COM bridge 未就绪：请先启动本地 bridge 服务，再连接飞控");
+        setConnectionUI("error");
+        return;
       }
-    } else if (!("serial" in navigator)) {
-      log("❌ 当前浏览器不支持 Web Serial，请改用 Chrome/Edge（桌面版）");
-      setConnectionUI("error");
-      return;
     }
 
     if (window._gcsConnState === "connected") {
@@ -540,10 +575,7 @@ async function connectImpl() {
     await closeSerialResources();
 
     const optionMetaEarly = window._comOptionMap?.get(selectedValue);
-    const useBridge =
-      !canWebSerial
-        ? !!selectedValue && !selectedValue.startsWith("__")
-        : shouldUseBridgeForSelection(selectedValue, optionMetaEarly);
+    const useBridge = !!selectedValue && shouldUseBridgeForSelection(selectedValue, optionMetaEarly);
 
     if (useBridge && selectedValue) {
       if (typeof window.ensureComBridgeRunning === "function") {
@@ -602,22 +634,26 @@ async function connectImpl() {
           }
         }
         const opened = await bridgeFetch("/bridge-open", { port: portName, baudrate: baudRate });
+        const bridgeSessionId = Number(opened?.sessionId || 0);
+        bumpConnectionSession();
         window._bridgeConnActive = true;
         window.port = { bridge: true, close: async () => { await bridgeFetch("/bridge-close", {}); } };
         writer = { write: async (bytes) => bridgeWriteBytes(bytes) };
         window.writer = writer;
         reader = { cancel: async () => {}, releaseLock: () => {} };
         window.reader = reader;
-        log(`✅ 桥接串口已打开：${opened.port || portName} @ ${opened.baudrate}`);
+        log(`🔌 COM bridge 已打开：${opened.port || portName} @ ${opened.baudrate}，等待首个 MAVLink 数据…`);
         window._readLoopLostWarned = false;
+        window._lastMavlinkRxMs = 0;
+        bridgeReadLoop();
+        await waitForFirstMavlinkPacket({ sessionId: bridgeSessionId, timeoutMs: Math.min(connectWatchdogMs - 3000, 9000) });
         if (window._heartbeatInterval) clearInterval(window._heartbeatInterval);
         window._heartbeatInterval = setInterval(sendHeartbeat, 1000);
         sendHeartbeat().catch(() => {});
         setTimeout(() => sendHeartbeat().catch(() => {}), 250);
-        bridgeReadLoop();
         startBridgeDataWatchdog();
-        bumpConnectionSession();
         setConnectionUI("connected");
+        log(`✅ COM bridge 已连接：${opened.port || portName} @ ${opened.baudrate}，已收到首个 MAVLink 数据`);
         if (typeof window.rememberSelectedPort === "function") {
           window.rememberSelectedPort(
             selectedValue,
@@ -651,234 +687,36 @@ async function connectImpl() {
         return;
       } catch (bridgeErr) {
         window._bridgeConnActive = false;
+        try { await bridgeFetch("/bridge-close", {}, { skipEnsure: true }); } catch (_) { /* ignore */ }
         if (window._gcsAutoConnectActive) {
           log(`⏳ 自动连接：桥接打开失败，将重试（${bridgeErr?.message || bridgeErr}）`);
           setConnectionUI("disconnected");
           return;
         }
-        if (!canWebSerial) {
-          log(`❌ COM 桥连接失败：${bridgeErr?.message || bridgeErr}`);
-          setConnectionUI("error");
-          return;
-        }
-        log(`⚠️ 桥接模式失败，回退 Web Serial：${bridgeErr?.message || bridgeErr}`);
+        log(`❌ COM bridge 连接失败：${bridgeErr?.message || bridgeErr}`);
+        setConnectionUI("error");
+        return;
       }
     }
 
-    if (!canWebSerial) {
-      log("❌ 内置浏览器请从顶部下拉选择 COM 口后连接（无 Web Serial 弹窗）");
+    if (!selectedValue || selectedValue.startsWith("__")) {
+      log("❌ 请先从顶部下拉选择 COM bridge 端口后连接");
       setConnectionUI("error");
       return;
     }
 
-    if (selectedValue === "__add__") {
-      if (window._gcsAutoConnectActive) return;
-      const ok = await requestAndRefreshPort();
-      if (!ok) {
-        log(canWebSerial ? "⚠️ 未选择飞控串口（已取消）" : "⚠️ 未发现 COM 口，请确认飞控已插入且 COM 桥已启动");
-        setConnectionUI("disconnected");
-        return;
-      }
-      selectedValue = comSelect.value;
-      if (!selectedValue || selectedValue === "__add__" || selectedValue.startsWith("__")) {
-        const portsNow = await navigator.serial.getPorts();
-        if (portsNow.length) selectedValue = "auth:0";
-        else {
-          log("⚠️ 未找到已授权串口，请重试");
-          setConnectionUI("disconnected");
-          return;
-        }
-      }
-      log("🔌 已授权串口，正在连接…");
-    }
-
-    if (!canWebSerial && (!selectedValue || selectedValue === "__refresh_bridge__")) {
-      log("❌ 请先从顶部下拉选择 COM 口（内置浏览器不支持浏览器选串口弹窗）");
-      setConnectionUI("error");
-      return;
-    }
-
-    if (!selectedValue) {
-      const portsNow = canWebSerial ? await navigator.serial.getPorts() : [];
-      if (!portsNow.length) {
-        setConnectionUI("connecting");
-        const added = await requestAllPortsInteractive();
-        if (!added) { log("⚠️ 未授权任何串口"); setConnectionUI("error"); return; }
-        await refreshPorts();
-        selectedValue = comSelect.value;
-      } else {
-        selectedValue = comSelect.value || selectedValue;
-      }
-      if (!selectedValue) { log("❌ 请先在下拉框中选择串口"); setConnectionUI("error"); return; }
-    }
-
-    log("🔌 正在通过 Web Serial 连接…");
-
-    let ports = await navigator.serial.getPorts();
-    window._knownPorts = ports;
-
-    if (!ports.length && selectedValue.startsWith("auth:")) {
-      log("⚠️ 浏览器未找到已授权串口，请在弹窗中重新选择飞控 USB 口");
-      const added = await requestAllPortsInteractive();
-      if (!added) { log("⚠️ 未授权任何串口"); setConnectionUI("error"); return; }
-      ports = await navigator.serial.getPorts();
-      window._knownPorts = ports;
-      scheduleRefreshPorts({ probeBridge: true });
-      selectedValue = comSelect.value || `auth:0`;
-    }
-
-    let selectedPort = null;
-    if (selectedValue.startsWith("auth:")) {
-      const idx = Number(selectedValue.slice(5));
-      if (Number.isNaN(idx) || idx < 0 || idx >= ports.length) {
-        scheduleRefreshPorts({ probeBridge: true });
-        log("⚠️ 串口列表已变化，请重新选择后连接");
-        setConnectionUI("disconnected");
-        return;
-      }
-      selectedPort = ports[idx];
-      log(`🔌 使用已授权端口：${comSelect.options[comSelect.selectedIndex]?.text || selectedValue}`);
-    } else {
-      const optionMeta = window._comOptionMap?.get(selectedValue);
-      const sysPort = optionMeta ? optionMeta.systemPort : null;
-      if (selectedValue.startsWith("sys:")) window._desiredSystemCom = selectedValue.slice(4);
-
-      if (window._gcsAutoConnectActive) {
-        log("⏳ 自动连接需要已授权串口或 COM 桥；请手动点击「连接串口」完成首次授权");
-        setConnectionUI("disconnected");
-        return;
-      }
-
-      if (sysPort && typeof sysPort.usbVendorId === "number" && typeof sysPort.usbProductId === "number") {
-        log(`🔐 为 ${sysPort.deviceId} 申请授权...`);
-        try {
-          selectedPort = await navigator.serial.requestPort({
-            filters: [{ usbVendorId: sysPort.usbVendorId, usbProductId: sysPort.usbProductId }]
-          });
-        } catch (e) {
-          log(`⚠️ 过滤授权失败，回退手动选择`);
-          selectedPort = await navigator.serial.requestPort();
-        }
-      } else {
-        log("🔐 申请授权（未获取到 VID/PID，使用手动选择）...");
-        selectedPort = await navigator.serial.requestPort();
-      }
-    }
-
-    const port = selectedPort;
-    if (!port) throw new Error("未获取到串口端口对象");
-    let baudRate = getSelectedBaudRate();
-    if (typeof window.resolveConnectBaudRate === "function") {
-      baudRate = await window.resolveConnectBaudRate({
-        serialPort: port,
-        useBridge: false,
-      });
-    }
-    try {
-      await openSerialPortWithTimeout(port, {
-        baudRate, dataBits: 8, stopBits: 1, parity: "none",
-        flowControl: "none", bufferSize: 8192,
-      });
-    } catch (openErr) {
-      const om = openErr?.message || String(openErr);
-      if (/InvalidStateError|already open/i.test(om)) {
-        try { await port.close(); } catch (_) { /* ignore */ }
-        await openSerialPortWithTimeout(port, {
-          baudRate, dataBits: 8, stopBits: 1, parity: "none",
-          flowControl: "none", bufferSize: 8192,
-        });
-      } else {
-        throw openErr;
-      }
-    }
-
-    window.port = port;
-    reader = port.readable.getReader();
-    writer = port.writable.getWriter();
-    window.reader = reader;
-    window.writer = writer;
-
-    log(`✅ 已连接串口（${baudRate} 8N1）`);
-
-    window._readLoopLostWarned = false;
-    if (window._heartbeatInterval) clearInterval(window._heartbeatInterval);
-    window._heartbeatInterval = setInterval(sendHeartbeat, 1000);
-    sendHeartbeat().catch(() => {});
-    setTimeout(() => sendHeartbeat().catch(() => {}), 250);
-    readLoop();
-    startTelemetryRequests();
-    bumpConnectionSession();
-    setConnectionUI("connected");
-    disarmConnectWatchdog();
-    scheduleRefreshPorts({ probeBridge: false });
-    if (typeof window.rememberSelectedPort === "function") {
-      window.rememberSelectedPort(
-        comSelect.value || selectedValue,
-        comSelect.options[comSelect.selectedIndex]?.text || selectedValue
-      );
-    }
-    if (typeof window.markGcsSessionConnected === "function") {
-      window.markGcsSessionConnected();
-    }
-    if (typeof window.resetAutoConnectAttempts === "function") {
-      window.resetAutoConnectAttempts();
-    }
-    schedulePostConnectMavlinkInfoRequests();
-    if (typeof window.applyConnectionTelemetrySetup === "function") {
-      window.applyConnectionTelemetrySetup()
-        .then(() => {
-          if (typeof window.startTelemetryMaintenance === "function") {
-            window.startTelemetryMaintenance(window._telemetryProfile || "sr0");
-          }
-        })
-        .catch((e) => log(`⚠️ 流速率/遥测初始化失败: ${e?.message || e}`));
-    }
-
-    // 概览「刷新固件/硬件信息」按钮
-    const refreshBtn = document.getElementById("ov-refresh-version");
-    if (refreshBtn && !refreshBtn.dataset.wired) {
-      refreshBtn.dataset.wired = "1";
-      refreshBtn.addEventListener("click", () => {
-        requestAutopilotVersionAndEkfOnce();
-        log("🔄 手动请求固件/硬件/设备 ID 信息", "debug");
-      });
-    }
-
-    if (window._pendingParamRequest || shouldAutoLoadParams()) {
-      window._pendingParamRequest = false;
-      log("📥 连接成功：开始加载参数表（PARAM_REQUEST_LIST）");
-      if (typeof window.loadParams === "function") {
-        window.loadParams({ force: true }).catch(() => {});
-      }
-    }
+    log("❌ 主飞控连接已统一为 COM bridge；当前未找到可用的 bridge MAVLink 端口");
+    setConnectionUI("error");
+    return;
   } catch (e) {
     const name = e?.name || "Error";
     const msg = e?.message || String(e);
     log(`❌ 连接失败: ${name} - ${msg}`);
 
-    const looksLikeClaimStale =
-      /InvalidStateError|Access denied|already open|设备正忙|busy|in use|占用/i.test(msg) ||
-      /open serial port/i.test(msg);
-
-    if (looksLikeClaimStale) {
-      const isAuthPort = typeof selectedValue === "string" && selectedValue.startsWith("auth:");
-      const justReloaded = !!(window._gcsJustReloaded || (Date.now() - (window._gcsPageLoadTs || 0) < 8000));
-
-      if (isAuthPort && justReloaded) {
-        log("⚠️ 这很可能是浏览器刷新后 USB 串口仍被前一页面“持有”的已知问题（Windows + Web Serial 经典坑）。");
-        log("💡 推荐处理顺序：");
-        log("   1. 等待 15~30 秒后，再点一次「连接串口」（浏览器通常会慢慢释放 claim）");
-        log("   2. 点击顶部下拉里的「↻ 刷新 COM 列表」，然后再尝试连接");
-        log("   3. 仍不行的话，物理拔掉飞控 USB 线再插上（最彻底）");
-        log("   4. 或者尝试关闭“自动匹配”复选框，用固定波特率手动连接");
-      } else {
-        log("💡 提示：请关闭 Mission Planner / QGC / 其他串口工具，或等待几秒后重试。物理拔插 USB 通常能立即恢复。");
-      }
-    } else {
-      // 普通错误也给一个通用提示
-      if (/open serial port|端口|占用/i.test(msg)) {
-        log("💡 提示：请关闭其他占用串口的程序（如 Mission Planner / QGC）后重试");
-      }
+    if (/reader stopped|首个 MAVLink 数据包超时|bridge/i.test(msg)) {
+      log("💡 请检查 bridge 是否仍在线、端口/波特率是否正确，或断开后重新连接。");
+    } else if (/open serial port|端口|占用|busy|in use/i.test(msg)) {
+      log("💡 请关闭其他占用串口的程序（如 Mission Planner / QGC），再重试 bridge 连接。");
     }
 
     try { await closeSerialResources(); } catch (_) { /* ignore */ }

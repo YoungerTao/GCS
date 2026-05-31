@@ -636,6 +636,12 @@ class SerialHub:
         self._last_rx_at = 0.0
         self._rx_bytes_total = 0
         self._reader_alive = False
+        self._generation = 0
+        self._session_seq = 0
+        self._session_id = 0
+        self._last_error = ""
+        self._last_open_port = None
+        self._last_open_baud = None
 
     def status(self):
         with self.lock:
@@ -646,9 +652,14 @@ class SerialHub:
                 "open": self.serial is not None and getattr(self.serial, "is_open", False),
                 "port": self.port,
                 "baudrate": self.baudrate,
+                "sessionId": getattr(self, "_session_id", 0),
                 "lastRxAgeSec": round(last_rx_age, 2) if last_rx_age < 999 else None,
+                "bytesRx": getattr(self, "_rx_bytes_total", 0),
                 "rxBytesTotal": getattr(self, "_rx_bytes_total", 0),
                 "readerAlive": getattr(self, "_reader_alive", False),
+                "lastOpenPort": getattr(self, "_last_open_port", None),
+                "lastOpenBaud": getattr(self, "_last_open_baud", None),
+                "error": getattr(self, "_last_error", ""),
             }
 
     def open(self, port, baudrate):
@@ -663,6 +674,10 @@ class SerialHub:
         except Exception:
             pass
         with self.lock:
+            self._generation += 1
+            generation = self._generation
+            self._session_seq += 1
+            self._session_id = self._session_seq
             self.serial = s
             self.port = port
             self.baudrate = baudrate
@@ -670,22 +685,35 @@ class SerialHub:
             self._last_rx_at = 0.0
             self._rx_bytes_total = 0
             self._reader_alive = True
-        self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+            self._last_error = ""
+            self._last_open_port = port
+            self._last_open_baud = baudrate
+        self.reader_thread = threading.Thread(target=self._reader_loop, args=(generation,), daemon=True)
         self.reader_thread.start()
         return self.status()
 
     def close(self):
         with self.lock:
             s = self.serial
+            t = self.reader_thread
+            self._generation += 1
             self.serial = None
             self.port = None
             self.rx_buffer = bytearray()
             self._last_rx_at = 0.0
             self._rx_bytes_total = 0
             self._reader_alive = False
+            self._session_id = 0
+            self._last_error = ""
+            self.reader_thread = None
         if s is not None:
             try:
                 s.close()
+            except Exception:
+                pass
+        if t is not None and t.is_alive() and t is not threading.current_thread():
+            try:
+                t.join(timeout=1.0)
             except Exception:
                 pass
 
@@ -705,27 +733,34 @@ class SerialHub:
             del self.rx_buffer[:max_bytes]
             return data
 
-    def _reader_loop(self):
+    def _reader_loop(self, generation):
         while True:
             with self.lock:
+                if generation != self._generation:
+                    return
                 s = self.serial
             if s is None or not getattr(s, "is_open", False):
                 with self.lock:
-                    self._reader_alive = False
+                    if generation == self._generation:
+                        self._reader_alive = False
                 return
             try:
                 data = s.read(4096)
                 if data:
                     now = time.time()
                     with self.lock:
+                        if generation != self._generation:
+                            return
                         self.rx_buffer.extend(data)
                         self._last_rx_at = now
                         self._rx_bytes_total = getattr(self, "_rx_bytes_total", 0) + len(data)
                     if self.label in ("slcan", "bridge"):
                         SLCAN_MONITOR.feed(data)
-            except Exception:
+            except Exception as exc:
                 with self.lock:
-                    self._reader_alive = False
+                    if generation == self._generation:
+                        self._reader_alive = False
+                        self._last_error = str(exc)
                 return
 
 
@@ -1110,10 +1145,13 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "service": "com-bridge",
                 "mavlinkBridge": {
+                    "sessionId": mav.get("sessionId"),
                     "open": mav.get("open", False),
                     "port": mav.get("port"),
                     "lastRxAgeSec": mav.get("lastRxAgeSec"),
                     "readerAlive": mav.get("readerAlive"),
+                    "bytesRx": mav.get("bytesRx"),
+                    "error": mav.get("error"),
                 },
             })
             return
@@ -1179,8 +1217,9 @@ class Handler(BaseHTTPRequestHandler):
                 send_json(self, 200, {"ok": True, **status})
                 return
             if self.path == "/bridge-close":
+                prev = MAVLINK_HUB.status()
                 MAVLINK_HUB.close()
-                send_json(self, 200, {"ok": True})
+                send_json(self, 200, {"ok": True, "sessionClosed": prev.get("sessionId", 0), **MAVLINK_HUB.status()})
                 return
             if self.path == "/bridge-write":
                 b64 = payload.get("data") or ""

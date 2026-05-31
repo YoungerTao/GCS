@@ -113,6 +113,28 @@
     return tps.autoPartitionByRelief(polygon, stats || {}, maxRelief);
   }
 
+  function withTimeout(promise, timeoutMs, message) {
+    const ms = Number(timeoutMs);
+    if (!Number.isFinite(ms) || ms <= 0) {
+      return promise;
+    }
+    return new Promise(function (resolve, reject) {
+      const timer = window.setTimeout(function () {
+        reject(new Error(message || "请求超时"));
+      }, ms);
+      Promise.resolve(promise).then(
+        function (value) {
+          window.clearTimeout(timer);
+          resolve(value);
+        },
+        function (err) {
+          window.clearTimeout(timer);
+          reject(err);
+        }
+      );
+    });
+  }
+
   function planAuto(polygon, settings, platform, callbacks) {
     const ts = TS();
     if (!ts) {
@@ -132,22 +154,57 @@
       settings.useTerrainFollowing && settings.terrainPrefetchOnDraw !== false;
 
     const terrainReady = shouldPrefetch
-      ? ts.ensureTerrainForPolygon(polygon, {
-          onProgress: function (status) {
-            report("prefetch", { status: status });
-          }
+      ? withTimeout(
+          ts.ensureTerrainForPolygon(polygon, {
+            timeoutMs: Number(settings.terrainPrefetchTimeoutMs) || 90000,
+            pollMs: 800,
+            onProgress: function (status) {
+              report("prefetch", { status: status });
+            }
+          }),
+          Number(settings.terrainPrefetchStageTimeoutMs) || 70000,
+          "地形预取等待超时"
+        ).catch(function (err) {
+          report("stats", {
+            message:
+              (err && err.message ? err.message : "地形预取未完成") + "，继续直接采样地形…"
+          });
+          return {
+            cached: false,
+            degraded: true,
+            warning:
+              (err && err.message ? err.message : "地形预取未完成") +
+              "，已降级为边采样边规划"
+          };
         })
       : Promise.resolve(null);
 
     return terrainReady
-      .then(function () {
+      .then(function (prefetchResult) {
         report("stats", { message: "读取测区高程…" });
-        return ts.getTerrainStats(polygon);
+        return ts.getTerrainStats(polygon).then(function (stats) {
+          return {
+            stats: stats,
+            prefetchResult: prefetchResult
+          };
+        });
       })
-      .then(function (stats) {
+      .then(function (ctx) {
+        const stats = ctx.stats;
+        const prefetchResult = ctx.prefetchResult;
         const parts = autoPartition(polygon, settings, stats);
         report("planning", { blockTotal: parts.length, blockIndex: 0 });
         let chain = Promise.resolve({ blocks: [], issues: [], stats: stats });
+        if (prefetchResult && prefetchResult.warning) {
+          chain = chain.then(function (acc) {
+            acc.issues.push({
+              level: "warning",
+              code: "terrain_prefetch_degraded",
+              message: prefetchResult.warning
+            });
+            return acc;
+          });
+        }
         parts.forEach(function (part, index) {
           chain = chain.then(function (acc) {
             report("planning", {
