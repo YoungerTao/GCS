@@ -6,6 +6,16 @@
     return window.TerrainService;
   };
 
+  function pointHasTerrain(point) {
+    if (!point) {
+      return false;
+    }
+    if (point.available === false) {
+      return false;
+    }
+    return point.elevation != null;
+  }
+
   function pushIssue(issues, level, code, message) {
     issues.push({ level: level, code: code, message: message });
   }
@@ -26,11 +36,20 @@
     return 2 * R * Math.asin(Math.sqrt(h));
   }
 
+  function effectiveAgl(point, baseAgl) {
+    const override = point && Number(point.aglOverride);
+    return Number.isFinite(override) ? override : baseAgl;
+  }
+
   function validateTerrainProfile(profile, settings, platform) {
     const issues = [];
     const agl = Number(settings.surveyAltitude) || 300;
     const margin = Number(settings.terrainAgMarginM) || 30;
     const maxClimb = Number(settings.terrainMaxClimbRateMps) || 3;
+    const maxDescent =
+      Number(settings.terrainMaxDescentRateMps) ||
+      Number(settings.terrainMaxClimbRateMps) ||
+      3;
     const speed = Number(settings.terrainCruiseSpeedMps || settings.speed) || 20;
     const isFw = platform === "plane" || platform === "vtol";
     const pts = profile || [];
@@ -42,7 +61,7 @@
 
     let missing = 0;
     pts.forEach(function (p) {
-      if (!p.available || p.elevation == null) {
+      if (!pointHasTerrain(p)) {
         missing += 1;
       }
     });
@@ -64,29 +83,40 @@
       }
     });
 
+    let clearanceViolation = false;
     for (let i = 1; i < pts.length; i += 1) {
       const a = pts[i - 1];
       const b = pts[i];
-      if (!a.available || !b.available || a.elevation == null || b.elevation == null) {
+      if (!pointHasTerrain(a) || !pointHasTerrain(b)) {
         continue;
       }
-      const targetA = a.elevation + agl;
-      const targetB = b.elevation + agl;
+      const aglA = effectiveAgl(a, agl);
+      const aglB = effectiveAgl(b, agl);
+      const targetA = a.elevation + aglA;
+      const targetB = b.elevation + aglB;
       const dist = haversineM(a, b);
       if (dist < 1) {
         continue;
       }
+      if (isFw && (aglA < margin || aglB < margin)) {
+        clearanceViolation = true;
+      }
       const dt = dist / Math.max(1, speed);
-      const climbRate = Math.abs(targetB - targetA) / dt;
-      if (climbRate > maxClimb) {
+      const delta = targetB - targetA;
+      const rate = Math.abs(delta) / dt;
+      const ascending = delta >= 0;
+      const limit = ascending ? maxClimb : maxDescent;
+      if (rate > limit) {
         pushIssue(
           issues,
           isFw ? "error" : "warning",
           "terrain_climb_rate",
-          "剖面段所需爬升率约 " +
-            climbRate.toFixed(1) +
+          "剖面段所需" +
+            (ascending ? "爬升率" : "下降率") +
+            "约 " +
+            rate.toFixed(1) +
             " m/s（超过 " +
-            maxClimb +
+            limit +
             " m/s）"
         );
       }
@@ -105,6 +135,15 @@
           );
         }
       }
+    }
+
+    if (clearanceViolation) {
+      pushIssue(
+        issues,
+        "error",
+        "terrain_clearance",
+        "修正后仍有航段离地高度低于安全裕度（" + margin + " m），存在触地风险"
+      );
     }
 
     if (Number.isFinite(hMax) && agl < margin) {

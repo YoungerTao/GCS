@@ -3,10 +3,75 @@
  */
 (function () {
   const TILE_SERVER = window.TILE_SERVER || "http://127.0.0.1:8768";
+  const HEALTH_POLL_MS = 8000;
+  const HEALTH_RETRY_MS = 1500;
+  const HEALTH_OFFLINE_FAILURES = 3;
+  const HEALTH_LAST_OK_GRACE_MS = 30000;
 
   let healthCache = null;
   let healthAt = 0;
   const HEALTH_TTL_MS = 4000;
+  let healthRequest = null;
+  let healthPollTimer = 0;
+  let healthPollStarted = false;
+  const healthListeners = new Set();
+  let healthState = {
+    health: null,
+    status: "idle",
+    inFlight: false,
+    lastOkAt: 0,
+    lastError: "",
+    consecutiveFailures: 0
+  };
+
+  function cloneHealthState() {
+    return {
+      health: healthState.health ? Object.assign({}, healthState.health) : null,
+      status: healthState.status,
+      inFlight: !!healthState.inFlight,
+      lastOkAt: Number(healthState.lastOkAt || 0),
+      lastError: healthState.lastError || "",
+      consecutiveFailures: Number(healthState.consecutiveFailures || 0)
+    };
+  }
+
+  function emitHealthState() {
+    const snapshot = cloneHealthState();
+    healthListeners.forEach(function (listener) {
+      try {
+        listener(snapshot);
+      } catch (_) {
+        /* ignore listener errors */
+      }
+    });
+  }
+
+  function setHealthState(patch) {
+    healthState = Object.assign({}, healthState, patch || {});
+    emitHealthState();
+  }
+
+  function classifyHealthStatus(health) {
+    if (!health || !health.ok) {
+      return "offline";
+    }
+    if (health.terrainReady || Number(health.cachedTerrainTiles || 0) > 0) {
+      return "online";
+    }
+    return "online-empty";
+  }
+
+  function getLastKnownHealthyStatus() {
+    return classifyHealthStatus(healthState.health);
+  }
+
+  function hasRecentHealthyResult(now) {
+    return (
+      healthState.lastOkAt > 0 &&
+      now - Number(healthState.lastOkAt || 0) < HEALTH_LAST_OK_GRACE_MS &&
+      getLastKnownHealthyStatus() !== "offline"
+    );
+  }
 
   function fetchJson(url, options) {
     const opts = Object.assign({ mode: "cors", cache: "no-store" }, options || {});
@@ -47,24 +112,109 @@
     );
   }
 
+  function applyHealthSuccess(data) {
+    const now = Date.now();
+    healthCache = data;
+    healthAt = now;
+    setHealthState({
+      health: data,
+      status: classifyHealthStatus(data),
+      inFlight: false,
+      lastOkAt: now,
+      lastError: "",
+      consecutiveFailures: 0
+    });
+    return data;
+  }
+
+  function applyHealthFailure(err) {
+    const now = Date.now();
+    const failures = Number(healthState.consecutiveFailures || 0) + 1;
+    const keepHealthy =
+      hasRecentHealthyResult(now) && failures < HEALTH_OFFLINE_FAILURES;
+    setHealthState({
+      status: keepHealthy ? getLastKnownHealthyStatus() : "offline",
+      inFlight: false,
+      lastError: err && err.message ? err.message : String(err || ""),
+      consecutiveFailures: failures
+    });
+    return healthState.health || { ok: false };
+  }
+
   function probeHealth(force) {
     const now = Date.now();
     if (!force && healthCache && now - healthAt < HEALTH_TTL_MS) {
       return Promise.resolve(healthCache);
     }
-    return fetchJson(TILE_SERVER + "/health", {
+    if (healthRequest) {
+      return healthRequest;
+    }
+    const keepHealthy = hasRecentHealthyResult(now);
+    setHealthState({
+      status: keepHealthy ? getLastKnownHealthyStatus() : "checking",
+      inFlight: true
+    });
+    healthRequest = fetchJson(TILE_SERVER + "/health", {
       timeoutMs: 5000
     })
       .then(function (data) {
-        healthCache = data;
-        healthAt = now;
-        return data;
+        return applyHealthSuccess(data);
       })
-      .catch(function () {
-        healthCache = { ok: false };
-        healthAt = now;
-        return healthCache;
+      .catch(function (err) {
+        return applyHealthFailure(err);
+      })
+      .finally(function () {
+        healthRequest = null;
       });
+    return healthRequest;
+  }
+
+  function getHealthState() {
+    return cloneHealthState();
+  }
+
+  function subscribeHealth(listener, options) {
+    if (typeof listener !== "function") {
+      return function () {};
+    }
+    healthListeners.add(listener);
+    if (!options || options.emitInitial !== false) {
+      listener(cloneHealthState());
+    }
+    return function () {
+      healthListeners.delete(listener);
+    };
+  }
+
+  function ensureHealthPolling(options) {
+    const opts = options || {};
+    const intervalMs = Number(opts.intervalMs) > 0 ? Number(opts.intervalMs) : HEALTH_POLL_MS;
+    const retryMs = Number(opts.retryMs) > 0 ? Number(opts.retryMs) : HEALTH_RETRY_MS;
+
+    function scheduleNext(delayMs) {
+      if (healthPollTimer) {
+        window.clearTimeout(healthPollTimer);
+      }
+      healthPollTimer = window.setTimeout(function () {
+        probeHealth(true).finally(function () {
+          const snapshot = getHealthState();
+          const nextDelay = snapshot.status === "offline" ? retryMs : intervalMs;
+          scheduleNext(nextDelay);
+        });
+      }, delayMs);
+    }
+
+    if (healthPollStarted) {
+      return;
+    }
+    healthPollStarted = true;
+    if (healthState.status === "idle") {
+      setHealthState({ status: "checking" });
+    }
+    probeHealth(true).finally(function () {
+      const snapshot = getHealthState();
+      scheduleNext(snapshot.status === "offline" ? retryMs : intervalMs);
+    });
   }
 
   function isTerrainAvailable() {
@@ -261,9 +411,8 @@
     if (!bbox) {
       return Promise.reject(new Error("无效测区多边形"));
     }
-    return probeHealth(false).then(function (health) {
-      const terrainReady = !!(health && health.ok && health.terrainReady);
-      if (terrainReady && !opts.force) {
+    return estimateTerrainPrefetch(bbox).then(function (estimate) {
+      if (estimate && estimate.ok && Number(estimate.missing || 0) <= 0 && !opts.force) {
         if (typeof opts.onProgress === "function") {
           opts.onProgress({ running: false, message: "完成", done: 0, total: 0, cached: true });
         }
@@ -306,6 +455,9 @@
   window.TerrainService = {
     TILE_SERVER: TILE_SERVER,
     probeHealth: probeHealth,
+    getHealthState: getHealthState,
+    subscribeHealth: subscribeHealth,
+    ensureHealthPolling: ensureHealthPolling,
     isTerrainAvailable: isTerrainAvailable,
     sampleElevation: sampleElevation,
     sampleElevationBatch: sampleElevationBatch,

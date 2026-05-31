@@ -3,7 +3,6 @@
  */
 (function () {
   const TILE_API = typeof window.TILE_SERVER === "string" ? window.TILE_SERVER : "http://127.0.0.1:8768";
-  const HEALTH_MS = 10000;
 
   function $(id) {
     return document.getElementById(id);
@@ -19,38 +18,46 @@
     el.classList.toggle("map-tile-status--err", ok === false);
   }
 
-  function pollHealth() {
-    fetch(TILE_API + "/health", { method: "GET", mode: "cors", cache: "no-store" })
-      .then(function (r) {
-        return r.ok ? r.json() : null;
-      })
-      .then(function (data) {
-        if (!data || !data.ok) {
-          setStatus("瓦片服务离线", false);
-          return;
-        }
-        const cached = data.cachedTiles != null ? data.cachedTiles : 0;
-        const terrainCached = data.cachedTerrainTiles != null ? data.cachedTerrainTiles : 0;
-        const pf = data.prefetch || {};
-        const tpf = data.terrainPrefetch || {};
-        let extra = "";
-        if (pf.running) {
-          extra = " · 影像 " + (pf.done || 0) + "/" + (pf.total || 0);
-        }
-        if (tpf.running) {
-          extra += " · 地形 " + (tpf.done || 0) + "/" + (tpf.total || 0);
-        }
-        const terrainNote = data.terrainReady ? " · 地形就绪" : terrainCached ? " · 地形 " + terrainCached : "";
-        setStatus("缓存 " + cached + " 张" + terrainNote + extra, true);
-      })
-      .catch(function () {
-        setStatus("瓦片服务离线", false);
-      });
+  function renderHealth(snapshot) {
+    if (!snapshot) {
+      setStatus("检测中…", null);
+      return;
+    }
+    if (snapshot.status === "offline") {
+      setStatus("瓦片服务离线", false);
+      return;
+    }
+    const health = snapshot.health;
+    if (!health || !health.ok) {
+      if (snapshot.status === "checking" || snapshot.status === "idle") {
+        setStatus("检测中…", null);
+        return;
+      }
+      setStatus("瓦片服务离线", false);
+      return;
+    }
+    const cached = health.cachedTiles != null ? health.cachedTiles : 0;
+    const terrainCached = health.cachedTerrainTiles != null ? health.cachedTerrainTiles : 0;
+    const pf = health.prefetch || {};
+    const tpf = health.terrainPrefetch || {};
+    let extra = "";
+    if (pf.running) {
+      extra = " · 影像 " + (pf.done || 0) + "/" + (pf.total || 0);
+    }
+    if (tpf.running) {
+      extra += " · 地形 " + (tpf.done || 0) + "/" + (tpf.total || 0);
+    }
+    if (snapshot.inFlight && snapshot.lastError) {
+      extra += " · 重试中";
+    }
+    const terrainNote = health.terrainReady ? " · 地形就绪" : terrainCached ? " · 地形 " + terrainCached : "";
+    setStatus("缓存 " + cached + " 张" + terrainNote + extra, true);
   }
 
   function wireUi() {
     const cacheOnly = $("mapCacheOnly");
     const prefetchBtn = $("mapPrefetchBtn");
+    let bindTimer = 0;
 
     if (cacheOnly && typeof window.getGcsMapCacheOnly === "function") {
       cacheOnly.checked = window.getGcsMapCacheOnly();
@@ -79,14 +86,25 @@
       });
     }
 
-    if (typeof window.probeTileServer === "function") {
-      window.probeTileServer().then(function () {
-        pollHealth();
-      });
-    } else {
-      pollHealth();
+    function bindHealth() {
+      const TS = window.TerrainService;
+      if (TS && typeof TS.subscribeHealth === "function") {
+        TS.subscribeHealth(renderHealth);
+        if (typeof TS.ensureHealthPolling === "function") {
+          TS.ensureHealthPolling();
+        } else if (typeof TS.probeHealth === "function") {
+          TS.probeHealth(true).then(function () {
+            if (typeof TS.getHealthState === "function") {
+              renderHealth(TS.getHealthState());
+            }
+          });
+        }
+      } else {
+        setStatus("检测中…", null);
+        bindTimer = window.setTimeout(bindHealth, 1000);
+      }
     }
-    setInterval(pollHealth, HEALTH_MS);
+    bindHealth();
   }
 
   if (document.readyState === "loading") {

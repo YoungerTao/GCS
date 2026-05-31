@@ -66,14 +66,28 @@
       });
   }
 
+  function canSendTerrainData() {
+    return (
+      window._gcsConnState === "connected" &&
+      typeof window.sendMavlinkV2 === "function" &&
+      !!window.writer
+    );
+  }
+
   function sendTerrainDataRows(rows) {
-    if (typeof window.sendMavlinkV2 !== "function") {
+    if (!canSendTerrainData()) {
       return Promise.resolve();
     }
     let chain = Promise.resolve();
     rows.forEach(function (row) {
       chain = chain.then(function () {
         return window.sendMavlinkV2(MSG_TERRAIN_DATA, packTerrainData(row), CRC_TERRAIN_DATA);
+      }).catch(function (err) {
+        const message = err && err.message ? err.message : String(err || "");
+        if (/未连接串口|not connected/i.test(message) || !canSendTerrainData()) {
+          return;
+        }
+        throw err;
       });
     });
     return chain;
@@ -89,6 +103,12 @@
     return fetchTerrainRows(req).then(function (rows) {
       terrainDataRowCount += rows.length;
       return sendTerrainDataRows(rows);
+    }).catch(function (err) {
+      const message = err && err.message ? err.message : String(err || "");
+      if (/未连接串口|not connected/i.test(message) || !canSendTerrainData()) {
+        return;
+      }
+      throw err;
     });
   }
 
@@ -104,6 +124,80 @@
       ok: enabled,
       warning: enabled ? null : "飞控 TERRAIN_ENABLE 未启用，地形跟随可能无效"
     };
+  }
+
+  function readParam(name) {
+    if (!(window.params instanceof Map) || !window.params.has(name)) {
+      return null;
+    }
+    const value = Number(window.params.get(name));
+    return Number.isFinite(value) ? value : null;
+  }
+
+  /**
+   * 上传前对地形相关飞控参数做综合校核（固定翼额外校核前视/跟随）。
+   * @returns {{ ok:boolean, blocking:boolean, ready:boolean, issues:Array }}
+   */
+  function checkTerrainParamsBeforeUpload(platform) {
+    const isFw = platform === "plane" || platform === "vtol";
+    const issues = [];
+    if (!(window.params instanceof Map) || window.params.size === 0) {
+      return { ok: true, blocking: false, ready: false, issues: issues };
+    }
+
+    const te = readParam("TERRAIN_ENABLE");
+    if (te != null && te !== 1) {
+      issues.push({
+        level: "error",
+        code: "terrain_enable_off",
+        message: "飞控 TERRAIN_ENABLE 未启用（应=1），地形跟随不会生效"
+      });
+    }
+
+    const spacing = readParam("TERRAIN_SPACING");
+    if (spacing != null) {
+      if (spacing >= 100) {
+        issues.push({
+          level: "warning",
+          code: "terrain_spacing_coarse",
+          message:
+            "TERRAIN_SPACING=" +
+            spacing +
+            " m 偏粗，与规划网格(30 m)不匹配，尖峰易被抹平，建议设为 30"
+        });
+      } else if (spacing > 30) {
+        issues.push({
+          level: "info",
+          code: "terrain_spacing",
+          message: "建议 TERRAIN_SPACING 设为 30 m 以匹配规划精度"
+        });
+      }
+    }
+
+    if (isFw) {
+      const lookahd = readParam("TERRAIN_LOOKAHD");
+      if (lookahd != null && lookahd <= 0) {
+        issues.push({
+          level: "warning",
+          code: "terrain_lookahd_off",
+          message: "固定翼 TERRAIN_LOOKAHD=0（无前视），建议设为非零以提前爬升"
+        });
+      }
+      const follow = readParam("TERRAIN_FOLLOW");
+      if (follow === 0) {
+        issues.push({
+          level: "info",
+          code: "terrain_follow_off",
+          message:
+            "TERRAIN_FOLLOW=0：CRUISE/FBWB/RTL 不按地形相对高度（不影响 frame 10 任务航点）"
+        });
+      }
+    }
+
+    const blocking = issues.some(function (i) {
+      return i.level === "error";
+    });
+    return { ok: !blocking, blocking: blocking, ready: true, issues: issues };
   }
 
   let terrainRequestCount = 0;
@@ -155,6 +249,7 @@
     packTerrainData: packTerrainData,
     handleTerrainRequest: handleTerrainRequest,
     checkTerrainEnableBeforeUpload: checkTerrainEnableBeforeUpload,
+    checkTerrainParamsBeforeUpload: checkTerrainParamsBeforeUpload,
     getTerrainGridStatus: getTerrainGridStatus,
     resetTerrainGridStats: resetTerrainGridStats
   };

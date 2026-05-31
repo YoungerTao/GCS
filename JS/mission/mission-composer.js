@@ -40,7 +40,14 @@
       terrainAgMarginM: Number(settings.terrainAgMarginM) || 30,
       terrainAutoPartition: settings.terrainAutoPartition !== false,
       terrainMaxReliefM: Number(settings.terrainMaxReliefM) || 120,
+      terrainMaxSortieMin: Number(settings.terrainMaxSortieMin) || 60,
       terrainMaxClimbRateMps: Number(settings.terrainMaxClimbRateMps) || 3,
+      terrainMaxDescentRateMps:
+        Number(settings.terrainMaxDescentRateMps) ||
+        Number(settings.terrainMaxClimbRateMps) ||
+        3,
+      terrainMaxAglM: Number(settings.terrainMaxAglM) || 200,
+      terrainClimbSmoothing: settings.terrainClimbSmoothing !== false,
       terrainCruiseSpeedMps:
         Number(settings.terrainCruiseSpeedMps || settings.speed) || 20,
       terrainPrefetchOnDraw: settings.terrainPrefetchOnDraw !== false
@@ -89,6 +96,7 @@
     }
     const frame = resolveSurveyFrame(snapshot);
     const mids = SP.buildConnectorPoints(from, to, CONNECTOR_THRESHOLD_M);
+    const connectorAlt = pointAltitude(to, altitude);
     const list = [];
 
     mids.forEach(function (p, index) {
@@ -96,7 +104,7 @@
         MM.createWaypoint({
           lng: p.lng,
           lat: p.lat,
-          alt: altitude,
+          alt: connectorAlt,
           frame: frame,
           command: MM.MAV_CMD.NAV_WAYPOINT,
           source: "connector",
@@ -111,16 +119,62 @@
     return list;
   }
 
+  function pointAltitude(point, fallbackAltitude) {
+    const override = point && Number(point.aglOverride);
+    return Number.isFinite(override) ? override : fallbackAltitude;
+  }
+
+  function buildLoiterClimbWaypoint(point, targetAgl, frame, blockId) {
+    const alt = Number.isFinite(Number(targetAgl)) ? Number(targetAgl) : null;
+    const partial = {
+      lng: point.lng,
+      lat: point.lat,
+      alt: alt,
+      frame: frame,
+      source: "survey",
+      segmentRole: "turn",
+      pathRole: "",
+      blockId: blockId,
+      label: "盘旋爬升",
+      command: MM.MAV_CMD.NAV_LOITER_TO_ALT,
+      row: point.row,
+      segment: point.segment
+    };
+    if (FWP) {
+      Object.assign(
+        partial,
+        FWP.planeLoiterToAltFields(
+          FWP.signedLoiterRadiusMeters(FWP.FW_SURVEY_TURN_LOITER_RADIUS_M, true),
+          alt,
+          FWP.FW_LOITER_XTRACK_TANGENT
+        )
+      );
+    }
+    return MM.createWaypoint(partial);
+  }
+
   function surveyPointsToWaypoints(points, altitude, platform, blockId, snapshot) {
     const isFw = platform === "plane" || platform === "vtol";
     const frame = resolveSurveyFrame(snapshot);
-    return (points || []).map(function (point, index) {
+    const out = [];
+    (points || []).forEach(function (point, index) {
       const role = point.segmentRole || "transect";
       const pathRole = point.pathRole || "";
+      const ptAlt = pointAltitude(point, altitude);
+      if (isFw && point.loiterClimbBefore && point.loiterClimbBefore.targetAgl != null) {
+        out.push(
+          buildLoiterClimbWaypoint(
+            point,
+            point.loiterClimbBefore.targetAgl,
+            frame,
+            blockId
+          )
+        );
+      }
       const partial = {
         lng: point.lng,
         lat: point.lat,
-        alt: altitude,
+        alt: ptAlt,
         frame: frame,
         source: "survey",
         segmentRole: role,
@@ -139,7 +193,7 @@
             partial,
             FWP.planeLoiterToAltFields(
               FWP.signedLoiterRadiusMeters(FWP.FW_SURVEY_TURN_LOITER_RADIUS_M, true),
-              altitude,
+              ptAlt,
               FWP.FW_LOITER_XTRACK_TANGENT
             )
           );
@@ -152,8 +206,9 @@
       } else if (index === 0) {
         partial.label = "测线";
       }
-      return MM.createWaypoint(partial);
+      out.push(MM.createWaypoint(partial));
     });
+    return out;
   }
 
   function surveyWaypointsWithCameraCommands(surveyWaypoints, snapshot) {
@@ -183,6 +238,39 @@
     });
   }
 
+  function applyTerrainClimbToRoute(routePoints, snapshot, platform, block) {
+    const isFw = platform === "plane" || platform === "vtol";
+    const solver = window.TerrainClimbSolver;
+    if (
+      !isFw ||
+      !solver ||
+      !snapshot ||
+      !snapshot.useTerrainFollowing ||
+      !Array.isArray(routePoints) ||
+      routePoints.length < 2
+    ) {
+      return routePoints;
+    }
+    const profile =
+      block && Array.isArray(block.storedProfile) && block.storedProfile.length
+        ? block.storedProfile
+        : block && Array.isArray(block.previewProfile)
+          ? block.previewProfile
+          : null;
+    if (!profile || profile.length < 2) {
+      return routePoints;
+    }
+    const result = solver.solve({
+      path: routePoints,
+      profile: profile,
+      settings: snapshot,
+      platform: platform
+    });
+    return result && result.applied && Array.isArray(result.adjustedPath)
+      ? result.adjustedPath
+      : routePoints;
+  }
+
   function appendBlockToMission(mission, block, platform, appendRtl) {
     const snapshot = block.paramsSnapshot || {};
     const altitude = snapshot.surveyAltitude;
@@ -190,27 +278,47 @@
       snapshot.lineSpacingMeters ||
       Math.max(4, (snapshot.footprintWidthMeters || 60) * (1 - (snapshot.sideOverlap || 0.7)));
 
-    let pathOpts = pathOptionsFromSnapshot(snapshot, lineSpacing);
-    if (snapshot.surveyHeadingDeg == null && SP && SP.pickBestSurveyHeadingDegrees) {
-      const autoDeg = SP.pickBestSurveyHeadingDegrees(
-        block.polygon,
-        snapshot.sideOverlap,
-        pathOpts
-      );
-      if (autoDeg != null) {
-        pathOpts.headingDegrees = autoDeg;
-        snapshot.surveyHeadingDeg = autoDeg;
+    let rawPath = Array.isArray(block.pathPoints)
+      ? block.pathPoints.map(function (point) {
+          return Object.assign({}, point);
+        })
+      : null;
+    if (!rawPath || !rawPath.length) {
+      let pathOpts = pathOptionsFromSnapshot(snapshot, lineSpacing);
+      if (snapshot.surveyHeadingDeg == null && SP && SP.pickBestSurveyHeadingDegrees) {
+        const autoDeg = SP.pickBestSurveyHeadingDegrees(
+          block.polygon,
+          snapshot.sideOverlap,
+          pathOpts
+        );
+        if (autoDeg != null) {
+          pathOpts.headingDegrees = autoDeg;
+          snapshot.surveyHeadingDeg = autoDeg;
+        }
       }
+      rawPath = SP
+        ? SP.generateSurveyPath(block.polygon, snapshot.sideOverlap, pathOpts)
+        : [];
+    }
+    const rawIsRouteLegs =
+      Array.isArray(rawPath) &&
+      rawPath.length > 0 &&
+      rawPath[0] &&
+      rawPath[0].segmentRole != null;
+    let routePoints;
+    if (rawIsRouteLegs) {
+      // 预览路径已是测线腿（含 segmentRole/pathRole），不要二次拆分，
+      // 否则会丢失 role 而把每个点都判成转弯并按 FW_MAX_SEGMENT_M 重复打碎。
+      routePoints = rawPath;
+    } else if (SP && SP.buildSurveyMissionLegsFromPath) {
+      routePoints = SP.buildSurveyMissionLegsFromPath(rawPath, platform);
+    } else if (SP) {
+      routePoints = SP.extractSurveyRouteWaypoints(rawPath, platform);
+    } else {
+      routePoints = block.polygon;
     }
 
-    const rawPath = SP
-      ? SP.generateSurveyPath(block.polygon, snapshot.sideOverlap, pathOpts)
-      : [];
-    const routePoints = SP
-      ? SP.buildSurveyMissionLegsFromPath
-        ? SP.buildSurveyMissionLegsFromPath(rawPath, platform)
-        : SP.extractSurveyRouteWaypoints(rawPath, platform)
-      : block.polygon;
+    routePoints = applyTerrainClimbToRoute(routePoints, snapshot, platform, block);
 
     let next = MM.stripRtlWaypoints(mission);
     const prev = lastMissionPoint(next);
@@ -247,6 +355,9 @@
 
     block.waypointCount = routePoints.length;
     block.paramsSnapshot = snapshot;
+    block.pathPoints = rawPath.map(function (point) {
+      return Object.assign({}, point);
+    });
 
     return {
       waypoints: next,
@@ -344,6 +455,38 @@
     };
   }
 
+  function createSurveyBlockFromPreview(previewBlock, settings, order, fallbackPolygon) {
+    const block = createSurveyBlock(
+      (previewBlock && previewBlock.polygon) || fallbackPolygon || [],
+      (previewBlock && previewBlock.paramsSnapshot) || settings || {},
+      order
+    );
+    if (previewBlock && previewBlock.paramsSnapshot) {
+      block.paramsSnapshot = Object.assign({}, previewBlock.paramsSnapshot);
+    }
+    if (previewBlock && Array.isArray(previewBlock.previewPath)) {
+      block.pathPoints = previewBlock.previewPath.map(function (point) {
+        return Object.assign({}, point);
+      });
+      block.previewPath = previewBlock.previewPath.map(function (point) {
+        return Object.assign({}, point);
+      });
+      block.waypointCount = block.pathPoints.length;
+    }
+    if (previewBlock && Array.isArray(previewBlock.previewProfile)) {
+      block.storedProfile = previewBlock.previewProfile.slice();
+      block.previewProfile = previewBlock.previewProfile.slice();
+    }
+    if (previewBlock && Array.isArray(previewBlock.previewIssues)) {
+      block.storedIssues = previewBlock.previewIssues.slice();
+      block.previewIssues = previewBlock.previewIssues.slice();
+    }
+    if (previewBlock) {
+      block.terrainPlanned = previewBlock.terrainPlanned !== false;
+    }
+    return block;
+  }
+
   function migrateLegacySurveyWaypoints(mission, blocks) {
     if ((blocks && blocks.length) || !mission || !mission.length) {
       return blocks || [];
@@ -369,6 +512,7 @@
 
   window.MissionComposer = {
     createSurveyBlock: createSurveyBlock,
+    createSurveyBlockFromPreview: createSurveyBlockFromPreview,
     appendBlockToMission: appendBlockToMission,
     rebuildMissionFromBlocks: rebuildMissionFromBlocks,
     removeLastBlock: removeLastBlock,

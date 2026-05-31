@@ -105,7 +105,7 @@
       const distanceSq = dx * dx + dy * dy;
       if (distanceSq > bestLength) {
         bestLength = distanceSq;
-        bestHeading = Math.atan2(dy, dx);
+        bestHeading = Math.atan2(dx, dy);
       }
     }
     return bestHeading;
@@ -215,6 +215,84 @@
     return total;
   }
 
+  /**
+   * 粗略估算一个测区的单架次航时（分钟），用于自动切块的航时软约束。
+   * 计入三部分：巡测直线、转弯盘旋（固定翼半圈弧长）、地形爬升。
+   * 仅服务于切块判断，不写入任务航点。
+   * @param {Array<{lng:number,lat:number}>} polygon
+   * @param {Object} settings 测绘设置（含 sideOverlap/lineSpacing/速度/爬升率等）
+   * @param {string} platform copter|plane|vtol
+   * @param {Object} terrainStats { relief } 该子块高差
+   * @returns {{minutes:number, seconds:number, lengthM:number, turns:number,
+   *            breakdown:{cruise:number, turns:number, climb:number}}}
+   */
+  function estimateBlockFlightTime(polygon, settings, platform, terrainStats) {
+    const cfg = settings || {};
+    const cruiseSpeed = Math.max(
+      1,
+      Number(cfg.terrainCruiseSpeedMps) || Number(cfg.speed) || 20
+    );
+    const climbRate = Math.max(0.3, Number(cfg.terrainMaxClimbRateMps) || 3);
+    const lineSpacing = Math.max(
+      4,
+      Number(cfg.lineSpacingMeters) ||
+        (Number(cfg.footprintWidthMeters) || 60) * (1 - (Number(cfg.sideOverlap) || 0.7))
+    );
+    const opts = {
+      turnAroundMeters: cfg.turnAroundMeters,
+      entryCorner: cfg.surveyEntryCorner,
+      footprintWidthMeters: cfg.footprintWidthMeters,
+      lineSpacingMeters: lineSpacing
+    };
+    if (Number.isFinite(Number(cfg.surveyHeadingDeg))) {
+      opts.headingDegrees = Number(cfg.surveyHeadingDeg);
+    }
+    const path = generateSurveyPath(polygon, cfg.sideOverlap, opts);
+    const lengthM = estimatePathLengthMeters(path);
+
+    let rowCount = 0;
+    let lastRow = null;
+    path.forEach(function (point) {
+      if (point.row !== lastRow) {
+        rowCount += 1;
+        lastRow = point.row;
+      }
+    });
+    const turns = Math.max(0, rowCount - 1);
+
+    const fw = window.FixedWingParams;
+    const isFw =
+      fw && typeof fw.isFixedWingPlatform === "function"
+        ? fw.isFixedWingPlatform(platform)
+        : platform === "plane" || platform === "vtol";
+    const turnRadius = (fw && fw.FW_SURVEY_TURN_LOITER_RADIUS_M) || 80;
+    // 固定翼每次掉头按半圈盘旋弧长（π·R）计；多旋翼掉头开销忽略。
+    const turnLengthM = isFw ? turns * Math.PI * turnRadius : 0;
+
+    const relief = Math.max(0, Number(terrainStats && terrainStats.relief) || 0);
+    // 爬升量估算：主爬升一次（爬上整个高程带），叠加每次掉头的起伏附加（按 30% 高差）。
+    const undulationFactor = 0.3;
+    const totalClimbM = relief * (1 + undulationFactor * turns);
+
+    const cruiseSec = lengthM / cruiseSpeed;
+    const turnSec = turnLengthM / cruiseSpeed;
+    // 保守处理：爬升时间叠加在巡航时间之上（爬升率受限时的附加耗时）。
+    const climbSec = totalClimbM / climbRate;
+    const totalSec = cruiseSec + turnSec + climbSec;
+
+    return {
+      minutes: totalSec / 60,
+      seconds: totalSec,
+      lengthM: lengthM,
+      turns: turns,
+      breakdown: {
+        cruise: cruiseSec / 60,
+        turns: turnSec / 60,
+        climb: climbSec / 60
+      }
+    };
+  }
+
   function generateSurveyPath(polygonVertices, overlapRate, options) {
     const settings = options || {};
     const vertices = Array.isArray(polygonVertices) ? polygonVertices : [];
@@ -227,17 +305,17 @@
       return projectLngLatToMeters(vertex, origin);
     });
 
-    let heading;
+    let rotationRad;
     if (Number.isFinite(settings.headingRadians)) {
-      heading = settings.headingRadians;
+      rotationRad = settings.headingRadians;
     } else if (Number.isFinite(settings.headingDegrees)) {
-      heading = (settings.headingDegrees * Math.PI) / 180;
+      rotationRad = trueNorthBearingDegToLocalRotationRad(settings.headingDegrees);
     } else {
-      heading = getLongestEdgeHeading(localPolygon);
+      rotationRad = trueNorthBearingRadToLocalRotationRad(getLongestEdgeHeading(localPolygon));
     }
 
     const rotatedPolygon = localPolygon.map(function (point) {
-      return rotatePoint(point, -heading);
+      return rotatePoint(point, -rotationRad);
     });
 
     const rowSpacing = Math.max(
@@ -277,7 +355,7 @@
       const orderedPoints = turnAroundMeters > 0 ? [legStart, from, to, legEnd] : [from, to];
 
       orderedPoints.forEach(function (point, pointIndex) {
-        const rotatedBack = inverseRotatePoint(point, -heading);
+        const rotatedBack = inverseRotatePoint(point, -rotationRad);
         const lngLat = projectMetersToLngLat(rotatedBack, origin);
         const previous = path[path.length - 1];
         const role = getSurveyPathPointRole(pointIndex, orderedPoints.length);
@@ -308,8 +386,9 @@
     const localPolygon = vertices.map(function (vertex) {
       return projectLngLatToMeters(vertex, origin);
     });
-    const seedDeg =
-      Math.round(((getLongestEdgeHeading(localPolygon) * 180) / Math.PI + 360) % 180) % 180;
+    const seedDeg = normalizeSurveyHeadingDegrees(
+      (getLongestEdgeHeading(localPolygon) * 180) / Math.PI
+    );
 
     const candidateSet = {};
     candidateSet[seedDeg] = true;
@@ -370,7 +449,215 @@
     return maxRate;
   }
 
-  function pickBestSurveyHeadingWithTerrain(polygonVertices, overlapRate, settings, platform) {
+  function normalizeSurveyHeadingDegrees(value) {
+    const deg = Number(value);
+    if (!Number.isFinite(deg)) {
+      return null;
+    }
+    return ((Math.round(deg) % 180) + 180) % 180;
+  }
+
+  // 全模块统一：真北为 0°，顺时针，东为 90°（与 projectionAlongBearing / computeBearingDegrees 一致）。
+  function trueNorthBearingDegToLocalRotationRad(bearingDeg) {
+    const navRad = (Number(bearingDeg) * Math.PI) / 180;
+    return Math.PI / 2 - navRad;
+  }
+
+  function trueNorthBearingRadToLocalRotationRad(bearingRad) {
+    return Math.PI / 2 - Number(bearingRad);
+  }
+
+  function angleDistanceDeg(a, b) {
+    const left = normalizeSurveyHeadingDegrees(a);
+    const right = normalizeSurveyHeadingDegrees(b);
+    if (left == null || right == null) {
+      return 90;
+    }
+    let delta = Math.abs(left - right) % 180;
+    if (delta > 90) {
+      delta = 180 - delta;
+    }
+    return delta;
+  }
+
+  function pointInPolygonMeters(point, polygon) {
+    if (!point || !polygon || polygon.length < 3) {
+      return false;
+    }
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+      const xi = polygon[i].x;
+      const yi = polygon[i].y;
+      const xj = polygon[j].x;
+      const yj = polygon[j].y;
+      const intersects =
+        yi > point.y !== yj > point.y &&
+        point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || 1e-9) + xi;
+      if (intersects) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  function buildTerrainOrientationGrid(vertices, maxAxisSamples) {
+    const origin = getSurveyOrigin(vertices);
+    const projected = vertices.map(function (vertex) {
+      return projectLngLatToMeters(vertex, origin);
+    });
+    const bounds = projected.reduce(
+      function (acc, point) {
+        acc.minX = Math.min(acc.minX, point.x);
+        acc.maxX = Math.max(acc.maxX, point.x);
+        acc.minY = Math.min(acc.minY, point.y);
+        acc.maxY = Math.max(acc.maxY, point.y);
+        return acc;
+      },
+      { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
+    );
+    const widthM = Math.max(1, bounds.maxX - bounds.minX);
+    const heightM = Math.max(1, bounds.maxY - bounds.minY);
+    const axisLimit = Math.max(12, Number(maxAxisSamples) || 28);
+    const spacing = Math.max(30, Math.max(widthM, heightM) / Math.max(2, axisLimit - 1));
+    const cols = Math.min(axisLimit, Math.max(6, Math.floor(widthM / spacing) + 1));
+    const rows = Math.min(axisLimit, Math.max(6, Math.floor(heightM / spacing) + 1));
+    const stepX = cols > 1 ? widthM / (cols - 1) : widthM;
+    const stepY = rows > 1 ? heightM / (rows - 1) : heightM;
+    const samplePoints = [];
+    const grid = [];
+    let insideCount = 0;
+
+    for (let row = 0; row < rows; row += 1) {
+      const y = bounds.minY + stepY * row;
+      const gridRow = [];
+      for (let col = 0; col < cols; col += 1) {
+        const x = bounds.minX + stepX * col;
+        const inside = pointInPolygonMeters({ x: x, y: y }, projected);
+        const ll = projectMetersToLngLat({ x: x, y: y }, origin);
+        const cell = { x: x, y: y, lat: ll.lat, lng: ll.lng, inside: inside, z: null };
+        if (inside) {
+          insideCount += 1;
+          samplePoints.push({ lat: ll.lat, lng: ll.lng });
+        }
+        gridRow.push(cell);
+      }
+      grid.push(gridRow);
+    }
+
+    return {
+      origin: origin,
+      projected: projected,
+      bounds: bounds,
+      rows: rows,
+      cols: cols,
+      stepX: stepX,
+      stepY: stepY,
+      grid: grid,
+      samplePoints: samplePoints,
+      insideCount: insideCount
+    };
+  }
+
+  function applyTerrainGridSamples(gridState, samples) {
+    if (!gridState || !Array.isArray(gridState.grid)) {
+      return {
+        validCount: 0,
+        validRatio: 0,
+        minElevation: Infinity,
+        maxElevation: -Infinity
+      };
+    }
+    let sampleIndex = 0;
+    let validCount = 0;
+    let minElevation = Infinity;
+    let maxElevation = -Infinity;
+    for (let row = 0; row < gridState.rows; row += 1) {
+      for (let col = 0; col < gridState.cols; col += 1) {
+        const cell = gridState.grid[row][col];
+        if (!cell.inside) {
+          continue;
+        }
+        const sample = samples[sampleIndex];
+        sampleIndex += 1;
+        const elevation =
+          sample && sample.elevation != null && Number.isFinite(Number(sample.elevation))
+            ? Number(sample.elevation)
+            : null;
+        cell.z = elevation;
+        if (elevation != null) {
+          validCount += 1;
+          minElevation = Math.min(minElevation, elevation);
+          maxElevation = Math.max(maxElevation, elevation);
+        }
+      }
+    }
+    return {
+      validCount: validCount,
+      validRatio: gridState.insideCount ? validCount / gridState.insideCount : 0,
+      minElevation: minElevation,
+      maxElevation: maxElevation
+    };
+  }
+
+  function estimateContourAlignedHeadingFromGrid(gridState) {
+    if (!gridState || !Array.isArray(gridState.grid) || gridState.rows < 3 || gridState.cols < 3) {
+      return null;
+    }
+    let sumCos2 = 0;
+    let sumSin2 = 0;
+    let weightTotal = 0;
+
+    for (let row = 1; row < gridState.rows - 1; row += 1) {
+      for (let col = 1; col < gridState.cols - 1; col += 1) {
+        const center = gridState.grid[row][col];
+        const left = gridState.grid[row][col - 1];
+        const right = gridState.grid[row][col + 1];
+        const up = gridState.grid[row - 1][col];
+        const down = gridState.grid[row + 1][col];
+        if (
+          !center ||
+          !center.inside ||
+          !left ||
+          !right ||
+          !up ||
+          !down ||
+          left.z == null ||
+          right.z == null ||
+          up.z == null ||
+          down.z == null
+        ) {
+          continue;
+        }
+        const dzdx = (Number(right.z) - Number(left.z)) / Math.max(1, 2 * gridState.stepX);
+        const dzdy = (Number(down.z) - Number(up.z)) / Math.max(1, 2 * gridState.stepY);
+        const gradientMag = Math.sqrt(dzdx * dzdx + dzdy * dzdy);
+        if (!Number.isFinite(gradientMag) || gradientMag < 0.002) {
+          continue;
+        }
+        // 等高线切线方向（真北 0°，东 90°）：梯度 (dzdx,dzdy) 指向上坡，切线为 (-dzdy,dzdx) 东/北分量。
+        const tangentRad = Math.atan2(-dzdy, dzdx);
+        const weight = gradientMag * gradientMag;
+        sumCos2 += Math.cos(2 * tangentRad) * weight;
+        sumSin2 += Math.sin(2 * tangentRad) * weight;
+        weightTotal += weight;
+      }
+    }
+
+    if (weightTotal <= 0) {
+      return null;
+    }
+    const dominantRad = 0.5 * Math.atan2(sumSin2, sumCos2);
+    return normalizeSurveyHeadingDegrees((dominantRad * 180) / Math.PI);
+  }
+
+  function resolveSurveyHeadingFallback(vertices, overlapRate, base, externalPreferredDeg) {
+    if (Number.isFinite(Number(externalPreferredDeg))) {
+      return normalizeSurveyHeadingDegrees(Number(externalPreferredDeg));
+    }
+    return pickBestSurveyHeadingDegrees(vertices, overlapRate, base);
+  }
+
+  function pickBestSurveyHeadingWithTerrain(polygonVertices, overlapRate, settings, platform, externalPreferredDeg) {
     const base = {
       turnAroundMeters: settings.turnAroundMeters,
       entryCorner: settings.surveyEntryCorner,
@@ -385,54 +672,175 @@
     const localPolygon = vertices.map(function (vertex) {
       return projectLngLatToMeters(vertex, origin);
     });
-    const seedDeg =
-      Math.round(((getLongestEdgeHeading(localPolygon) * 180) / Math.PI + 360) % 180) % 180;
-    const candidateSet = {};
-    candidateSet[seedDeg] = true;
-    for (let offset = 15; offset < 90; offset += 15) {
-      candidateSet[(seedDeg + offset) % 180] = true;
-      candidateSet[(seedDeg - offset + 180) % 180] = true;
-    }
+    const seedDeg = normalizeSurveyHeadingDegrees(
+      (getLongestEdgeHeading(localPolygon) * 180) / Math.PI
+    );
     const isFw = platform === "plane" || platform === "vtol";
     const w1 = 1;
     const w2 = isFw ? 8 : 3;
     const w3 = isFw ? 12 : 4;
+    const w4 = isFw ? 18 : 8;
     const speed = Number(settings.terrainCruiseSpeedMps || settings.speed) || 20;
     const TS = window.TerrainService;
-    const keys = Object.keys(candidateSet);
     if (!TS || !TS.sampleElevationBatch) {
-      return Promise.resolve(pickBestSurveyHeadingDegrees(vertices, overlapRate, base));
+      return Promise.resolve(
+        resolveSurveyHeadingFallback(vertices, overlapRate, base, externalPreferredDeg)
+      );
     }
-    const tasks = keys.map(function (key) {
-      const deg = Number(key);
-      const path = generateSurveyPath(vertices, overlapRate, Object.assign({}, base, {
-        headingDegrees: deg
-      }));
+
+    function buildHeadingCandidates(startDeg, endDeg, stepDeg) {
+      const seen = {};
+      const list = [];
+      for (let deg = startDeg; deg <= endDeg + 0.001; deg += stepDeg) {
+        const normalized = normalizeSurveyHeadingDegrees(deg);
+        if (normalized == null || seen[normalized]) {
+          continue;
+        }
+        seen[normalized] = true;
+        list.push(normalized);
+      }
+      return list;
+    }
+
+    function evaluateHeading(deg, preferredDeg) {
+      const path = generateSurveyPath(
+        vertices,
+        overlapRate,
+        Object.assign({}, base, { headingDegrees: deg })
+      );
       const pts = path.map(function (p) {
         return { lat: p.lat, lng: p.lng };
       });
-      return TS.sampleElevationBatch(pts, { cacheOnly: true }).then(function (samples) {
-        const elevs = samples.map(function (s) {
-          return s.elevation;
+      if (pts.length < 2) {
+        return Promise.resolve({ deg: deg, score: Infinity });
+      }
+      return TS.sampleElevationBatch(pts, { timeoutMs: 8000 }).then(function (samples) {
+        const elevs = (samples || []).map(function (s) {
+          return s && s.elevation != null ? Number(s.elevation) : null;
         });
+        const validCount = elevs.reduce(function (count, value) {
+          return count + (value == null || !Number.isFinite(value) ? 0 : 1);
+        }, 0);
+        if (validCount < 2) {
+          throw new Error("terrain samples unavailable");
+        }
         const len = estimatePathLengthMeters(path);
         const variance = terrainVarianceAlongPath(path, elevs);
         const climb = maxClimbRateAlongPath(path, elevs, speed);
-        const score = w1 * len + w2 * variance + w3 * climb;
+        const directionPenalty =
+          preferredDeg == null ? 0 : angleDistanceDeg(deg, preferredDeg) * 25;
+        const score = w1 * len + w2 * variance + w3 * climb + w4 * directionPenalty;
         return { deg: deg, score: score };
       });
-    });
-    return Promise.all(tasks).then(function (results) {
-      let asyncBest = seedDeg;
-      let asyncScore = Infinity;
-      results.forEach(function (r) {
-        if (r.score < asyncScore) {
-          asyncScore = r.score;
-          asyncBest = r.deg;
+    }
+
+    function pickBestFromResults(results, fallbackDeg) {
+      let bestDeg = fallbackDeg;
+      let bestScore = Infinity;
+      (results || []).forEach(function (result) {
+        if (!result || !Number.isFinite(result.score)) {
+          return;
+        }
+        if (result.score < bestScore) {
+          bestScore = result.score;
+          bestDeg = result.deg;
         }
       });
-      return asyncBest;
-    });
+      return {
+        deg: bestDeg,
+        score: bestScore
+      };
+    }
+
+    function searchBestHeading(preferredHeading) {
+      const candidateMap = {};
+      buildHeadingCandidates(0, 179, 15).forEach(function (deg) {
+        candidateMap[deg] = true;
+      });
+      if (preferredHeading != null) {
+        buildHeadingCandidates(preferredHeading - 18, preferredHeading + 18, 6).forEach(function (deg) {
+          candidateMap[deg] = true;
+        });
+      }
+      if (seedDeg != null) {
+        buildHeadingCandidates(seedDeg - 18, seedDeg + 18, 6).forEach(function (deg) {
+          candidateMap[deg] = true;
+        });
+      }
+      const coarseCandidates = Object.keys(candidateMap).map(function (key) {
+        return Number(key);
+      });
+      return Promise.all(
+        coarseCandidates.map(function (deg) {
+          return evaluateHeading(deg, preferredHeading);
+        })
+      ).then(function (coarseResults) {
+        const coarseBest = pickBestFromResults(coarseResults, preferredHeading);
+        const fineCandidateMap = {};
+        buildHeadingCandidates(coarseBest.deg - 12, coarseBest.deg + 12, 3).forEach(function (deg) {
+          fineCandidateMap[deg] = true;
+        });
+        if (preferredHeading != null) {
+          buildHeadingCandidates(preferredHeading - 9, preferredHeading + 9, 3).forEach(function (deg) {
+            fineCandidateMap[deg] = true;
+          });
+        }
+        const fineCandidates = Object.keys(fineCandidateMap).map(function (key) {
+          return Number(key);
+        });
+        return Promise.all(
+          fineCandidates.map(function (deg) {
+            return evaluateHeading(deg, preferredHeading);
+          })
+        ).then(function (fineResults) {
+          return pickBestFromResults(fineResults.concat(coarseResults || []), coarseBest.deg).deg;
+        });
+      });
+    }
+
+    const orientationGrid = buildTerrainOrientationGrid(vertices, isFw ? 32 : 28);
+    if (!orientationGrid.samplePoints.length) {
+      return Promise.resolve(
+        resolveSurveyHeadingFallback(vertices, overlapRate, base, externalPreferredDeg)
+      );
+    }
+
+    const externalPreferred = Number.isFinite(Number(externalPreferredDeg))
+      ? Number(externalPreferredDeg)
+      : null;
+    const minGridValidRatio = externalPreferred != null ? 0.28 : 0.65;
+
+    return TS.sampleElevationBatch(orientationGrid.samplePoints, { timeoutMs: 8000 })
+      .then(function (samples) {
+        const stats = applyTerrainGridSamples(orientationGrid, samples || []);
+        if (
+          stats.validRatio < minGridValidRatio ||
+          !Number.isFinite(stats.minElevation) ||
+          !Number.isFinite(stats.maxElevation)
+        ) {
+          throw new Error("terrain orientation samples unavailable");
+        }
+        const contourHeading = estimateContourAlignedHeadingFromGrid(orientationGrid);
+        // If a high-quality global contour heading was supplied from the parent large-polygon
+        // partition step (the reliable "沿着等高线归划" prior computed on the full DEM grid),
+        // use it as the authoritative preferred direction. This guides the full terrain-cost
+        // search (variance + climb + direction penalty) on thin elevation-band sub-polygons
+        // whose own local grid would otherwise be too noisy or fail the 0.65 validRatio.
+        const preferredHeading =
+          externalPreferred != null
+            ? externalPreferred
+            : (contourHeading != null ? contourHeading : seedDeg);
+        return searchBestHeading(preferredHeading);
+      })
+      .catch(function () {
+        const fallbackPreferred = externalPreferred != null ? externalPreferred : null;
+        if (fallbackPreferred != null) {
+          return searchBestHeading(fallbackPreferred).catch(function () {
+            return fallbackPreferred;
+          });
+        }
+        return resolveSurveyHeadingFallback(vertices, overlapRate, base, externalPreferredDeg);
+      });
   }
 
   function pushUniqueCorner(corners, point, pathRole) {
@@ -447,6 +855,12 @@
       if (point.segment != null && last.segment == null) {
         last.segment = point.segment;
       }
+      if (point.aglOverride != null && last.aglOverride == null) {
+        last.aglOverride = point.aglOverride;
+      }
+      if (point.loiterClimbBefore && !last.loiterClimbBefore) {
+        last.loiterClimbBefore = point.loiterClimbBefore;
+      }
       return;
     }
     corners.push({
@@ -454,7 +868,9 @@
       lat: point.lat,
       pathRole: pathRole || point.role || "",
       row: point.row,
-      segment: point.segment
+      segment: point.segment,
+      aglOverride: point.aglOverride,
+      loiterClimbBefore: point.loiterClimbBefore
     });
   }
 
@@ -634,7 +1050,9 @@
           row: point.row,
           segment: point.segment,
           label: label,
-          transectIndex: transectIndex
+          transectIndex: transectIndex,
+          aglOverride: point.aglOverride,
+          loiterClimbBefore: point.loiterClimbBefore
         });
       });
     });
@@ -673,7 +1091,14 @@
     distanceMetersBetween: distanceMetersBetween,
     computeBearingDegrees: computeBearingDegrees,
     estimatePathLengthMeters: estimatePathLengthMeters,
+    estimateBlockFlightTime: estimateBlockFlightTime,
     computeCameraTriggerDistanceMeters: computeCameraTriggerDistanceMeters,
+    buildTerrainOrientationGrid: buildTerrainOrientationGrid,
+    applyTerrainGridSamples: applyTerrainGridSamples,
+    estimateContourAlignedHeadingFromGrid: estimateContourAlignedHeadingFromGrid,
+    trueNorthBearingDegToLocalRotationRad: trueNorthBearingDegToLocalRotationRad,
+    normalizeSurveyHeadingDegrees: normalizeSurveyHeadingDegrees,
+    getSurveyOrigin: getSurveyOrigin,
     CONNECTOR_THRESHOLD_M: 80,
     FW_MAX_SEGMENT_M: FW_MAX_SEGMENT_M
   };

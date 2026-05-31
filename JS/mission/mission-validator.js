@@ -238,7 +238,16 @@
           return;
         }
         chain = chain.then(function (acc) {
-          return TSP.profileForPath(path, snap).then(function (profile) {
+          const stored =
+            block.storedProfile && block.storedProfile.length >= 2
+              ? block.storedProfile
+              : block.previewProfile && block.previewProfile.length >= 2
+                ? block.previewProfile
+                : null;
+          const profilePromise = stored
+            ? Promise.resolve(stored)
+            : TSP.profileForPath(path, snap, platform);
+          return profilePromise.then(function (profile) {
             const profileIssues = TPV.validateTerrainProfile(profile, snap, platform) || [];
             profileIssues.forEach(function (issue) {
               acc.push(

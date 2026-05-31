@@ -22,17 +22,36 @@
     return 2 * R * Math.asin(Math.sqrt(h));
   }
 
+  function pointHasTerrain(point) {
+    if (!point) {
+      return false;
+    }
+    if (point.available === false) {
+      return false;
+    }
+    return point.elevation != null;
+  }
+
+  function effectiveAgl(point, baseAgl) {
+    const override = point && Number(point.aglOverride);
+    return Number.isFinite(override) ? override : baseAgl;
+  }
+
   function findProfileProblemSegments(profile, settings, platform) {
     const issues = [];
     const agl = Number(settings && settings.surveyAltitude) || 300;
     const maxClimb = Number(settings && settings.terrainMaxClimbRateMps) || 3;
+    const maxDescent =
+      Number(settings && settings.terrainMaxDescentRateMps) ||
+      Number(settings && settings.terrainMaxClimbRateMps) ||
+      3;
     const speed = Number(settings && settings.terrainCruiseSpeedMps || (settings && settings.speed)) || 20;
     const isFw = platform === "plane" || platform === "vtol";
     const pts = profile || [];
 
     let missing = 0;
     pts.forEach(function (p) {
-      if (!p.available || p.elevation == null) {
+      if (!pointHasTerrain(p)) {
         missing += 1;
       }
     });
@@ -43,7 +62,7 @@
     for (let i = 1; i < pts.length; i += 1) {
       const a = pts[i - 1];
       const b = pts[i];
-      if (!a.available || !b.available || a.elevation == null || b.elevation == null) {
+      if (!pointHasTerrain(a) || !pointHasTerrain(b)) {
         issues.push({
           fromIndex: i - 1,
           toIndex: i,
@@ -56,15 +75,17 @@
         });
         continue;
       }
-      const targetA = a.elevation + agl;
-      const targetB = b.elevation + agl;
+      const targetA = a.elevation + effectiveAgl(a, agl);
+      const targetB = b.elevation + effectiveAgl(b, agl);
       const dist = haversineM(a, b);
       if (dist < 1) {
         continue;
       }
       const dt = dist / Math.max(1, speed);
-      const climbRate = Math.abs(targetB - targetA) / dt;
-      if (climbRate > maxClimb) {
+      const delta = targetB - targetA;
+      const climbRate = Math.abs(delta) / dt;
+      const limit = delta >= 0 ? maxClimb : maxDescent;
+      if (climbRate > limit) {
         issues.push({
           fromIndex: i - 1,
           toIndex: i,

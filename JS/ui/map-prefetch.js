@@ -10,6 +10,8 @@
   const setupMaps = new WeakSet();
   let pollTimer = null;
   let currentBounds = null;
+  let estimateSeq = 0;
+  let latestEstimate = null;
 
   function $(id) {
     return document.getElementById(id);
@@ -113,6 +115,15 @@
     });
   }
 
+  function estimateTerrainPrefetch(bounds) {
+    const body = terrainBboxPayload(bounds);
+    return fetchJson(TILE_API + "/terrain/prefetch?dryRun=1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  }
+
   function pollTerrainPrefetchStatus() {
     return fetchJson(TILE_API + "/terrain/prefetch/status", { method: "GET", cache: "no-store" });
   }
@@ -140,32 +151,92 @@
 
   function updateEstimateUI(bounds) {
     const estEl = $("gcsPrefetchEstimate");
+    const startBtn = $("gcsPrefetchStartBtn");
+    const terrainCb = $("gcsPrefetchTerrain");
+    const wantTerrain = terrainCb ? terrainCb.checked : false;
     if (!bounds) {
       if (estEl) {
         estEl.textContent = "";
       }
+      if (startBtn) {
+        startBtn.disabled = true;
+      }
+      latestEstimate = null;
       return;
     }
+    const seq = ++estimateSeq;
     if (estEl) {
       estEl.textContent = "估算中…";
     }
-    estimatePrefetch(boundsPayload(bounds))
-      .then(function (res) {
-        if (!estEl) {
+    if (startBtn) {
+      startBtn.disabled = true;
+    }
+    Promise.all([
+      estimatePrefetch(boundsPayload(bounds)),
+      wantTerrain ? estimateTerrainPrefetch(bounds) : Promise.resolve(null)
+    ])
+      .then(function (results) {
+        const res = results[0];
+        const terrainRes = results[1];
+        if (seq !== estimateSeq || !estEl) {
           return;
         }
         if (!res.ok || !res.body || !res.body.ok) {
           estEl.textContent = "无法估算（瓦片服务未就绪）";
+          latestEstimate = null;
           return;
         }
-        estEl.textContent =
-          "约 " +
-          (res.body.total || 0) +
-          " 张瓦片，~" +
-          formatBytes(res.body.estimateBytes || 0);
+        const total = res.body.total || 0;
+        const cached = Number(res.body.cached || 0);
+        const missing = res.body.missing == null ? null : Number(res.body.missing || 0);
+        let estimateText = "瓦片 " + total + " 张";
+        if (missing != null) {
+          estimateText += "，已缓存 " + cached + "，待下载 " + missing;
+          estimateText += "，约新增 " + formatBytes(res.body.downloadBytes || 0);
+        } else {
+          estimateText += "，总量约 " + formatBytes(res.body.estimateBytes || 0);
+        }
+        let terrainEstimate = null;
+        if (terrainRes && terrainRes.ok && terrainRes.body && terrainRes.body.ok) {
+          const terrainTotal = Number(terrainRes.body.total || 0);
+          const terrainCached = Number(terrainRes.body.cached || 0);
+          const terrainMissing = Number(terrainRes.body.missing || 0);
+          estimateText +=
+            "；地形 " +
+            terrainTotal +
+            " 块，已缓存 " +
+            terrainCached +
+            "，待下载 " +
+            terrainMissing +
+            "，约新增 " +
+            formatBytes(terrainRes.body.downloadBytes || 0);
+          terrainEstimate = {
+            total: terrainTotal,
+            cached: terrainCached,
+            missing: terrainMissing,
+            downloadBytes: Number(terrainRes.body.downloadBytes || 0)
+          };
+        }
+        latestEstimate = {
+          map: {
+            total: total,
+            cached: cached,
+            missing: missing,
+            downloadBytes: res.body.downloadBytes == null ? null : Number(res.body.downloadBytes || 0)
+          },
+          terrain: terrainEstimate
+        };
+        if (res.body.tooLarge) {
+          estEl.textContent = estimateText + "。范围过大，请缩小选区或降低最大级别。";
+          return;
+        }
+        estEl.textContent = estimateText;
+        if (startBtn) {
+          startBtn.disabled = false;
+        }
       })
       .catch(function () {
-        if (estEl) {
+        if (seq === estimateSeq && estEl) {
           estEl.textContent = "估算失败";
         }
       });
@@ -259,9 +330,22 @@
       btn.disabled = true;
     }
     setProgress("启动预取…");
+    if (
+      latestEstimate &&
+      latestEstimate.map &&
+      latestEstimate.map.missing != null &&
+      latestEstimate.map.missing <= 0 &&
+      (!latestEstimate.terrain || latestEstimate.terrain.missing <= 0)
+    ) {
+      setProgress("当前选区已全部缓存，无需重复下载");
+      if (btn) {
+        btn.disabled = false;
+      }
+      return;
+    }
     const terrainCb = $("gcsPrefetchTerrain");
     const wantTerrain = terrainCb ? terrainCb.checked : false;
-    if (wantTerrain) {
+    if (wantTerrain && (!latestEstimate || !latestEstimate.terrain || latestEstimate.terrain.missing > 0)) {
       startTerrainPrefetch(currentBounds).catch(function () {
         /* terrain optional */
       });
@@ -384,6 +468,7 @@
     const stopBtn = $("gcsPrefetchStopBtn");
     const zMin = $("gcsPrefetchZoomMin");
     const zMax = $("gcsPrefetchZoomMax");
+    const terrainCb = $("gcsPrefetchTerrain");
 
     if (closeBtn) {
       closeBtn.addEventListener("click", function () {
@@ -415,6 +500,9 @@
     }
     if (zMax) {
       zMax.addEventListener("change", refreshEstimate);
+    }
+    if (terrainCb) {
+      terrainCb.addEventListener("change", refreshEstimate);
     }
   }
 
