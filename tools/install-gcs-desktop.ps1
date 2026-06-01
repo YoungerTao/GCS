@@ -40,6 +40,11 @@ New-GcsShortcut (Join-Path $StartMenuDir "GCS.lnk")
 Write-Host "Desktop and Start Menu shortcut created: GCS -> $Launcher"
 Write-Host "Daily use: double-click the desktop GCS icon."
 
+$ie4u = Join-Path $env:SystemRoot "System32\ie4uinit.exe"
+if (Test-Path -LiteralPath $ie4u) {
+    Start-Process -FilePath $ie4u -ArgumentList "-show" -Wait -NoNewWindow -ErrorAction SilentlyContinue | Out-Null
+}
+
 if ($WatchdogStartup) {
     $Watchdog = Join-Path $Root "tools\gcs_watchdog.py"
     $PyCmd = Get-Command pythonw -ErrorAction SilentlyContinue

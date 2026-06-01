@@ -40,11 +40,11 @@
   function findProfileProblemSegments(profile, settings, platform) {
     const issues = [];
     const agl = Number(settings && settings.surveyAltitude) || 300;
-    const maxClimb = Number(settings && settings.terrainMaxClimbRateMps) || 3;
+    const maxClimb = Number(settings && settings.terrainMaxClimbRateMps) || 4;
     const maxDescent =
       Number(settings && settings.terrainMaxDescentRateMps) ||
       Number(settings && settings.terrainMaxClimbRateMps) ||
-      3;
+      4;
     const speed = Number(settings && settings.terrainCruiseSpeedMps || (settings && settings.speed)) || 20;
     const isFw = platform === "plane" || platform === "vtol";
     const pts = profile || [];
@@ -92,6 +92,7 @@
           level: isFw ? "error" : "warning",
           code: "terrain_climb_rate",
           climbRate: climbRate,
+          tone: climbRate > 6 ? "danger" : "warn",
           latlngs: [
             { lat: a.lat, lng: a.lng },
             { lat: b.lat, lng: b.lng }

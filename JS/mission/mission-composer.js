@@ -41,7 +41,7 @@
       terrainAutoPartition: settings.terrainAutoPartition !== false,
       terrainMaxReliefM: Number(settings.terrainMaxReliefM) || 120,
       terrainMaxSortieMin: Number(settings.terrainMaxSortieMin) || 60,
-      terrainMaxClimbRateMps: Number(settings.terrainMaxClimbRateMps) || 3,
+      terrainMaxClimbRateMps: Number(settings.terrainMaxClimbRateMps) || 4,
       terrainMaxDescentRateMps:
         Number(settings.terrainMaxDescentRateMps) ||
         Number(settings.terrainMaxClimbRateMps) ||
@@ -124,35 +124,6 @@
     return Number.isFinite(override) ? override : fallbackAltitude;
   }
 
-  function buildLoiterClimbWaypoint(point, targetAgl, frame, blockId) {
-    const alt = Number.isFinite(Number(targetAgl)) ? Number(targetAgl) : null;
-    const partial = {
-      lng: point.lng,
-      lat: point.lat,
-      alt: alt,
-      frame: frame,
-      source: "survey",
-      segmentRole: "turn",
-      pathRole: "",
-      blockId: blockId,
-      label: "盘旋爬升",
-      command: MM.MAV_CMD.NAV_LOITER_TO_ALT,
-      row: point.row,
-      segment: point.segment
-    };
-    if (FWP) {
-      Object.assign(
-        partial,
-        FWP.planeLoiterToAltFields(
-          FWP.signedLoiterRadiusMeters(FWP.FW_SURVEY_TURN_LOITER_RADIUS_M, true),
-          alt,
-          FWP.FW_LOITER_XTRACK_TANGENT
-        )
-      );
-    }
-    return MM.createWaypoint(partial);
-  }
-
   function surveyPointsToWaypoints(points, altitude, platform, blockId, snapshot) {
     const isFw = platform === "plane" || platform === "vtol";
     const frame = resolveSurveyFrame(snapshot);
@@ -161,16 +132,6 @@
       const role = point.segmentRole || "transect";
       const pathRole = point.pathRole || "";
       const ptAlt = pointAltitude(point, altitude);
-      if (isFw && point.loiterClimbBefore && point.loiterClimbBefore.targetAgl != null) {
-        out.push(
-          buildLoiterClimbWaypoint(
-            point,
-            point.loiterClimbBefore.targetAgl,
-            frame,
-            blockId
-          )
-        );
-      }
       const partial = {
         lng: point.lng,
         lat: point.lat,

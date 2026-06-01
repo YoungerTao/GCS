@@ -118,6 +118,14 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 8765  com-bridge     Windows COM 枚举 / 串口桥
 ```
 
+### Windows 一键安装快捷方式
+
+首次给别人使用时，可让对方在项目根目录直接双击：
+
+- `GCS-安装桌面快捷方式.bat`
+
+它会自动调用 `tools/install-gcs-desktop.ps1`，在桌面和开始菜单创建 `GCS` 快捷方式。之后日常只需要双击桌面的 `GCS` 图标即可启动。
+
 ### 以后交付客户时再用（现在可忽略）
 
 | 文件 | 用途 |

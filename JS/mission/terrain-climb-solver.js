@@ -87,7 +87,7 @@
   function resolveOpts(settings) {
     const agl = Math.max(1, Number(settings && settings.surveyAltitude) || 300);
     const margin = Math.max(0, Number(settings && settings.terrainAgMarginM) || 30);
-    const climb = Math.max(0.2, Number(settings && settings.terrainMaxClimbRateMps) || 3);
+    const climb = Math.max(0.2, Number(settings && settings.terrainMaxClimbRateMps) || 4);
     const descentRaw = Number(settings && settings.terrainMaxDescentRateMps);
     const descent = Math.max(0.2, Number.isFinite(descentRaw) ? descentRaw : climb);
     const speed = Math.max(1, Number(settings && (settings.terrainCruiseSpeedMps || settings.speed)) || 20);
@@ -242,36 +242,6 @@
     });
 
     const loiterInserts = [];
-    overCapRegions.forEach(function (region) {
-      const insertIndex = Math.max(0, region.startIndex);
-      const anchor = adjustedPath[insertIndex];
-      const targetAgl = Math.min(opts.maxAgl, region.peakAgl);
-      const loiter = {
-        pathIndex: insertIndex,
-        lat: anchor.lat,
-        lng: anchor.lng,
-        targetAgl: targetAgl
-      };
-      loiterInserts.push(loiter);
-      if (insertIndex < adjustedPath.length) {
-        adjustedPath[insertIndex] = Object.assign({}, adjustedPath[insertIndex], {
-          loiterClimbBefore: { targetAgl: targetAgl }
-        });
-      }
-    });
-
-    if (loiterInserts.length) {
-      issues.push({
-        level: "warning",
-        code: "terrain_loiter_inserted",
-        message:
-          "地形过陡：已在 " +
-          loiterInserts.length +
-          " 处插入盘旋爬升点（AGL 上限 " +
-          Math.round(opts.maxAgl) +
-          " m）"
-      });
-    }
     if (raisedBaselineAgl > opts.agl + 1) {
       issues.push({
         level: "info",

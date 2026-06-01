@@ -45,11 +45,11 @@
     const issues = [];
     const agl = Number(settings.surveyAltitude) || 300;
     const margin = Number(settings.terrainAgMarginM) || 30;
-    const maxClimb = Number(settings.terrainMaxClimbRateMps) || 3;
+    const maxClimb = Number(settings.terrainMaxClimbRateMps) || 4;
     const maxDescent =
       Number(settings.terrainMaxDescentRateMps) ||
       Number(settings.terrainMaxClimbRateMps) ||
-      3;
+      4;
     const speed = Number(settings.terrainCruiseSpeedMps || settings.speed) || 20;
     const isFw = platform === "plane" || platform === "vtol";
     const pts = profile || [];
@@ -190,7 +190,7 @@
         }
       });
       const thresholdMatch = String(climbSegs[0].message || "").match(/超过\s*([\d.]+)\s*m\/s/);
-      const threshold = thresholdMatch ? thresholdMatch[1] : "3";
+      const threshold = thresholdMatch ? thresholdMatch[1] : "4";
       out.push({
         level: climbSegs[0].level || "error",
         code: "terrain_climb_rate_summary",

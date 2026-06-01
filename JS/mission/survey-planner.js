@@ -232,7 +232,7 @@
       1,
       Number(cfg.terrainCruiseSpeedMps) || Number(cfg.speed) || 20
     );
-    const climbRate = Math.max(0.3, Number(cfg.terrainMaxClimbRateMps) || 3);
+    const climbRate = Math.max(0.3, Number(cfg.terrainMaxClimbRateMps) || 4);
     const lineSpacing = Math.max(
       4,
       Number(cfg.lineSpacingMeters) ||

@@ -175,7 +175,7 @@
     terrainAutoPartition: false,
     terrainMaxReliefM: 120,
     terrainMaxSortieMin: 60,
-    terrainMaxClimbRateMps: 3,
+    terrainMaxClimbRateMps: 4,
     terrainMaxDescentRateMps: 3,
     terrainMaxAglM: 200,
     terrainClimbSmoothing: true,
@@ -2165,6 +2165,42 @@
   const TERRAIN_CONTOUR_MIN_VALID_RATIO = 0.7;
   const TERRAIN_CONTOUR_MAIN_STROKE = "#ffd24a";
   const TERRAIN_CONTOUR_MINOR_STROKE = "#f7d774";
+  const TERRAIN_CONTOUR_LABEL_MIN_POINTS = 6;
+
+  function buildViewportPolygonFromMap(map) {
+    if (!map || typeof map.getBounds !== "function") {
+      return [];
+    }
+    const bounds = map.getBounds();
+    if (!bounds) {
+      return [];
+    }
+    const north = bounds.getNorth();
+    const south = bounds.getSouth();
+    const east = bounds.getEast();
+    const west = bounds.getWest();
+    if (
+      !Number.isFinite(north) ||
+      !Number.isFinite(south) ||
+      !Number.isFinite(east) ||
+      !Number.isFinite(west)
+    ) {
+      return [];
+    }
+    return [
+      { lat: north, lng: west },
+      { lat: north, lng: east },
+      { lat: south, lng: east },
+      { lat: south, lng: west }
+    ];
+  }
+
+  function pickContourLabelPoint(polyline) {
+    if (!Array.isArray(polyline) || polyline.length < TERRAIN_CONTOUR_LABEL_MIN_POINTS) {
+      return null;
+    }
+    return polyline[Math.floor(polyline.length / 2)] || null;
+  }
 
   function pointInPolygonMeters(point, polygon) {
     if (!point || !polygon || polygon.length < 3) {
@@ -2568,6 +2604,30 @@
             interactive: false
           }
         ).addTo(layerGroup);
+        if (entry.major) {
+          const labelPoint = pickContourLabelPoint(polyline);
+          if (labelPoint) {
+            window.L.marker([labelPoint.lat, labelPoint.lng], {
+              interactive: false,
+              keyboard: false,
+              zIndexOffset: 200,
+              icon: window.L.divIcon({
+                className: "fp-terrain-contour-label",
+                html:
+                  '<span style="' +
+                  "display:inline-block;padding:1px 5px;border-radius:999px;" +
+                  "background:rgba(12,18,26,0.72);border:1px solid rgba(255,210,74,0.38);" +
+                  "color:#ffe38a;font-size:11px;font-weight:700;line-height:1.2;" +
+                  "text-shadow:0 1px 2px rgba(0,0,0,0.45);" +
+                  '">' +
+                  Math.round(Number(entry.level) || 0) +
+                  "m</span>",
+                iconSize: [44, 18],
+                iconAnchor: [22, 9]
+              })
+            }).addTo(layerGroup);
+          }
+        }
       });
     });
   }
@@ -2661,7 +2721,7 @@
           return [p.lat, p.lng];
         }),
         {
-          color: seg.level === "error" ? "#ff6b6b" : "#ffb020",
+          color: seg.tone === "danger" ? "#ff6b6b" : "#ffb020",
           weight: 6,
           opacity: 0.9,
           lineCap: "round",
@@ -3436,6 +3496,7 @@
     const [terrainContourGeo, setTerrainContourGeo] = useState([]);
     const [terrainContourLoading, setTerrainContourLoading] = useState(false);
     const [terrainContourError, setTerrainContourError] = useState("");
+    const [terrainContourViewportRevision, setTerrainContourViewportRevision] = useState(0);
     const [connected, setConnected] = useState(
       window._gcsConnState === "connected"
     );
@@ -3834,9 +3895,9 @@
 
     const contourTargetPolygon = useMemo(
       function () {
-        return terrainSurveyPolygon.length >= 3 ? terrainSurveyPolygon : [];
+        return buildViewportPolygonFromMap(mapRef.current);
       },
-      [terrainSurveyPolygon]
+      [terrainContourViewportRevision]
     );
 
     const contourTargetAvailable = useMemo(
@@ -5384,6 +5445,15 @@
         mapRef.current = map;
         window.flightPlanMap = map;
 
+        function handleContourViewportChange() {
+          setTerrainContourViewportRevision(function (value) {
+            return value + 1;
+          });
+        }
+
+        map.on("moveend zoomend resize", handleContourViewportChange);
+        handleContourViewportChange();
+
         syncLeafletMissionLayers(
           layersRef.current,
           latestWaypointsRef.current,
@@ -6854,10 +6924,7 @@
               e(
                 "div",
                 { className: "fp-stat-label-wrap" },
-                e("label", { className: "fp-stat-label", htmlFor: "fp-platform" }, "机型"),
-                connected
-                  ? e("span", { className: "fp-stat-hint" }, "已连飞控自动判定")
-                  : null
+                e("label", { className: "fp-stat-label", htmlFor: "fp-platform" }, "机型")
               ),
               e(
                 "select",
@@ -8275,9 +8342,9 @@
                 },
                 title: contourTargetAvailable
                   ? terrainContourLoading
-                    ? "正在生成测区等高线"
-                    : terrainContourError || "在主地图显示当前测区的地形等高线"
-                  : "请先绘制或确认有效测区"
+                    ? "正在生成当前视野等高线"
+                    : terrainContourError || "在主地图显示当前视野的地形等高线"
+                  : "地图尚未就绪"
               },
               e("input", {
                 type: "checkbox",
@@ -8319,52 +8386,7 @@
         e(
           "div",
           { className: "fp-map-stage" },
-          e("div", { ref: mapContainerRef, className: "fp-map-canvas" }),
-          e(
-            "div",
-            { className: "fp-live-panel" },
-            e("div", { className: "fp-live-panel-title" }, "ArduPilot 实时状态"),
-            e(
-              "div",
-              { className: "fp-live-grid" },
-              e(
-                "div",
-                { className: "fp-live-item" },
-                e("span", { className: "fp-live-label" }, "模式"),
-                e("strong", { className: "fp-live-value" }, window.flight_mode || "UNKNOWN")
-              ),
-              e(
-                "div",
-                { className: "fp-live-item" },
-                e("span", { className: "fp-live-label" }, "解锁"),
-                e("strong", { className: "fp-live-value" }, window.armed ? "已解锁" : "未解锁")
-              ),
-              e(
-                "div",
-                { className: "fp-live-item" },
-                e("span", { className: "fp-live-label" }, "GPS"),
-                e("strong", { className: "fp-live-value" }, "Fix " + gpsFix)
-              ),
-              e(
-                "div",
-                { className: "fp-live-item" },
-                e("span", { className: "fp-live-label" }, "当前任务"),
-                e("strong", { className: "fp-live-value" }, missionCurrent == null ? "—" : String(missionCurrent))
-              ),
-              e(
-                "div",
-                { className: "fp-live-item" },
-                e("span", { className: "fp-live-label" }, "高度"),
-                e("strong", { className: "fp-live-value" }, liveAltitude == null ? "—" : liveAltitude + " m")
-              ),
-              e(
-                "div",
-                { className: "fp-live-item" },
-                e("span", { className: "fp-live-label" }, "地速"),
-                e("strong", { className: "fp-live-value" }, liveGroundspeed == null ? "—" : liveGroundspeed + " m/s")
-              )
-            )
-          )
+          e("div", { ref: mapContainerRef, className: "fp-map-canvas" })
         )
       ),
       render3dPreviewModal()
