@@ -11,6 +11,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER_SCRIPT = REPO_ROOT / "tools" / "com-bridge" / "server.py"
 BRIDGE_API = "http://127.0.0.1:8765/health"
+BRIDGE_STDOUT_LOG = REPO_ROOT / "tools" / "com-bridge" / "server.stdout.log"
+BRIDGE_STDERR_LOG = REPO_ROOT / "tools" / "com-bridge" / "server.stderr.log"
 
 
 def gcs_python() -> str:
@@ -34,6 +36,8 @@ def gcs_python() -> str:
 _lock = threading.Lock()
 _proc: subprocess.Popen | None = None
 _bridge_fail_streak = 0
+_stdout_handle = None
+_stderr_handle = None
 
 
 def _subprocess_flags() -> int:
@@ -51,7 +55,7 @@ def bridge_healthy(timeout_s: float = 1.5) -> bool:
 
 
 def _stop_locked() -> None:
-    global _proc
+    global _proc, _stdout_handle, _stderr_handle
     if _proc is None:
         return
     if _proc.poll() is None:
@@ -61,10 +65,25 @@ def _stop_locked() -> None:
         except Exception:
             _proc.kill()
     _proc = None
+    for handle_name in ("_stdout_handle", "_stderr_handle"):
+        handle = globals().get(handle_name)
+        if handle is not None:
+            try:
+                handle.close()
+            except Exception:
+                pass
+            globals()[handle_name] = None
+
+
+def _open_bridge_logs():
+    BRIDGE_STDOUT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    stdout_handle = BRIDGE_STDOUT_LOG.open("ab")
+    stderr_handle = BRIDGE_STDERR_LOG.open("ab")
+    return stdout_handle, stderr_handle
 
 
 def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> bool:
-    global _proc
+    global _proc, _stdout_handle, _stderr_handle
     with _lock:
         if not force_restart and bridge_healthy():
             return True
@@ -76,11 +95,12 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
             _proc = None
 
         if _proc is None or _proc.poll() is not None:
+            _stdout_handle, _stderr_handle = _open_bridge_logs()
             _proc = subprocess.Popen(
                 [gcs_python(), str(SERVER_SCRIPT)],
                 cwd=str(SERVER_SCRIPT.parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=_stdout_handle,
+                stderr=_stderr_handle,
                 creationflags=_subprocess_flags(),
             )
 
