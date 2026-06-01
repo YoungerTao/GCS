@@ -155,12 +155,18 @@ def _read_ports_unix():
 
 def read_ports():
     if sys.platform == "win32":
+        ports = []
         if serial is not None:
             try:
-                return _read_ports_unix()
+                ports = _read_ports_unix()
             except Exception:
-                return []
-        return []
+                ports = []
+        if ports:
+            return ports
+        try:
+            return _read_ports_windows()
+        except Exception:
+            return []
     return _read_ports_unix()
 
 

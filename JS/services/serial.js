@@ -557,9 +557,9 @@ async function connectImpl() {
       );
       if (!hasBridgePort || refreshedValue === "__refresh_bridge__") {
         setConnectionUI("error");
-        log("❌ 当前未发现可用 COM bridge 串口。请先启动 bridge 服务，再刷新串口列表。");
+        log("❌ COM bridge 已启动，但当前未发现可用串口设备。请确认飞控已插入、Windows 已识别出 COM 口后，再刷新串口列表。");
         if (typeof window.alert === "function") {
-          window.alert("未发现可用 COM bridge 串口。\n\n请先启动 bridge 服务（例如 GCS.cmd / GCS.app / 本地 watchdog），再回到页面点击“刷新串口”。");
+          window.alert("COM bridge 已启动，但未发现可用串口设备。\n\n请确认飞控已插入电脑，并且 Windows 设备管理器中已经出现对应的 COM 口，然后回到页面点击“刷新串口”。\n\n如果设备管理器里也没有新 COM 口，通常是数据线、驱动或飞控 USB 模式问题。");
         }
         return;
       }
