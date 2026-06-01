@@ -184,6 +184,35 @@ def read_ports():
     return _read_ports_unix()
 
 
+def read_ports_debug():
+    pyserial_ports = []
+    windows_ports = []
+    pyserial_error = ""
+    windows_error = ""
+    if serial is not None:
+        try:
+            pyserial_ports = _read_ports_unix()
+        except Exception as exc:
+            pyserial_error = str(exc)
+    else:
+        pyserial_error = "pyserial unavailable"
+
+    if sys.platform == "win32":
+        try:
+            windows_ports = _read_ports_windows()
+        except Exception as exc:
+            windows_error = str(exc)
+
+    return {
+        "platform": sys.platform,
+        "pyserialPorts": pyserial_ports,
+        "pyserialError": pyserial_error,
+        "windowsPorts": windows_ports,
+        "windowsError": windows_error,
+        "mergedPorts": read_ports(),
+    }
+
+
 _PORT_PROBE_CACHE = {"at": 0.0, "ports": []}
 _PORT_PROBE_LOCK = threading.Lock()
 _BAUD_PROBE_LOCK = threading.Lock()
@@ -1187,6 +1216,12 @@ class Handler(BaseHTTPRequestHandler):
                 send_json(self, 200, {"ports": ports, "probed": True})
             except Exception as exc:
                 send_json(self, 500, {"ports": [], "ok": False, "error": str(exc)})
+            return
+        if self.path.startswith("/com-ports-debug"):
+            try:
+                send_json(self, 200, read_ports_debug())
+            except Exception as exc:
+                send_json(self, 500, {"ok": False, "error": str(exc)})
             return
         if self.path == "/bridge-status":
             send_json(self, 200, MAVLINK_HUB.status())
