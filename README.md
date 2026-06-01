@@ -124,7 +124,7 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 
 - `GCS-安装桌面快捷方式.bat`
 
-它会自动调用 `tools/install-gcs-desktop.ps1`，在桌面和开始菜单创建 `GCS` 快捷方式。之后日常只需要双击桌面的 `GCS` 图标即可启动。
+它会先调用 `tools/setup-python-deps.ps1` 创建 `.venv` 并安装 `pyserial`、`pymavlink`，然后再调用 `tools/install-gcs-desktop.ps1` 创建桌面和开始菜单的 `GCS` 快捷方式。之后日常只需要双击桌面的 `GCS` 图标即可启动。
 
 ### 以后交付客户时再用（现在可忽略）
 

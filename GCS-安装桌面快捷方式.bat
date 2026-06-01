@@ -2,16 +2,28 @@
 setlocal
 cd /d "%~dp0"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install-gcs-desktop.ps1"
+echo Preparing Python bridge environment...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\setup-python-deps.ps1"
 if errorlevel 1 (
   echo.
-  echo 安装 GCS 桌面快捷方式失败。
-  echo 请确认已允许 PowerShell 脚本运行，并重试。
+  echo GCS Python bridge dependencies install failed.
+  echo Please install Python 3 first, then run this installer again.
   pause
   exit /b 1
 )
 
 echo.
-echo 安装完成。
-echo 现在可以直接双击桌面的 GCS 快捷方式启动。
+echo Creating desktop shortcut...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install-gcs-desktop.ps1"
+if errorlevel 1 (
+  echo.
+  echo Install GCS desktop shortcut failed.
+  echo Please confirm PowerShell script execution is allowed, then try again.
+  pause
+  exit /b 1
+)
+
+echo.
+echo Install complete.
+echo You can now double-click the desktop GCS shortcut to launch.
 pause
