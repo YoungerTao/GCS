@@ -513,91 +513,118 @@
     ];
     let lastError = null;
 
-    for (let ci = 0; ci < compCandidates.length; ci++) {
-      const t = { sys: baseT.sys, comp: compCandidates[ci] };
-
-      for (let pi = 0; pi < plans.length; pi++) {
-        const plan = plans[pi];
-        window._missionTransfer = {
-          mode: "download",
-          items: [],
-          count: null,
-          ack: false,
-          error: null,
-          requestedSeq: null,
-          targetComp: t.comp,
-          requestMsgId: plan.useInt ? 51 : 40
-        };
-
+    try {
+      if (window._paramLoadActive && typeof window.endParamLoadingUI === "function") {
+        window.endParamLoadingUI(false, "mission-download");
         if (typeof log === "function") {
-          log(
-            "📥 请求飞控任务列表 sys=" +
-              t.sys +
-              " comp=" +
-              t.comp +
-              " (" +
-              (plan.useInt ? "REQUEST_INT" : "REQUEST") +
-              (plan.includeMissionType ? " + type" : "") +
-              ")",
-            "mission_download_start"
-          );
+          log("⏸ 已暂停参数加载，优先读取任务");
         }
+      }
 
+      if (window._telemetryReqTimer) {
+        clearInterval(window._telemetryReqTimer);
+        window._telemetryReqTimer = null;
+      }
+
+      if (typeof window.sendHeartbeat === "function") {
         try {
-          await sendMissionRequestList(t, plan.includeMissionType);
+          await window.sendHeartbeat();
+        } catch (_) { /* ignore */ }
+      }
 
-          await waitMissionEvent(function (s) {
-            return typeof s.count === "number";
-          }, 6000, "获取飞控任务数量超时");
+      for (let ci = 0; ci < compCandidates.length; ci++) {
+        const t = { sys: baseT.sys, comp: compCandidates[ci] };
 
-          const count = window._missionTransfer.count;
-          if (!count) {
-            resetMissionSession();
-            return [];
-          }
+        for (let pi = 0; pi < plans.length; pi++) {
+          const plan = plans[pi];
+          window._missionTransfer = {
+            mode: "download",
+            items: [],
+            count: null,
+            ack: false,
+            error: null,
+            requestedSeq: null,
+            targetComp: t.comp,
+            requestMsgId: plan.useInt ? 51 : 40
+          };
 
-          if (onProgress) {
-            onProgress(0, count);
-          }
-
-          for (let seq = 0; seq < count; seq++) {
-            window._missionTransfer.requestedSeq = seq;
-            await sendMissionRequestSeq(seq, t, plan.useInt, plan.includeMissionType);
-            await waitMissionEvent(function (s) {
-              return s.items && s.items[seq];
-            }, 8000, "读取航点 " + seq + " 超时");
-            if (onProgress) {
-              onProgress(seq + 1, count);
-            }
-          }
-
-          const result = MM.renumberWaypoints(
-            (window._missionTransfer.items || [])
-              .filter(Boolean)
-              .map(missionItemToWaypoint)
-          );
-          resetMissionSession();
-          return result;
-        } catch (err) {
-          lastError = err;
-          resetMissionSession();
           if (typeof log === "function") {
             log(
-              "⚠️ 读取飞控任务重试 comp=" +
+              "📥 请求飞控任务列表 sys=" +
+                t.sys +
+                " comp=" +
                 t.comp +
-                " / " +
+                " (" +
                 (plan.useInt ? "REQUEST_INT" : "REQUEST") +
                 (plan.includeMissionType ? " + type" : "") +
-                " 失败: " +
-                (err && err.message ? err.message : err),
-              "mission_download_retry"
+                ")",
+              "mission_download_start"
             );
+          }
+
+          try {
+            await sendMissionRequestList(t, plan.includeMissionType);
+
+            await waitMissionEvent(function (s) {
+              return typeof s.count === "number";
+            }, 6000, "获取飞控任务数量超时");
+
+            const count = window._missionTransfer.count;
+            if (!count) {
+              resetMissionSession();
+              return [];
+            }
+
+            if (onProgress) {
+              onProgress(0, count);
+            }
+
+            for (let seq = 0; seq < count; seq++) {
+              window._missionTransfer.requestedSeq = seq;
+              await sendMissionRequestSeq(seq, t, plan.useInt, plan.includeMissionType);
+              await waitMissionEvent(function (s) {
+                return s.items && s.items[seq];
+              }, 8000, "读取航点 " + seq + " 超时");
+              if (onProgress) {
+                onProgress(seq + 1, count);
+              }
+            }
+
+            const result = MM.renumberWaypoints(
+              (window._missionTransfer.items || [])
+                .filter(Boolean)
+                .map(missionItemToWaypoint)
+            );
+            resetMissionSession();
+            return result;
+          } catch (err) {
+            lastError = err;
+            resetMissionSession();
+            if (typeof log === "function") {
+              log(
+                "⚠️ 读取飞控任务重试 comp=" +
+                  t.comp +
+                  " / " +
+                  (plan.useInt ? "REQUEST_INT" : "REQUEST") +
+                  (plan.includeMissionType ? " + type" : "") +
+                  " 失败: " +
+                  (err && err.message ? err.message : err),
+                "mission_download_retry"
+              );
+            }
+            await new Promise(function (r) {
+              setTimeout(r, 80);
+            });
           }
         }
       }
-    }
 
-    throw lastError || new Error("读取飞控任务失败");
+      throw lastError || new Error("读取飞控任务失败");
+    } finally {
+      if (window._gcsConnState === "connected" && typeof startTelemetryRequests === "function") {
+        startTelemetryRequests();
+      }
+    }
   }
 
   window.MavlinkMission = {

@@ -59,24 +59,38 @@ function missionBridgeFastWrite() {
   );
 }
 
+let _bridgeWriteQueue = Promise.resolve();
+
+function enqueueBridgeWrite(task) {
+  const next = _bridgeWriteQueue.then(task, task);
+  _bridgeWriteQueue = next.catch(function () {});
+  return next;
+}
+
 async function bridgeWriteBytes(bytes) {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const fast = missionBridgeFastWrite();
-  const writePromise = bridgeFetch(
-    "/bridge-write",
-    { data: bridgeBytesToBase64(arr) },
-    { skipEnsure: fast }
-  );
-  if (fast) {
-    writePromise.catch(function (err) {
-      const msg = err && err.message ? err.message : String(err);
-      if (window._missionTransfer && !window._missionTransfer.error) {
-        window._missionTransfer.error = "桥接写入失败: " + msg;
-      }
-    });
-    return;
+  const missionIo = missionBridgeFastWrite();
+  const writeFn = function () {
+    return bridgeFetch(
+      "/bridge-write",
+      { data: bridgeBytesToBase64(arr) },
+      { skipEnsure: missionIo }
+    );
+  };
+
+  try {
+    if (missionIo) {
+      await enqueueBridgeWrite(writeFn);
+      return;
+    }
+    await writeFn();
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    if (missionIo && window._missionTransfer && !window._missionTransfer.error) {
+      window._missionTransfer.error = "桥接写入失败: " + msg;
+    }
+    throw err;
   }
-  await writePromise;
 }
 
 function resolveBridgeDeviceId(selectedValue, optionMeta, comSelect) {

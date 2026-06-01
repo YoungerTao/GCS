@@ -666,7 +666,7 @@ class SerialHub:
         if serial is None:
             raise RuntimeError("pyserial is not installed")
         self.close()
-        s = serial.Serial(port, baudrate=baudrate, timeout=0.2, write_timeout=0.5)
+        s = serial.Serial(port, baudrate=baudrate, timeout=0.2, write_timeout=3.0)
         # Prevent USB-serial adapters from asserting DTR/RTS which often resets ArduPilot/CUAV/etc flight controllers
         try:
             s.dtr = False
@@ -720,10 +720,10 @@ class SerialHub:
     def write(self, data):
         with self.lock:
             s = self.serial
-        if s is None or not getattr(s, "is_open", False):
-            raise RuntimeError(f"{self.label} is not open")
-        s.write(data)
-        return len(data)
+            if s is None or not getattr(s, "is_open", False):
+                raise RuntimeError(f"{self.label} is not open")
+            s.write(data)
+            return len(data)
 
     def read_buffer(self, max_bytes=65536):
         with self.lock:

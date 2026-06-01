@@ -35,21 +35,24 @@
     }
 
     const mon = getParamNum("BATT_MONITOR");
-    return [{
-      id: 0,
-      slotIndex: 0,
-      name: "Battery 1",
-      prefix: "BATT",
-      monitorKey: "BATT_MONITOR",
-      monitorType: mon ?? 0,
-      typeShort: mon === 0 || mon == null ? "Disabled" : "BATT",
-      typeUi: mon === 0 || mon == null ? "disabled" : "monitor",
-      connected: false,
-      voltage: 0,
-      current: 0,
-      cells: 0,
-      cellVoltages: [],
-    }];
+    if (mon === 0 || mon == null) {
+      return [{
+        id: 0,
+        slotIndex: 0,
+        name: "Battery 1",
+        prefix: "BATT",
+        monitorKey: "BATT_MONITOR",
+        monitorType: mon ?? 0,
+        typeShort: "Disabled",
+        typeUi: "disabled",
+        connected: false,
+        voltage: 0,
+        current: 0,
+        cells: 0,
+        cellVoltages: [],
+      }];
+    }
+    return [];
   }
 
   function statusOf(inst) {
@@ -163,6 +166,7 @@
         }));
         svg.appendChild(b);
         svg.appendChild(nameText);
+        svg.appendChild(idText);
       });
       lines.forEach((line) => svg.appendChild(line));
     }
@@ -184,7 +188,13 @@
     const root = document.getElementById("power-cards");
     const countEl = document.getElementById("power-instance-count");
     const emptyEl = document.getElementById("power-cards-empty");
-    if (!root || !countEl) return;
+    
+    console.log('[Power] renderCards called, instances:', instances.length, root, countEl);
+    
+    if (!root || !countEl) {
+      console.error('[Power] root or countEl not found!');
+      return;
+    }
 
     const online = instances.filter((i) => i.connected).length;
     countEl.textContent = online < instances.length
@@ -192,19 +202,27 @@
       : `${instances.length} 路电源`;
 
     const showEmpty = !instances.length;
+    console.log('[Power] showEmpty:', showEmpty, 'instances.length:', instances.length);
+    
     if (emptyEl) emptyEl.classList.toggle("hidden", !showEmpty);
     root.classList.toggle("hidden", showEmpty);
     root.classList.toggle("power-cards--three", instances.length > 1);
 
     const sig = getInstancesSignature(instances);
     if (sig === _lastInstancesSig && root.children.length === instances.length) {
+      console.log('[Power] Signature match, updating live values only');
       updateLiveCardValues(instances);
       return;
     }
     _lastInstancesSig = sig;
     root.innerHTML = "";
-    if (showEmpty) return;
+    if (showEmpty) {
+      console.log('[Power] No instances, returning early');
+      return;
+    }
 
+    console.log('[Power] Rendering', instances.length, 'cards');
+    
     instances.forEach((inst) => {
       const st = statusOf(inst);
       const card = document.createElement("article");

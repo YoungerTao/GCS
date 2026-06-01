@@ -8364,18 +8364,6 @@
                 e("strong", { className: "fp-live-value" }, liveGroundspeed == null ? "—" : liveGroundspeed + " m/s")
               )
             )
-          ),
-          e(
-            "div",
-            { className: "fp-map-overlay" },
-            e("h4", null, "交互提示"),
-            e(
-              "p",
-              null,
-              activeTab === "survey"
-                ? "继续点击地图添加多边形顶点，达到 3 个点后会自动生成 S 形航测路径。"
-                : "点击地图新增航点，左侧航点列表会同步更新。"
-            )
           )
         )
       ),
