@@ -79,8 +79,6 @@ $result | ConvertTo-Json -Depth 3
             "-NoLogo",
             "-NonInteractive",
             "-NoProfile",
-            "-WindowStyle",
-            "Hidden",
             "-Command",
             ps_script,
         ],
@@ -155,18 +153,34 @@ def _read_ports_unix():
 
 def read_ports():
     if sys.platform == "win32":
-        ports = []
+        merged = {}
         if serial is not None:
             try:
-                ports = _read_ports_unix()
+                for item in _read_ports_unix():
+                    dev = str(item.get("deviceId") or "").upper()
+                    if dev:
+                        merged[dev] = item
             except Exception:
-                ports = []
-        if ports:
-            return ports
+                pass
         try:
-            return _read_ports_windows()
+            for item in _read_ports_windows():
+                dev = str(item.get("deviceId") or "").upper()
+                if not dev:
+                    continue
+                # Win32_SerialPort often has better CUAV/ArduPilot interface names.
+                if dev not in merged or str(item.get("name") or "").strip():
+                    merged[dev] = {**merged.get(dev, {}), **item}
         except Exception:
-            return []
+            pass
+
+        ports = list(merged.values())
+
+        def com_key(item):
+            m = re.match(r"COM(\d+)", str(item.get("deviceId", "")).upper())
+            return int(m.group(1)) if m else 10**9
+
+        ports.sort(key=com_key)
+        return ports
     return _read_ports_unix()
 
 
