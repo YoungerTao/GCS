@@ -181,7 +181,7 @@
         if (seq !== estimateSeq || !estEl) {
           return;
         }
-        if (!res.ok || !res.body || !res.body.ok) {
+        if (!res.ok || !res.body) {
           estEl.textContent = "无法估算（瓦片服务未就绪）";
           latestEstimate = null;
           return;
@@ -197,7 +197,7 @@
           estimateText += "，总量约 " + formatBytes(res.body.estimateBytes || 0);
         }
         let terrainEstimate = null;
-        if (terrainRes && terrainRes.ok && terrainRes.body && terrainRes.body.ok) {
+        if (terrainRes && terrainRes.ok && terrainRes.body) {
           const terrainTotal = Number(terrainRes.body.total || 0);
           const terrainCached = Number(terrainRes.body.cached || 0);
           const terrainMissing = Number(terrainRes.body.missing || 0);

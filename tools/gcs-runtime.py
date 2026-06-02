@@ -16,6 +16,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from gcs_supervisor import bridge_healthy, ensure_bridge_process, watchdog_loop  # noqa: E402
+from map_tiles_supervisor import ensure_tile_server_process, tile_server_healthy  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UI_PORT = 8766
@@ -32,9 +33,19 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        if self.path.split("?", 1)[0] == "/__gcs/ensure-bridge":
+        path = self.path.split("?", 1)[0]
+        if path == "/__gcs/ensure-bridge":
             ok = ensure_bridge_process(wait_s=15.0)
             body = json.dumps({"ok": ok, "bridgeReady": ok}).encode("utf-8")
+            self.send_response(200 if ok else 503)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/__gcs/ensure-tile-server":
+            ok = ensure_tile_server_process(wait_s=15.0)
+            body = json.dumps({"ok": ok, "tileServerUp": ok}).encode("utf-8")
             self.send_response(200 if ok else 503)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -50,6 +61,7 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
                 "ok": True,
                 "service": "gcs-runtime",
                 "bridgeUp": bridge_healthy(),
+                "tileServerUp": tile_server_healthy(),
             }).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -80,6 +92,9 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
 def main() -> int:
     if not ensure_bridge_process(wait_s=15.0):
         print("Failed to start COM bridge on http://127.0.0.1:8765", file=sys.stderr)
+        return 1
+    if not ensure_tile_server_process(wait_s=15.0):
+        print("Failed to start tile server on http://127.0.0.1:8768", file=sys.stderr)
         return 1
 
     threading.Thread(target=watchdog_loop, daemon=True).start()

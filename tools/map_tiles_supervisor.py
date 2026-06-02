@@ -23,6 +23,35 @@ _lock = threading.Lock()
 _proc: subprocess.Popen | None = None
 
 
+def _reap_stale_port_owner() -> None:
+    """Clear a stale tile_server.py that still owns :8768 but no longer serves /health."""
+    if sys.platform == "win32":
+        return
+    try:
+        out = subprocess.check_output(
+            ["lsof", "-nP", "-iTCP:8768", "-sTCP:LISTEN", "-Fpc"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return
+
+    pid = None
+    command = None
+    for line in out.splitlines():
+        if line.startswith("p"):
+            pid = line[1:].strip()
+        elif line.startswith("c"):
+            command = line[1:].strip()
+            if pid and command and "python" in command.lower():
+                try:
+                    subprocess.run(["kill", "-TERM", pid], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+                pid = None
+                command = None
+
+
 def _subprocess_flags() -> int:
     if sys.platform == "win32":
         return getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -61,6 +90,9 @@ def ensure_tile_server_process(force_restart: bool = False, wait_s: float = 12.0
             return True
         elif _proc is not None and _proc.poll() is not None:
             _proc = None
+
+        if not tile_server_healthy(timeout_s=1.0):
+            _reap_stale_port_owner()
 
         if _proc is None or _proc.poll() is not None:
             _proc = subprocess.Popen(

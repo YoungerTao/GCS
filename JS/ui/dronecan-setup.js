@@ -1005,11 +1005,13 @@
         <div class="sc-dc-toolbar-card">
           <div class="sc-dc-toolbar-right">
             <label class="sc-dc-slcan-port-label">${dcText("SLCAN Port", "SLCAN 端口")}
-              <select id="sc-dc-slcan-port" class="sc-dc-slcan-port-select" title="${dcText("CUAV one USB exposes two virtual ports. Pick the non-MAVLink side.", "CUAV 一根 USB 会暴露两个虚拟口，请选非 MAVLink 的那一路")}"></select>
+              <div class="sc-dc-slcan-port-controls">
+                <select id="sc-dc-slcan-port" class="sc-dc-slcan-port-select" title="${dcText("CUAV one USB exposes two virtual ports. Pick the non-MAVLink side.", "CUAV 一根 USB 会暴露两个虚拟口，请选非 MAVLink 的那一路")}"></select>
+                <button type="button" id="sc-dc-auth-slcan2" class="sc-btn sc-btn-ghost sc-btn-sm" title="${dcText("Grant the second Web Serial lane in Chrome.", "在 Chrome 中授权第二路 Web Serial")}">${dcText("＋ Authorize 2nd", " ＋ 授权第二路")}</button>
+              </div>
             </label>
-            <button type="button" id="sc-dc-auth-slcan2" class="sc-btn sc-btn-ghost sc-btn-sm" title="${dcText("Grant the second Web Serial lane in Chrome.", "在 Chrome 中授权第二路 Web Serial")}">${dcText("＋ Authorize 2nd", "＋ 授权第二路")}</button>
-            <label class="sc-dc-check"><input type="checkbox" id="sc-dc-exit-slcan" checked> ${dcText("Exit SLCAN on leave?", "离开时退出 SLCAN？")}</label>
-            <label class="sc-dc-check"><input type="checkbox" id="sc-dc-log"> ${dcText("Log", "记录")}</label>
+            <label class="sc-dc-check sc-dc-check--control-row"><input type="checkbox" id="sc-dc-exit-slcan" checked> ${dcText("Exit SLCAN on leave?", "离开时退出SLCAN？")}</label>
+            <label class="sc-dc-check sc-dc-check--control-row"><input type="checkbox" id="sc-dc-log"> ${dcText("Log", "开启日志Log")}</label>
           </div>
         </div>
       </div>
@@ -1176,10 +1178,13 @@
       }
       .sc-dc-toolbar-right { display:flex; gap:12px; align-items:center; color:#d5dcf0; font-size:12px; position:relative; z-index:1; flex-wrap:wrap; min-height:40px; }
       .sc-dc-slcan-port-label { display:grid; gap:6px; align-content:center; color:#b9c7e4; font-weight:600; margin:0; }
+      .sc-dc-slcan-port-controls { display:flex; gap:12px; align-items:center; }
       .sc-dc-slcan-port-select { min-width: 220px; max-width: 280px; background:#121a2a; color:#e8edf8; border:1px solid #4a5c7d; border-radius:10px; padding:7px 10px; font-size:12px; }
       .sc-dc-slcan-port-select option { background:#1a2235; color:#e8edf8; }
       .sc-dc-toolbar-right .sc-btn { align-self:center; min-height:36px; display:inline-flex; align-items:center; justify-content:center; }
+      #sc-dc-auth-slcan2 { color:#f5eaf5; }
       .sc-dc-check { display:inline-flex; gap:6px; align-items:center; min-height:36px; padding:0 2px; margin:0; line-height:1; }
+      .sc-dc-check--control-row { align-self:end; }
       .sc-dc-check input { margin:0; align-self:center; }
       .sc-dc-hint-row { padding:12px 14px 14px; border:1px solid rgba(70, 84, 112, 0.42); border-radius:14px; background:rgba(13, 18, 30, 0.7); margin-bottom:14px; }
       #sc-dc-transport-badge { position:relative; overflow:hidden; }
@@ -1708,16 +1713,6 @@
     const span = 340;
     const left = hubX - span / 2;
 
-    const hubRect = document.createElementNS(svgNs, "rect");
-    hubRect.setAttribute("x", hubX - 72);
-    hubRect.setAttribute("y", hubY - 22);
-    hubRect.setAttribute("width", "144");
-    hubRect.setAttribute("height", "44");
-    hubRect.setAttribute("rx", "8");
-    hubRect.setAttribute("fill", "#1e2235");
-    hubRect.setAttribute("stroke", hubNode.status === "online" ? "#10b981" : "#ef4444");
-    svg.appendChild(hubRect);
-
     const hubText = document.createElementNS(svgNs, "text");
     hubText.setAttribute("x", hubX);
     hubText.setAttribute("y", hubY + 5);
@@ -1726,6 +1721,18 @@
     hubText.setAttribute("font-size", "12");
     hubText.textContent = `${hubNode.title || hubNode.name} (${hubNode.nodeId})`;
     svg.appendChild(hubText);
+
+    const hubRect = document.createElementNS(svgNs, "rect");
+    const hubTextWidth = typeof hubText.getComputedTextLength === "function" ? hubText.getComputedTextLength() : 0;
+    const hubRectWidth = Math.max(144, Math.ceil(hubTextWidth + 28));
+    hubRect.setAttribute("x", hubX - hubRectWidth / 2);
+    hubRect.setAttribute("y", hubY - 22);
+    hubRect.setAttribute("width", String(hubRectWidth));
+    hubRect.setAttribute("height", "44");
+    hubRect.setAttribute("rx", "8");
+    hubRect.setAttribute("fill", "#1e2235");
+    hubRect.setAttribute("stroke", hubNode.status === "online" ? "#10b981" : "#ef4444");
+    svg.insertBefore(hubRect, hubText);
 
     children.forEach((node, i) => {
       const nx = left + (count === 1 ? span / 2 : (i / Math.max(1, count - 1)) * span);
@@ -2373,4 +2380,3 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 })();
-
