@@ -15,6 +15,7 @@ WATCHDOG_SCRIPT = REPO_ROOT / "tools" / "gcs_watchdog.py"
 RUNTIME_PING = "http://127.0.0.1:8766/__gcs/ping"
 LAUNCHER_PING = "http://127.0.0.1:8767/ping"
 LAUNCH_URL = "http://127.0.0.1:8767/launch"
+TILE_SERVER_HEALTH = "http://127.0.0.1:8768/health"
 UI_URL = "http://127.0.0.1:8766/index.html"
 
 
@@ -62,6 +63,17 @@ def _post_launch(wait_s: float = 45.0) -> bool:
         return False
 
 
+def _ensure_runtime_stack(wait_s: float = 45.0) -> bool:
+    if not _post_launch(wait_s=wait_s):
+        return False
+    deadline = time.time() + min(wait_s, 15.0)
+    while time.time() < deadline:
+        if _url_ok(RUNTIME_PING, 1.0) and _url_ok(TILE_SERVER_HEALTH, 1.0):
+            return True
+        time.sleep(0.25)
+    return _url_ok(RUNTIME_PING, 1.0) and _url_ok(TILE_SERVER_HEALTH, 1.0)
+
+
 def _clear_launch_lock() -> None:
     lock = Path(os.environ.get("TEMP", "")) / "gcs-launch.lock"
     try:
@@ -74,15 +86,18 @@ def main() -> int:
     code = 1
     try:
         if _url_ok(RUNTIME_PING, 1.5):
+            _spawn_watchdog()
+            if not _url_ok(TILE_SERVER_HEALTH, 1.5):
+                _ensure_runtime_stack(wait_s=25.0)
             webbrowser.open(UI_URL)
             return 0
 
         _spawn_watchdog()
-        if not _post_launch():
+        if not _ensure_runtime_stack():
             return 1
 
         for _ in range(30):
-            if _url_ok(RUNTIME_PING, 1.0):
+            if _url_ok(RUNTIME_PING, 1.0) and _url_ok(TILE_SERVER_HEALTH, 1.0):
                 webbrowser.open(UI_URL)
                 return 0
             time.sleep(0.2)

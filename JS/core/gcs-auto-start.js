@@ -6,6 +6,7 @@
   const RUNTIME_ORIGIN = "http://127.0.0.1:8766";
   const LAUNCHER_ORIGIN = "http://127.0.0.1:8767";
   const BRIDGE_HEALTH = "http://127.0.0.1:8765/health";
+  const TILE_HEALTH = "http://127.0.0.1:8768/health";
   const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
   function sleep(ms) {
@@ -100,6 +101,11 @@
     return fetchOk(`${RUNTIME_ORIGIN}/__gcs/ensure-bridge`, { method: "POST" });
   }
 
+  async function ensureTileServerFromRuntime() {
+    if (await fetchOk(TILE_HEALTH)) return true;
+    return fetchOk(`${RUNTIME_ORIGIN}/__gcs/ensure-tile-server`, { method: "POST" });
+  }
+
   async function waitForBridge(maxMs) {
     const deadline = Date.now() + maxMs;
     const interval = global.__gcsLiveServerDev ? 1200 : 600;
@@ -117,6 +123,7 @@
       const runtimeOk = await ensureRuntimeStarted();
       if (runtimeOk) {
         await ensureBridgeFromRuntime();
+        await ensureTileServerFromRuntime();
         const bridgeWait = global.__gcsLiveServerDev ? 2500 : 15000;
         const bridgeOk = await waitForBridge(bridgeWait);
         if (!bridgeOk && !global.__gcsRuntimeNative) {
