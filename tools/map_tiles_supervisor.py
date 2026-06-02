@@ -5,10 +5,13 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
+from gcs_http import local_http_ok
+from gcs_ports import reap_stale_python_listener
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
+TILE_SERVER_PORT = 8768
 SERVER_SCRIPT = REPO_ROOT / "tools" / "map-tiles" / "tile_server.py"
 TILE_SERVER_API = "http://127.0.0.1:8768/health"
 LOG_DIR = REPO_ROOT / "tools" / "logs"
@@ -46,31 +49,7 @@ def _log_supervisor_event(message: str) -> None:
 
 def _reap_stale_port_owner() -> None:
     """Clear a stale tile_server.py that still owns :8768 but no longer serves /health."""
-    if sys.platform == "win32":
-        return
-    try:
-        out = subprocess.check_output(
-            ["lsof", "-nP", "-iTCP:8768", "-sTCP:LISTEN", "-Fpc"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        return
-
-    pid = None
-    command = None
-    for line in out.splitlines():
-        if line.startswith("p"):
-            pid = line[1:].strip()
-        elif line.startswith("c"):
-            command = line[1:].strip()
-            if pid and command and "python" in command.lower():
-                try:
-                    subprocess.run(["kill", "-TERM", pid], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception:
-                    pass
-                pid = None
-                command = None
+    reap_stale_python_listener(TILE_SERVER_PORT)
 
 
 def _subprocess_flags() -> int:
@@ -80,11 +59,7 @@ def _subprocess_flags() -> int:
 
 
 def tile_server_healthy(timeout_s: float = 1.5) -> bool:
-    try:
-        with urllib.request.urlopen(TILE_SERVER_API, timeout=timeout_s) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    return local_http_ok(TILE_SERVER_API, timeout_s=timeout_s)
 
 
 def _stop_locked() -> None:
@@ -134,13 +109,16 @@ def ensure_tile_server_process(force_restart: bool = False, wait_s: float = 12.0
             return True
         with _lock:
             if _proc is not None and _proc.poll() is not None:
+                if tile_server_healthy():
+                    _log_supervisor_event("Tile server healthy via existing listener")
+                    return True
                 _log_supervisor_event(
                     f"Tile server exited early with code {_proc.poll()}"
                 )
                 return False
         time.sleep(0.25)
     _log_supervisor_event(f"Tile server health check timed out after {wait_s:.1f}s")
-    return False
+    return tile_server_healthy()
 
 
 def ensure_tile_server(force_restart: bool = False, wait_s: float = 12.0) -> bool:

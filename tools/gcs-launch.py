@@ -11,7 +11,8 @@ import webbrowser
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-WATCHDOG_SCRIPT = REPO_ROOT / "tools" / "gcs_watchdog.py"
+TOOLS_DIR = REPO_ROOT / "tools"
+WATCHDOG_SCRIPT = TOOLS_DIR / "gcs_watchdog.py"
 RUNTIME_PING = "http://127.0.0.1:8766/__gcs/ping"
 LAUNCHER_PING = "http://127.0.0.1:8767/ping"
 LAUNCH_URL = "http://127.0.0.1:8767/launch"
@@ -26,11 +27,11 @@ def _no_window_flags() -> int:
 
 
 def _url_ok(url: str, timeout_s: float = 2.0) -> bool:
-    try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    from gcs_http import local_http_ok
+
+    return local_http_ok(url, timeout_s=timeout_s)
 
 
 def _spawn_watchdog() -> None:
@@ -55,12 +56,11 @@ def _spawn_watchdog() -> None:
 
 
 def _post_launch(wait_s: float = 45.0) -> bool:
-    try:
-        req = urllib.request.Request(LAUNCH_URL, method="POST")
-        with urllib.request.urlopen(req, timeout=wait_s) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    from gcs_http import local_http_post_ok
+
+    return local_http_post_ok(LAUNCH_URL, timeout_s=wait_s)
 
 
 def _ensure_runtime_stack(wait_s: float = 45.0) -> bool:

@@ -23,6 +23,10 @@ open_ui() {
 }
 
 find_python() {
+  if [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    echo "$SCRIPT_DIR/.venv/bin/python"
+    return 0
+  fi
   if command -v python3 >/dev/null 2>&1; then
     command -v python3
     return 0
@@ -43,6 +47,8 @@ PYTHON_BIN="$(find_python)" || {
   notify_error "未检测到 Python 3。请先安装 Python 3，再重新双击 start-gcs.command。"
   exit 1
 }
+
+"$PYTHON_BIN" "$SCRIPT_DIR/tools/gcs-stop.py" >/dev/null 2>&1 || true
 
 if ! url_ok "$LAUNCHER_PING"; then
   nohup "$PYTHON_BIN" "$SCRIPT_DIR/tools/gcs_watchdog.py" >/tmp/gcs-watchdog.log 2>&1 &
