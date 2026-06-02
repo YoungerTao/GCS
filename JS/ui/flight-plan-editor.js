@@ -187,22 +187,36 @@
   const TURN_AROUND_DEFAULT_FIXED_WING_M = 100;
 
   function ensureLocalTileServerReady() {
-    return fetch("/__gcs/ensure-tile-server", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" }
-    })
-      .then(function (response) {
-        if (!response.ok) {
-          throw new Error("高程服务启动失败");
-        }
-        return response.json().catch(function () {
-          return { ok: true };
-        });
+    function postEnsure(url) {
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
       })
-      .then(function (payload) {
-        if (!payload || payload.ok === false) {
-          throw new Error("高程服务启动失败");
-        }
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error("HTTP " + response.status);
+          }
+          return response.json().catch(function () {
+            return { ok: true };
+          });
+        })
+        .then(function (payload) {
+          if (!payload || payload.ok === false) {
+            throw new Error("高程服务启动失败");
+          }
+          return true;
+        });
+    }
+
+    // Live Server(5501) 下没有 /__gcs 路由，先尝试当前站点，再回退到本地 runtime/watchdog。
+    return postEnsure("/__gcs/ensure-tile-server")
+      .catch(function () {
+        return postEnsure("http://127.0.0.1:8766/__gcs/ensure-tile-server");
+      })
+      .catch(function () {
+        return postEnsure("http://127.0.0.1:8767/launch");
+      })
+      .then(function () {
         const TS = window.TerrainService;
         if (TS && typeof TS.probeHealth === "function") {
           return TS.probeHealth(true).then(function (health) {
@@ -2673,7 +2687,7 @@
       return { contours: [], validRatio: 0, insideCount: 0, interval: 0 };
     }
 
-    const sampled = await TS.sampleElevationBatch(samplePoints);
+    const sampled = await TS.sampleElevationBatch(samplePoints, { timeoutMs: 20000 });
     let sampleIndex = 0;
     let validCount = 0;
     let minElevation = Infinity;
@@ -6356,11 +6370,22 @@
         setTerrainContourLoading(true);
         setTerrainContourError("");
 
+        const contourTimeout = window.setTimeout(function () {
+          if (cancelled) {
+            return;
+          }
+          setTerrainContourLoading(false);
+          setTerrainContourGeo([]);
+          setTerrainContourError("等高线生成超时，请缩小视野或先预取地形后重试");
+          setSurveyToast("等高线生成超时，请缩小视野或先预取地形后重试");
+        }, 25000);
+
         generateTerrainContoursForPolygon(contourTargetPolygon)
           .then(function (result) {
             if (cancelled) {
               return;
             }
+            window.clearTimeout(contourTimeout);
             if (!result || result.validRatio < TERRAIN_CONTOUR_MIN_VALID_RATIO) {
               setTerrainContourGeo([]);
               setTerrainContourError("等高线生成失败，请确认地形数据已预取");
@@ -6374,11 +6399,13 @@
             if (cancelled) {
               return;
             }
+            window.clearTimeout(contourTimeout);
             setTerrainContourGeo([]);
             setTerrainContourError((err && err.message) || "等高线生成失败");
             setSurveyToast("等高线生成失败，请确认地形数据已预取");
           })
           .finally(function () {
+            window.clearTimeout(contourTimeout);
             if (!cancelled) {
               setTerrainContourLoading(false);
             }

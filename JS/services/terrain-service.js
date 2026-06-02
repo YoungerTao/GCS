@@ -82,34 +82,52 @@
     if (Number.isFinite(timeoutMs) && timeoutMs > 0 && typeof AbortController === "function") {
       controller = new AbortController();
       opts.signal = controller.signal;
-      timer = window.setTimeout(function () {
-        controller.abort();
-      }, timeoutMs);
     }
-    return fetch(url, opts).then(
+
+    const requestPromise = fetch(url, opts).then(
       function (r) {
-        if (timer) {
-          window.clearTimeout(timer);
-        }
         if (!r.ok) {
-          return r.json().catch(function () {
-            throw new Error("HTTP " + r.status);
-          }).then(function (body) {
-            throw new Error(body && body.error ? body.error : "HTTP " + r.status);
-          });
+          return r
+            .json()
+            .catch(function () {
+              throw new Error("HTTP " + r.status);
+            })
+            .then(function (body) {
+              throw new Error(body && body.error ? body.error : "HTTP " + r.status);
+            });
         }
         return r.json();
       },
       function (err) {
-        if (timer) {
-          window.clearTimeout(timer);
-        }
         if (err && err.name === "AbortError") {
           throw new Error("请求超时");
         }
         throw err;
       }
     );
+
+    if (!(Number.isFinite(timeoutMs) && timeoutMs > 0)) {
+      return requestPromise;
+    }
+
+    const timeoutPromise = new Promise(function (_, reject) {
+      timer = window.setTimeout(function () {
+        if (controller) {
+          try {
+            controller.abort();
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        reject(new Error("请求超时"));
+      }, timeoutMs);
+    });
+
+    return Promise.race([requestPromise, timeoutPromise]).finally(function () {
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    });
   }
 
   function applyHealthSuccess(data) {
