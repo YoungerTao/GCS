@@ -7,7 +7,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -15,6 +14,7 @@ TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+from gcs_http import local_http_ok  # noqa: E402
 from gcs_supervisor import ensure_bridge_process, bridge_healthy, gcs_python  # noqa: E402
 from map_tiles_supervisor import ensure_tile_server, tile_server_healthy  # noqa: E402
 
@@ -28,11 +28,7 @@ _runtime_proc: subprocess.Popen | None = None
 
 
 def runtime_healthy(timeout_s: float = 1.2) -> bool:
-    try:
-        with urllib.request.urlopen(RUNTIME_PING, timeout=timeout_s) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    return local_http_ok(RUNTIME_PING, timeout_s=timeout_s)
 
 
 def _spawn_runtime_locked() -> None:
@@ -59,7 +55,7 @@ def launch_runtime(wait_s: float = 20.0) -> bool:
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if runtime_healthy():
-            ensure_bridge_process(wait_s=10.0, force_restart=True)
+            ensure_bridge_process(wait_s=10.0, force_restart=not bridge_healthy())
             ensure_tile_server(wait_s=10.0)
             return True
         time.sleep(0.3)

@@ -5,10 +5,13 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
+from gcs_http import local_http_ok
+from gcs_ports import reap_stale_python_listener
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
+BRIDGE_PORT = 8765
 SERVER_SCRIPT = REPO_ROOT / "tools" / "com-bridge" / "server.py"
 BRIDGE_API = "http://127.0.0.1:8765/health"
 BRIDGE_STDOUT_LOG = REPO_ROOT / "tools" / "com-bridge" / "server.stdout.log"
@@ -47,11 +50,7 @@ def _subprocess_flags() -> int:
 
 
 def bridge_healthy(timeout_s: float = 1.5) -> bool:
-    try:
-        with urllib.request.urlopen(BRIDGE_API, timeout=timeout_s) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    return local_http_ok(BRIDGE_API, timeout_s=timeout_s)
 
 
 def _stop_locked() -> None:
@@ -94,6 +93,9 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
         elif _proc is not None and _proc.poll() is not None:
             _proc = None
 
+        if not bridge_healthy(timeout_s=1.0):
+            reap_stale_python_listener(BRIDGE_PORT)
+
         if _proc is None or _proc.poll() is not None:
             _stdout_handle, _stderr_handle = _open_bridge_logs()
             _proc = subprocess.Popen(
@@ -110,9 +112,9 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
             return True
         with _lock:
             if _proc is not None and _proc.poll() is not None:
-                return False
+                return bridge_healthy()
         time.sleep(0.25)
-    return False
+    return bridge_healthy()
 
 
 def watchdog_loop(interval_s: float = 5.0) -> None:
