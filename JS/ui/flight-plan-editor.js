@@ -186,6 +186,37 @@
   const TURN_AROUND_DEFAULT_MULTIROTOR_M = 20;
   const TURN_AROUND_DEFAULT_FIXED_WING_M = 100;
 
+  function ensureLocalTileServerReady() {
+    return fetch("/__gcs/ensure-tile-server", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("高程服务启动失败");
+        }
+        return response.json().catch(function () {
+          return { ok: true };
+        });
+      })
+      .then(function (payload) {
+        if (!payload || payload.ok === false) {
+          throw new Error("高程服务启动失败");
+        }
+        const TS = window.TerrainService;
+        if (TS && typeof TS.probeHealth === "function") {
+          return TS.probeHealth(true).then(function (health) {
+            return !!(health && health.ok);
+          });
+        }
+        return fetch((window.TILE_SERVER || "http://127.0.0.1:8768") + "/health", {
+          cache: "no-store"
+        }).then(function (response) {
+          return response.ok;
+        });
+      });
+  }
+
   function getDefaultTurnAroundMeters(platform) {
     const FWP = window.FixedWingParams;
     if (FWP && FWP.isFixedWingPlatform(platform)) {
@@ -3441,6 +3472,7 @@
     const partitionRecalcTimerRef = useRef(null);
     const latestTerrainContourGeoRef = useRef([]);
     const latestShowTerrainContoursRef = useRef(false);
+    const terrainContourEnsureAttemptRef = useRef(false);
     const demHeadingLastResolveKeyRef = useRef("");
     const demHeadingLastBearingRef = useRef(null);
     const demHeadingRequestIdRef = useRef(0);
@@ -5998,6 +6030,7 @@
     useEffect(
       function () {
         if (!showTerrainContours) {
+          terrainContourEnsureAttemptRef.current = false;
           setTerrainContourLoading(false);
           setTerrainContourError("");
           if (terrainContourGeo.length) {
@@ -6015,14 +6048,41 @@
         }
         const serviceStatus = terrainHealth ? terrainHealth.status : "idle";
         if (serviceStatus !== "online" && serviceStatus !== "online-empty") {
+          if (!terrainContourEnsureAttemptRef.current) {
+            terrainContourEnsureAttemptRef.current = true;
+            setTerrainContourLoading(true);
+            setTerrainContourError("高程服务离线，正在尝试启动本地服务...");
+            ensureLocalTileServerReady()
+              .then(function (ok) {
+                if (!ok) {
+                  throw new Error("高程服务未就绪");
+                }
+                setTerrainContourError("");
+                setSurveyToast("高程服务已启动，正在生成等高线...");
+              })
+              .catch(function (err) {
+                const message =
+                  (err && err.message) || "高程服务未就绪，请通过启动器检查 :8768";
+                setTerrainContourLoading(false);
+                setTerrainContourError(message);
+                setSurveyToast(message);
+              });
+            return;
+          }
           setTerrainContourLoading(false);
           setTerrainContourError("高程服务未就绪");
+          setTerrainContourError(
+            terrainHealth && terrainHealth.lastError
+              ? "高程服务未就绪：" + terrainHealth.lastError
+              : "高程服务未就绪，请启动本地服务 :8768"
+          );
           if (terrainContourGeo.length) {
             setTerrainContourGeo([]);
           }
           return;
         }
 
+        terrainContourEnsureAttemptRef.current = false;
         let cancelled = false;
         latestTerrainContourGeoRef.current = [];
         setTerrainContourLoading(true);
