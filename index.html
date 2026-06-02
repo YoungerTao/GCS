@@ -66,6 +66,10 @@
   <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
   <button id="loadParamsBtn" type="button" onclick="loadParams({ force: true })">加载参数</button>
   <span class="map-tile-controls">
+    <label for="mapBaseLayerSelect" title="切换地图底图">
+      底图
+    </label>
+    <select id="mapBaseLayerSelect" class="map-base-layer-select" aria-label="切换地图底图"></select>
     <button id="mapPrefetchBtn" type="button" title="对当前地图视野预取瓦片">预取地图</button>
     <label for="mapCacheOnly" title="仅使用已下载瓦片，不联网补图">
       <input type="checkbox" id="mapCacheOnly">
@@ -923,9 +927,9 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 <script src="JS/core/globals.js" defer></script>
-<script src="JS/core/map-layers.js?v=20260531b" defer></script>
+<script src="JS/core/map-layers.js?v=20260602a" defer></script>
 <script src="JS/ui/map-prefetch.js?v=20260531b" defer></script>
-<script src="JS/ui/map-tile-settings.js?v=20260531d" defer></script>
+<script src="JS/ui/map-tile-settings.js?v=20260602a" defer></script>
 <script src="JS/core/ardupilot-board-types.js" defer></script>
 <script src="JS/core/ardupilot-devid.js" defer></script>
 <script src="JS/ui/status-messages.js" defer></script>
@@ -970,7 +974,7 @@
 <script src="JS/mission/vehicle-templates.js" defer></script>
 <script src="JS/mission/waypoint-file.js" defer></script>
 <script src="JS/mission/mavlink-mission.js?v=20260517e" defer></script>
-<script src="JS/ui/flight-plan-editor.js?v=20260531f" defer></script>
+<script src="JS/ui/flight-plan-editor.js?v=20260602a" defer></script>
 <script src="JS/ui/quick-grid.js" defer></script>
 <script src="JS/ui/rc-setup.js" defer></script>
 <script src="JS/ui/serial-setup.js" defer></script>

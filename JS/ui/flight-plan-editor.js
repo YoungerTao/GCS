@@ -310,6 +310,19 @@
     return 2 * earthRadius * Math.asin(Math.sqrt(h));
   }
 
+  function pointToSegmentDistance(p, a, b) {
+    const dx = b.lng - a.lng;
+    const dy = b.lat - a.lat;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) {
+      return distanceMetersBetween(p, a);
+    }
+    let t = ((p.lng - a.lng) * dx + (p.lat - a.lat) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const proj = { lng: a.lng + t * dx, lat: a.lat + t * dy };
+    return distanceMetersBetween(p, proj);
+  }
+
   const SURVEY_ROUTE_WP_LABEL_QUADRANTS = ["ne", "nw", "se", "sw"];
 
   function extractSurveyRouteWaypoints(path) {
@@ -1251,12 +1264,72 @@
       html:
         '<span class="fp-survey-vertex-marker-dot" title="区域顶点 ' +
         vertexIndex +
-        '">' +
+        '（拖拽移动，右键菜单删除）">' +
         vertexIndex +
         "</span>",
       iconSize: [28, 28],
       iconAnchor: [14, 14]
     });
+  }
+
+  function showSurveyVertexContextMenu(originalEvent, vertexIndex, deleteCallback) {
+    if (!originalEvent || typeof deleteCallback !== "function") {
+      return;
+    }
+    const existing = document.querySelector(".fp-survey-ctx-menu");
+    if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
+    const menu = document.createElement("div");
+    menu.className = "fp-survey-ctx-menu";
+    menu.innerHTML =
+      '<div class="fp-ctx-item fp-ctx-danger" data-action="delete">删除顶点 ' +
+      (vertexIndex + 1) +
+      '</div><div class="fp-ctx-item" data-action="cancel">取消</div>';
+
+    const pageX = originalEvent.pageX != null ? originalEvent.pageX : originalEvent.clientX + window.scrollX;
+    const pageY = originalEvent.pageY != null ? originalEvent.pageY : originalEvent.clientY + window.scrollY;
+    menu.style.position = "absolute";
+    menu.style.left = pageX + "px";
+    menu.style.top = pageY + "px";
+    menu.style.zIndex = "2500";
+    document.body.appendChild(menu);
+
+    function closeMenu() {
+      if (menu.parentNode) {
+        menu.parentNode.removeChild(menu);
+      }
+      document.removeEventListener("pointerdown", onDocClick, true);
+      document.removeEventListener("keydown", onKey, true);
+    }
+
+    function onDocClick(ev) {
+      if (!menu.contains(ev.target)) {
+        closeMenu();
+      }
+    }
+
+    function onKey(ev) {
+      if (ev.key === "Escape") {
+        closeMenu();
+      }
+    }
+
+    menu.addEventListener("click", function (ev) {
+      const actionEl = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : ev.target;
+      const action = actionEl && actionEl.dataset ? actionEl.dataset.action : null;
+      if (action === "delete") {
+        closeMenu();
+        deleteCallback(vertexIndex);
+      } else if (action === "cancel") {
+        closeMenu();
+      }
+    });
+
+    setTimeout(function () {
+      document.addEventListener("pointerdown", onDocClick, true);
+      document.addEventListener("keydown", onKey, true);
+    }, 0);
   }
 
   function createPartitionVertexMarkerIcon() {
@@ -1833,6 +1906,8 @@
     surveyArea,
     surveyPath,
     onSurveyVertexMoved,
+    onSurveyVertexDeleted,
+    onSurveyVertexInserted,
     layerOptions,
     committedBlocks,
     planningBlocks,
@@ -1989,6 +2064,52 @@
       }
     });
 
+    // Main survey area boundary for editing:
+    // Draw fill polygon first (interactive:false so interior clicks fall through to map append),
+    // then the line on top so clicks on the yellow border can insert vertices.
+    if (surveyArea.length >= 3) {
+      window.L.polygon(
+        surveyArea.map(function (point) {
+          return [point.lat, point.lng];
+        }),
+        {
+          color: "#f0c24f",
+          weight: 2.5,
+          fillColor: "#f0c24f",
+          fillOpacity: 0.18,
+          interactive: false
+        }
+      ).addTo(layers.surveyGroup);
+    }
+
+    if (surveyArea.length >= 2) {
+      const line = window.L.polyline(
+        surveyArea.map(function (point) {
+          return [point.lat, point.lng];
+        }),
+        { color: "#f0c24f", weight: 2.5 }
+      ).addTo(layers.surveyGroup);
+      if (onSurveyVertexInserted) {
+        line.on("click", function (event) {
+          window.L.DomEvent.stopPropagation(event);
+          const ll = event.latlng;
+          const clicked = { lng: round(ll.lng, 6), lat: round(ll.lat, 6) };
+          let bestAfter = 0;
+          let bestD = Infinity;
+          for (let i = 0; i < surveyArea.length; i += 1) {
+            const a = surveyArea[i];
+            const b = surveyArea[(i + 1) % surveyArea.length];
+            const d = pointToSegmentDistance(clicked, a, b);
+            if (d < bestD) {
+              bestD = d;
+              bestAfter = i;
+            }
+          }
+          onSurveyVertexInserted(bestAfter, clicked.lng, clicked.lat);
+        });
+      }
+    }
+
     surveyArea.forEach(function (point, index) {
       const vertexNumber = index + 1;
       const marker = window.L.marker([point.lat, point.lng], {
@@ -2014,31 +2135,20 @@
         });
       }
 
+      if (onSurveyVertexDeleted) {
+        marker.on("contextmenu", function (ev) {
+          window.L.DomEvent.stopPropagation(ev);
+          const orig = ev.originalEvent;
+          if (orig) {
+            orig.preventDefault();
+            orig.stopPropagation();
+          }
+          showSurveyVertexContextMenu(orig || ev, index, onSurveyVertexDeleted);
+        });
+      }
+
       layers.surveyGroup.addLayer(marker);
     });
-
-    if (surveyArea.length >= 2) {
-      window.L.polyline(
-        surveyArea.map(function (point) {
-          return [point.lat, point.lng];
-        }),
-        { color: "#f0c24f", weight: 2.5 }
-      ).addTo(layers.surveyGroup);
-    }
-
-    if (surveyArea.length >= 3) {
-      window.L.polygon(
-        surveyArea.map(function (point) {
-          return [point.lat, point.lng];
-        }),
-        {
-          color: "#f0c24f",
-          weight: 2.5,
-          fillColor: "#f0c24f",
-          fillOpacity: 0.18
-        }
-      ).addTo(layers.surveyGroup);
-    }
 
     if (!(planningBlocks && planningBlocks.length)) {
       const previewSettings = opts.previewSettings;
@@ -2095,6 +2205,8 @@
     surveyPath,
     onWaypointMoved,
     onSurveyVertexMoved,
+    onSurveyVertexDeleted,
+    onSurveyVertexInserted,
     layerOptions,
     committedBlocks,
     syncScope,
@@ -2126,6 +2238,8 @@
         surveyArea,
         surveyPath,
         onSurveyVertexMoved,
+        onSurveyVertexDeleted,
+        onSurveyVertexInserted,
         layerOptions,
         committedBlocks,
         overlayOptions && overlayOptions.planningBlocks,
@@ -3776,19 +3890,19 @@
     }, [resolvedPlatform]);
 
     useEffect(function () {
-      if (!preview3dOpen) {
-        return;
-      }
       function onResize() {
         if (previewThreeApiRef.current && typeof previewThreeApiRef.current.resize === "function") {
           previewThreeApiRef.current.resize();
+        }
+        if (mapRef.current) {
+          mapRef.current.invalidateSize();
         }
       }
       window.addEventListener("resize", onResize);
       return function () {
         window.removeEventListener("resize", onResize);
       };
-    }, [preview3dOpen]);
+    }, []);  // always listen so 2D map recovers on browser resize too
 
     useEffect(function () {
       if (!preview3dOpen || !preview3dData || !previewThreeCanvasRef.current) {
@@ -3816,6 +3930,66 @@
       preview3dView,
       resolvedPlatform
     ]);
+
+    // When 3D preview closes, force the 2D Leaflet map to re-measure its container.
+    // This fixes cases where the map goes black/blank after using the 3D modal.
+    useEffect(function () {
+      if (preview3dOpen) {
+        return;
+      }
+      const t = window.setTimeout(function () {
+        if (mapRef.current) {
+          mapRef.current.invalidateSize();
+          if (layersRef.current) {
+            // also re-sync layers in case something was cleared
+            syncLeafletMissionLayers(
+              layersRef.current,
+              latestWaypointsRef.current,
+              latestSurveyAreaRef.current,
+              latestSurveyPathRef.current,
+              function (index, lng, lat) {
+                if (onWaypointMovedRef.current) {
+                  onWaypointMovedRef.current(index, lng, lat);
+                }
+              },
+              function (index, lng, lat) {
+                if (onSurveyVertexMovedRef.current) {
+                  onSurveyVertexMovedRef.current(index, lng, lat);
+                }
+              },
+              function (index) {
+                if (onSurveyVertexDeletedRef.current) {
+                  onSurveyVertexDeletedRef.current(index);
+                }
+              },
+              function (afterIndex, lng, lat) {
+                if (onSurveyVertexInsertedRef.current) {
+                  onSurveyVertexInsertedRef.current(afterIndex, lng, lat);
+                }
+              },
+              { surveyPathPreview: !surveyCommittedRef.current, previewSettings: latestSettingsRef.current },
+              latestSurveyBlocksRef.current,
+              "all",
+              {
+                platform: latestPlatformRef.current,
+                settings: latestSettingsRef.current,
+                planningBlocks: latestTerrainPlanBlocksRef.current,
+                partition: getPartitionOverlay(),
+                showTerrainContours: latestShowTerrainContoursRef.current,
+                terrainContourGeo: latestTerrainContourGeoRef.current,
+                terrainProfiles: collectTerrainProfilesForMap(
+                  latestTerrainPlanBlocksRef.current,
+                  latestSurveyBlocksRef.current
+                )
+              }
+            );
+          }
+        }
+      }, 60);
+      return function () {
+        window.clearTimeout(t);
+      };
+    }, [preview3dOpen]);
 
     useEffect(function () {
       return function () {
@@ -4180,6 +4354,8 @@
 
     const onWaypointMovedRef = useRef(null);
     const onSurveyVertexMovedRef = useRef(null);
+    const onSurveyVertexDeletedRef = useRef(null);
+    const onSurveyVertexInsertedRef = useRef(null);
 
     const applyTakeoffVehicleSync = useCallback(function () {
       const VT = window.VehicleTemplates;
@@ -4213,6 +4389,18 @@
       };
     }, []);
 
+    const invalidateSurveyTerrainPlan = useCallback(function () {
+      setTerrainPlanBlocks([]);
+      setTerrainPlanIssues([]);
+      setTerrainPlanStats(null);
+      setTerrainPartitionBlocks([]);
+      setTerrainPartitionIssues([]);
+      setPartitionSelection([]);
+      setTerrainAdvisorText("");
+      setSurveyAreaTerrainStats(null);
+      setSurveyAreaStatsLoading(false);
+    }, []);
+
     const handleWaypointMoved = useCallback(function (index, lng, lat) {
       setMissionWaypoints(function (previous) {
         if (index < 0 || index >= previous.length) {
@@ -4235,7 +4423,35 @@
         return next;
       });
       setSurveyCommitted(false);
-    }, []);
+      invalidateSurveyTerrainPlan();
+    }, [invalidateSurveyTerrainPlan]);
+
+    const handleSurveyVertexDeleted = useCallback(function (index) {
+      setSurveyArea(function (previous) {
+        if (index < 0 || index >= previous.length) {
+          return previous;
+        }
+        const next = previous.slice();
+        next.splice(index, 1);
+        return next;
+      });
+      setSurveyCommitted(false);
+      invalidateSurveyTerrainPlan();
+    }, [invalidateSurveyTerrainPlan]);
+
+    const handleSurveyVertexInserted = useCallback(function (afterIndex, lng, lat) {
+      setSurveyArea(function (previous) {
+        if (!Array.isArray(previous) || previous.length === 0) {
+          return [{ lng: lng, lat: lat }];
+        }
+        const idx = Math.max(-1, Math.min(previous.length - 1, afterIndex));
+        const next = previous.slice();
+        next.splice(idx + 1, 0, { lng: lng, lat: lat });
+        return next;
+      });
+      setSurveyCommitted(false);
+      invalidateSurveyTerrainPlan();
+    }, [invalidateSurveyTerrainPlan]);
 
     const bootstrapMissionForSurvey = useCallback(function () {
       const MM = window.MissionModel;
@@ -5133,6 +5349,14 @@
     }, [handleSurveyVertexMoved]);
 
     useEffect(function () {
+      onSurveyVertexDeletedRef.current = handleSurveyVertexDeleted;
+    }, [handleSurveyVertexDeleted]);
+
+    useEffect(function () {
+      onSurveyVertexInsertedRef.current = handleSurveyVertexInserted;
+    }, [handleSurveyVertexInserted]);
+
+    useEffect(function () {
       onPartitionVertexMovedRef.current = handlePartitionVertexMoved;
     }, [handlePartitionVertexMoved]);
 
@@ -5181,6 +5405,16 @@
         function (index, lng, lat) {
           if (onSurveyVertexMovedRef.current) {
             onSurveyVertexMovedRef.current(index, lng, lat);
+          }
+        },
+        function (index) {
+          if (onSurveyVertexDeletedRef.current) {
+            onSurveyVertexDeletedRef.current(index);
+          }
+        },
+        function (afterIndex, lng, lat) {
+          if (onSurveyVertexInsertedRef.current) {
+            onSurveyVertexInsertedRef.current(afterIndex, lng, lat);
           }
         },
         {
@@ -5397,10 +5631,18 @@
     useEffect(function () {
       let disposed = false;
       let retryTimer = null;
+      let mapResizeObserver = null;
 
       function destroyMap() {
         layersRef.current = null;
+        if (mapResizeObserver) {
+          mapResizeObserver.disconnect();
+          mapResizeObserver = null;
+        }
         if (mapRef.current) {
+          if (typeof window.removeGcsMapBaseLayers === "function") {
+            window.removeGcsMapBaseLayers(mapRef.current);
+          }
           mapRef.current.remove();
           mapRef.current = null;
         }
@@ -5441,6 +5683,20 @@
           homeGroup: window.L.layerGroup().addTo(map),
           vehicleGroup: window.L.layerGroup().addTo(map)
         };
+
+        // Robustness: observe container size changes (tab switch, 3D modal, splitters, etc.)
+        // and call invalidateSize so Leaflet map doesn't stay blank/black.
+        if (window.ResizeObserver) {
+          if (mapResizeObserver) {
+            mapResizeObserver.disconnect();
+          }
+          mapResizeObserver = new ResizeObserver(function () {
+            if (mapRef.current) {
+              mapRef.current.invalidateSize();
+            }
+          });
+          mapResizeObserver.observe(container);
+        }
 
         map.on("click", function (event) {
           const clicked = {
@@ -5499,6 +5755,16 @@
           function (index, lng, lat) {
             if (onSurveyVertexMovedRef.current) {
               onSurveyVertexMovedRef.current(index, lng, lat);
+            }
+          },
+          function (index) {
+            if (onSurveyVertexDeletedRef.current) {
+              onSurveyVertexDeletedRef.current(index);
+            }
+          },
+          function (afterIndex, lng, lat) {
+            if (onSurveyVertexInsertedRef.current) {
+              onSurveyVertexInsertedRef.current(afterIndex, lng, lat);
             }
           },
           { surveyPathPreview: !surveyCommittedRef.current, previewSettings: latestSettingsRef.current },
@@ -5576,6 +5842,16 @@
               function (index, lng, lat) {
                 if (onSurveyVertexMovedRef.current) {
                   onSurveyVertexMovedRef.current(index, lng, lat);
+                }
+              },
+              function (index) {
+                if (onSurveyVertexDeletedRef.current) {
+                  onSurveyVertexDeletedRef.current(index);
+                }
+              },
+              function (afterIndex, lng, lat) {
+                if (onSurveyVertexInsertedRef.current) {
+                  onSurveyVertexInsertedRef.current(afterIndex, lng, lat);
                 }
               },
               { surveyPathPreview: !surveyCommittedRef.current, previewSettings: latestSettingsRef.current },
@@ -5890,16 +6166,8 @@
     const handleClearSurvey = useCallback(function () {
       setSurveyArea([]);
       setSurveyCommitted(false);
-      setTerrainPlanBlocks([]);
-      setTerrainPlanIssues([]);
-      setTerrainPlanStats(null);
-      setTerrainPartitionBlocks([]);
-      setTerrainPartitionIssues([]);
-      setPartitionSelection([]);
-      setTerrainAdvisorText("");
-      setSurveyAreaTerrainStats(null);
-      setSurveyAreaStatsLoading(false);
-    }, []);
+      invalidateSurveyTerrainPlan();
+    }, [invalidateSurveyTerrainPlan]);
 
     useEffect(
       function () {
@@ -8438,7 +8706,11 @@
               "span",
               { className: "fp-chip fp-token-note" },
               window.L
-                ? "Leaflet 地图已加载（Esri 卫星 + 高德标注）"
+                ? "Leaflet 地图已加载（" +
+                  (typeof window.getCurrentMapBaseLayerLabel === "function"
+                    ? window.getCurrentMapBaseLayerLabel()
+                    : "底图") +
+                  "）"
                 : "Leaflet 未加载，请检查网络"
             )
           )
