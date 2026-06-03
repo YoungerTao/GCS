@@ -2622,8 +2622,9 @@
       });
   }
 
-  async function generateTerrainContoursForPolygon(polygon) {
+  async function generateTerrainContoursForPolygon(polygon, options) {
     const TS = window.TerrainService;
+    const opts = options || {};
     if (!TS || typeof TS.sampleElevationBatch !== "function") {
       throw new Error("TerrainService 未加载");
     }
@@ -2687,7 +2688,10 @@
       return { contours: [], validRatio: 0, insideCount: 0, interval: 0 };
     }
 
-    const sampled = await TS.sampleElevationBatch(samplePoints, { timeoutMs: 20000 });
+    const sampled = await TS.sampleElevationBatch(samplePoints, {
+      timeoutMs: 20000,
+      signal: opts.signal
+    });
     let sampleIndex = 0;
     let validCount = 0;
     let minElevation = Infinity;
@@ -3601,6 +3605,9 @@
     const latestTerrainContourGeoRef = useRef([]);
     const latestShowTerrainContoursRef = useRef(false);
     const terrainContourEnsureAttemptRef = useRef(false);
+    const terrainContourRequestIdRef = useRef(0);
+    const terrainContourAbortRef = useRef(null);
+    const terrainStatsAbortRef = useRef(null);
     const demHeadingLastResolveKeyRef = useRef("");
     const demHeadingLastBearingRef = useRef(null);
     const demHeadingRequestIdRef = useRef(0);
@@ -4120,6 +4127,20 @@
       [terrainContourViewportRevision]
     );
 
+    const contourTargetKey = useMemo(
+      function () {
+        if (!contourTargetPolygon.length) {
+          return "";
+        }
+        return contourTargetPolygon
+          .map(function (point) {
+            return round(point.lng, 5).toFixed(5) + "," + round(point.lat, 5).toFixed(5);
+          })
+          .join("|");
+      },
+      [contourTargetPolygon]
+    );
+
     const contourTargetAvailable = useMemo(
       function () {
         return contourTargetPolygon.length >= 3;
@@ -4127,41 +4148,76 @@
       [contourTargetPolygon]
     );
 
+    const terrainServiceStatus =
+      terrainHealth && terrainHealth.status ? String(terrainHealth.status) : "idle";
+
     useEffect(
       function () {
         if (!settings.useTerrainFollowing || terrainSurveyPolygon.length < 3) {
+          if (terrainStatsAbortRef.current) {
+            try {
+              terrainStatsAbortRef.current.abort();
+            } catch (_) {
+              /* ignore */
+            }
+            terrainStatsAbortRef.current = null;
+          }
           setSurveyAreaTerrainStats(null);
           setSurveyAreaStatsLoading(false);
           return;
         }
         const TS = window.TerrainService;
         if (!TS || typeof TS.getTerrainStats !== "function") {
+          setSurveyAreaStatsLoading(terrainServiceStatus === "checking" || terrainServiceStatus === "idle");
           return;
         }
-        let cancelled = false;
+        if (terrainStatsAbortRef.current) {
+          try {
+            terrainStatsAbortRef.current.abort();
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        const controller =
+          typeof AbortController === "function" ? new AbortController() : null;
+        terrainStatsAbortRef.current = controller;
         setSurveyAreaStatsLoading(true);
-        TS.getTerrainStats(terrainSurveyPolygon)
+        TS.getTerrainStats(terrainSurveyPolygon, {
+          signal: controller ? controller.signal : null
+        })
           .then(function (stats) {
-            if (!cancelled) {
-              setSurveyAreaTerrainStats(stats || null);
-              setSurveyAreaStatsLoading(false);
+            if (terrainStatsAbortRef.current !== controller) {
+              return;
             }
+            setSurveyAreaTerrainStats(stats || null);
+            setSurveyAreaStatsLoading(false);
           })
-          .catch(function () {
-            if (!cancelled) {
-              setSurveyAreaTerrainStats(null);
-              setSurveyAreaStatsLoading(false);
+          .catch(function (err) {
+            if (terrainStatsAbortRef.current !== controller) {
+              return;
             }
+            if (err && err.message === "请求已取消") {
+              return;
+            }
+            setSurveyAreaTerrainStats(null);
+            setSurveyAreaStatsLoading(false);
           });
         return function () {
-          cancelled = true;
+          if (terrainStatsAbortRef.current === controller) {
+            terrainStatsAbortRef.current = null;
+          }
+          if (controller) {
+            try {
+              controller.abort();
+            } catch (_) {
+              /* ignore */
+            }
+          }
         };
       },
-      [settings.useTerrainFollowing, terrainSurveyPolygon]
+      [settings.useTerrainFollowing, terrainSurveyPolygon, terrainServiceStatus]
     );
 
-    const terrainServiceStatus =
-      terrainHealth && terrainHealth.status ? String(terrainHealth.status) : "idle";
     const terrainStatsRelief =
       surveyAreaTerrainStats != null && Number.isFinite(Number(surveyAreaTerrainStats.relief))
         ? Number(surveyAreaTerrainStats.relief)
@@ -6311,10 +6367,21 @@
 
     useEffect(
       function () {
+        if (terrainContourAbortRef.current) {
+          try {
+            terrainContourAbortRef.current.abort();
+          } catch (_) {
+            /* ignore */
+          }
+          terrainContourAbortRef.current = null;
+        }
         if (!showTerrainContours) {
           terrainContourEnsureAttemptRef.current = false;
           setTerrainContourLoading(false);
           setTerrainContourError("");
+          setSurveyToast(function (prev) {
+            return prev === "高程服务已启动，正在生成等高线..." ? "" : prev;
+          });
           if (terrainContourGeo.length) {
             setTerrainContourGeo([]);
           }
@@ -6323,6 +6390,9 @@
         if (!contourTargetAvailable) {
           setTerrainContourLoading(false);
           setTerrainContourError("");
+          setSurveyToast(function (prev) {
+            return prev === "高程服务已启动，正在生成等高线..." ? "" : prev;
+          });
           if (terrainContourGeo.length) {
             setTerrainContourGeo([]);
           }
@@ -6365,14 +6435,26 @@
         }
 
         terrainContourEnsureAttemptRef.current = false;
-        let cancelled = false;
+        const requestId = terrainContourRequestIdRef.current + 1;
+        terrainContourRequestIdRef.current = requestId;
+        const controller =
+          typeof AbortController === "function" ? new AbortController() : null;
+        terrainContourAbortRef.current = controller;
         latestTerrainContourGeoRef.current = [];
         setTerrainContourLoading(true);
         setTerrainContourError("");
 
         const contourTimeout = window.setTimeout(function () {
-          if (cancelled) {
+          if (terrainContourRequestIdRef.current !== requestId) {
             return;
+          }
+          if (terrainContourAbortRef.current === controller && controller) {
+            try {
+              controller.abort();
+            } catch (_) {
+              /* ignore */
+            }
+            terrainContourAbortRef.current = null;
           }
           setTerrainContourLoading(false);
           setTerrainContourGeo([]);
@@ -6380,9 +6462,11 @@
           setSurveyToast("等高线生成超时，请缩小视野或先预取地形后重试");
         }, 25000);
 
-        generateTerrainContoursForPolygon(contourTargetPolygon)
+        generateTerrainContoursForPolygon(contourTargetPolygon, {
+          signal: controller ? controller.signal : null
+        })
           .then(function (result) {
-            if (cancelled) {
+            if (terrainContourRequestIdRef.current !== requestId) {
               return;
             }
             window.clearTimeout(contourTimeout);
@@ -6394,32 +6478,53 @@
             }
             setTerrainContourGeo(Array.isArray(result.contours) ? result.contours : []);
             setTerrainContourError("");
+            setSurveyToast(function (prev) {
+              return prev === "高程服务已启动，正在生成等高线..." ? "" : prev;
+            });
           })
           .catch(function (err) {
-            if (cancelled) {
+            if (terrainContourRequestIdRef.current !== requestId) {
               return;
             }
             window.clearTimeout(contourTimeout);
+            if (err && err.message === "请求已取消") {
+              setTerrainContourError("");
+              return;
+            }
             setTerrainContourGeo([]);
             setTerrainContourError((err && err.message) || "等高线生成失败");
             setSurveyToast("等高线生成失败，请确认地形数据已预取");
           })
           .finally(function () {
             window.clearTimeout(contourTimeout);
-            if (!cancelled) {
+            if (terrainContourAbortRef.current === controller) {
+              terrainContourAbortRef.current = null;
+            }
+            if (terrainContourRequestIdRef.current === requestId) {
               setTerrainContourLoading(false);
             }
           });
 
         return function () {
-          cancelled = true;
+          window.clearTimeout(contourTimeout);
+          if (terrainContourAbortRef.current === controller) {
+            terrainContourAbortRef.current = null;
+          }
+          if (controller) {
+            try {
+              controller.abort();
+            } catch (_) {
+              /* ignore */
+            }
+          }
         };
       },
       [
         showTerrainContours,
         contourTargetAvailable,
-        contourTargetPolygon,
-        terrainHealth,
+        contourTargetKey,
+        terrainServiceStatus,
+        terrainHealth && terrainHealth.lastError,
         terrainContourGeo.length
       ]
     );
