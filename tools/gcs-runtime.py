@@ -22,6 +22,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 UI_PORT = 8766
 
 
+def tile_server_watchdog_loop(interval_s: float = 10.0) -> None:
+    while True:
+        try:
+            if not tile_server_healthy(timeout_s=1.0):
+                ensure_tile_server_process(force_restart=True, wait_s=15.0)
+        except Exception:
+            pass
+        time.sleep(interval_s)
+
+
 class GcsHttpHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(REPO_ROOT), **kwargs)
@@ -93,11 +103,13 @@ def main() -> int:
     if not ensure_bridge_process(wait_s=15.0):
         print("Failed to start COM bridge on http://127.0.0.1:8765", file=sys.stderr)
         return 1
-    if not ensure_tile_server_process(wait_s=15.0):
-        print("Failed to start tile server on http://127.0.0.1:8768", file=sys.stderr)
-        return 1
+
+    # Tile service is optional during cold start: keep the UI reachable and retry in background.
+    if not ensure_tile_server_process(wait_s=3.0):
+        print("Tile server startup deferred; UI will continue and retry in background.", file=sys.stderr)
 
     threading.Thread(target=watchdog_loop, daemon=True).start()
+    threading.Thread(target=tile_server_watchdog_loop, daemon=True).start()
 
     ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer(("127.0.0.1", UI_PORT), GcsHttpHandler)

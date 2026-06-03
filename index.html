@@ -28,7 +28,7 @@
 <link rel="stylesheet" href="CSS/components/map-prefetch.css">
 <link rel="stylesheet" href="CSS/components/serial-setup.css">
 <link rel="stylesheet" href="CSS/components/safety-setup.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css"/>
 </head>
 <body>
 
@@ -64,7 +64,6 @@
     自动匹配
   </label>
   <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
-  <button id="loadParamsBtn" type="button" onclick="loadParams({ force: true })">加载参数</button>
   <span class="map-tile-controls">
     <label for="mapBaseLayerSelect" title="切换地图底图">
       底图
@@ -923,7 +922,7 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="vendor/leaflet/leaflet.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 <script src="JS/core/globals.js" defer></script>

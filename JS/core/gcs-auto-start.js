@@ -9,11 +9,16 @@
   const TILE_HEALTH = "http://127.0.0.1:8768/health";
   const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
+  function hasFetch() {
+    return typeof global.fetch === "function";
+  }
+
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   async function fetchOk(url, opts) {
+    if (!hasFetch()) return false;
     try {
       const resp = await fetch(url, { cache: "no-store", ...opts });
       return resp.ok;
@@ -120,6 +125,9 @@
     hideBootOverlay();
     global.__gcsStackBootstrapping = true;
     try {
+      if (!hasFetch()) {
+        return false;
+      }
       const runtimeOk = await ensureRuntimeStarted();
       if (runtimeOk) {
         await ensureBridgeFromRuntime();
@@ -148,6 +156,9 @@
   global.__gcsBootstrapPromise = bootstrap();
 
   global.ensureGcsStackReady = async function ensureGcsStackReady() {
+    if (!hasFetch()) {
+      return false;
+    }
     if (global.__gcsBootstrapPromise) {
       await global.__gcsBootstrapPromise;
     }

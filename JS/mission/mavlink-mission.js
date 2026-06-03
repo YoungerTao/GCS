@@ -4,6 +4,39 @@
   const MAV_MISSION_ACCEPTED = 0;
   const MAV_MISSION_TYPE_MISSION = 0;
 
+  function getValidTelemetryHome() {
+    const home = window.homeState || (window.telemetry && window.telemetry.home) || null;
+    if (!home || home.valid !== true) {
+      return null;
+    }
+    return {
+      lat: Number(home.lat),
+      lng: Number(home.lng),
+      alt: Number(home.alt) || 0,
+      valid: true,
+      source: home.source || "telemetry"
+    };
+  }
+
+  function dispatchMissionSyncSuccess(source, waypoints) {
+    const home = getValidTelemetryHome();
+    if (!home) {
+      return false;
+    }
+    const detail = {
+      source: source,
+      waypoints: Array.isArray(waypoints) ? waypoints.map(function (wp) {
+        return Object.assign({}, wp);
+      }) : [],
+      home: home
+    };
+    try {
+      document.dispatchEvent(new CustomEvent("gcs-mission-sync-success", { detail: detail }));
+      window.dispatchEvent(new CustomEvent("gcs-mission-sync-success", { detail: detail }));
+    } catch (_) { /* ignore */ }
+    return true;
+  }
+
   function i32bytes(v) {
     const n = Math.round(Number(v));
     return [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff];
@@ -157,6 +190,7 @@
     return MM.createWaypoint({
       command: cmd,
       frame: item.frame,
+      mission_type: item.mission_type,
       param1: item.param1,
       param2: item.param2,
       param3: item.param3,
@@ -486,6 +520,7 @@
       if (window._missionTransfer && window._missionTransfer.error) {
         throw new Error(window._missionTransfer.error);
       }
+      dispatchMissionSyncSuccess("upload", list);
       resetMissionSession();
       return list;
     } finally {
@@ -595,6 +630,13 @@
                 .filter(Boolean)
                 .map(missionItemToWaypoint)
             );
+            const validMissionItems = (window._missionTransfer.items || []).filter(function (item) {
+              return item && item.mission_type === MAV_MISSION_TYPE_MISSION;
+            });
+            if (validMissionItems.length !== count) {
+              throw new Error("下载任务校验失败：任务项数量或 mission_type 不匹配");
+            }
+            dispatchMissionSyncSuccess("download", result);
             resetMissionSession();
             return result;
           } catch (err) {

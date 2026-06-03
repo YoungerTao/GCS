@@ -8,6 +8,10 @@
   const RETRY_MS = 1500;
   const FETCH_TIMEOUT_MS = 1800;
 
+  function hasFetch() {
+    return typeof global.fetch === "function";
+  }
+
   function withTimeout(promise, timeoutMs) {
     return new Promise(function (resolve, reject) {
       const timer = global.setTimeout(function () {
@@ -26,6 +30,9 @@
   }
 
   async function fetchJson(url) {
+    if (!hasFetch()) {
+      throw new Error("fetch unavailable");
+    }
     const resp = await withTimeout(
       fetch(url, { cache: "no-store", mode: "cors" }),
       FETCH_TIMEOUT_MS
@@ -102,13 +109,15 @@
     const title = allOk ? "启动自检正常" : "启动自检异常";
     const hint = allOk
       ? "服务已就绪，可以直接使用。"
-      : "请稍候几秒；若仍失败，请检查桌面快捷方式、.venv 和 8768 瓦片服务。";
+      : "请稍候几秒；如果仍然失败，请检查桌面快捷方式、venv 和 8768 瓦片服务。";
+
     el.className =
       "gcs-startup-check " +
       (allOk ? "gcs-startup-check--ok" : "gcs-startup-check--bad");
     if (!finalState && !allOk) {
       el.className += " gcs-startup-check--pending";
     }
+
     el.innerHTML =
       '<div class="gcs-startup-check__title">' +
       title +
@@ -124,6 +133,7 @@
       hint +
       "</div>";
     el.hidden = false;
+
     if (allOk && finalState) {
       global.setTimeout(function () {
         el.hidden = true;
@@ -132,6 +142,9 @@
   }
 
   async function bootstrapChecks() {
+    if (!hasFetch()) {
+      return;
+    }
     const boot = global.__gcsBootstrapPromise;
     if (boot && typeof boot.then === "function") {
       try {

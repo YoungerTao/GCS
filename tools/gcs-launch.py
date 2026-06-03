@@ -66,12 +66,12 @@ def _post_launch(wait_s: float = 45.0) -> bool:
 def _ensure_runtime_stack(wait_s: float = 45.0) -> bool:
     if not _post_launch(wait_s=wait_s):
         return False
-    deadline = time.time() + min(wait_s, 15.0)
+    deadline = time.time() + min(wait_s, 10.0)
     while time.time() < deadline:
-        if _url_ok(RUNTIME_PING, 1.0) and _url_ok(TILE_SERVER_HEALTH, 1.0):
+        if _url_ok(RUNTIME_PING, 1.0):
             return True
         time.sleep(0.25)
-    return _url_ok(RUNTIME_PING, 1.0) and _url_ok(TILE_SERVER_HEALTH, 1.0)
+    return _url_ok(RUNTIME_PING, 1.0)
 
 
 def _clear_launch_lock() -> None:
@@ -88,7 +88,7 @@ def main() -> int:
         if _url_ok(RUNTIME_PING, 1.5):
             _spawn_watchdog()
             if not _url_ok(TILE_SERVER_HEALTH, 1.5):
-                _ensure_runtime_stack(wait_s=25.0)
+                _post_launch(wait_s=5.0)
             webbrowser.open(UI_URL)
             return 0
 
@@ -97,7 +97,7 @@ def main() -> int:
             return 1
 
         for _ in range(30):
-            if _url_ok(RUNTIME_PING, 1.0) and _url_ok(TILE_SERVER_HEALTH, 1.0):
+            if _url_ok(RUNTIME_PING, 1.0):
                 webbrowser.open(UI_URL)
                 return 0
             time.sleep(0.2)

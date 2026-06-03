@@ -7,8 +7,13 @@
 
   const MAV_CMD = {
     NAV_WAYPOINT: 16,
+    NAV_LOITER_UNLIM: 17,
+    NAV_LOITER_TURNS: 18,
+    NAV_LOITER_TIME: 19,
+    NAV_LAND: 21,
     NAV_LOITER_TO_ALT: 31,
     NAV_TAKEOFF: 22,
+    NAV_SPLINE_WAYPOINT: 82,
     NAV_VTOL_TAKEOFF: 84,
     NAV_VTOL_LAND: 85,
     NAV_RETURN_TO_LAUNCH: 20,
@@ -27,8 +32,13 @@
 
   const CMD_LABELS = {
     16: "航点",
+    17: "盘旋",
+    18: "盘旋圈数",
+    19: "盘旋定时",
+    21: "降落",
     31: "盘旋",
     22: "起飞",
+    82: "样条航点",
     84: "垂直起飞",
     85: "垂起降落",
     20: "返航",
@@ -40,6 +50,11 @@
 
   const ROLE_MAP_LABELS = {
     22: "起飞",
+    21: "降落",
+    17: "盘旋",
+    18: "盘旋圈数",
+    19: "盘旋定时",
+    82: "样条航点",
     84: "垂直起飞",
     31: "盘旋",
     20: "返航",
@@ -149,6 +164,38 @@
 
   function isMapVisibleWaypoint(wp) {
     return Boolean(wp) && wp.mapVisible !== false && wp.source !== "camera";
+  }
+
+  function isRenderableNavCommand(command) {
+    return (
+      command === MAV_CMD.NAV_TAKEOFF ||
+      command === MAV_CMD.NAV_WAYPOINT ||
+      command === MAV_CMD.NAV_SPLINE_WAYPOINT ||
+      command === MAV_CMD.NAV_LOITER_UNLIM ||
+      command === MAV_CMD.NAV_LOITER_TURNS ||
+      command === MAV_CMD.NAV_LOITER_TIME ||
+      command === MAV_CMD.NAV_LAND
+    );
+  }
+
+  function isDoCommand(command) {
+    const cmd = Number(command);
+    return (cmd >= 176 && cmd < 3000) || cmd === MAV_CMD.DO_VTOL_TRANSITION || cmd === MAV_CMD.DO_SET_CAM_TRIGG_DIST;
+  }
+
+  function isCondCommand(command) {
+    const cmd = Number(command);
+    return cmd >= 112 && cmd < 160;
+  }
+
+  function isValidMissionGeo(lat, lng) {
+    return (
+      Number.isFinite(Number(lat)) &&
+      Number.isFinite(Number(lng)) &&
+      Math.abs(Number(lat)) <= 90 &&
+      Math.abs(Number(lng)) <= 180 &&
+      !(Number(lat) === 0 && Number(lng) === 0)
+    );
   }
 
   function createCameraTriggerStart(afterWp, triggerDistanceMeters, blockId) {
@@ -313,6 +360,10 @@
     isMapVisibleWaypoint: isMapVisibleWaypoint,
     buildSurveyMapVisibilitySet: buildSurveyMapVisibilitySet,
     applySurveyMapVisibility: applySurveyMapVisibility,
+    isRenderableNavCommand: isRenderableNavCommand,
+    isDoCommand: isDoCommand,
+    isCondCommand: isCondCommand,
+    isValidMissionGeo: isValidMissionGeo,
     createCameraTriggerStart: createCameraTriggerStart,
     createCameraTriggerStop: createCameraTriggerStop,
     appendSurveyCameraCommands: appendSurveyCameraCommands,
