@@ -61,6 +61,62 @@
   color: #f08080;
 }
 
+.gcs-startup-check {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 13000;
+  width: min(420px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #4c5159;
+  background: rgba(25, 30, 36, 0.96);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  color: #e9edf2;
+}
+
+.gcs-startup-check--ok {
+  border-color: rgba(82, 180, 109, 0.85);
+}
+
+.gcs-startup-check--bad {
+  border-color: rgba(234, 95, 95, 0.9);
+}
+
+.gcs-startup-check--pending {
+  border-style: dashed;
+}
+
+.gcs-startup-check__title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.gcs-startup-check__grid {
+  display: grid;
+  gap: 6px;
+}
+
+.gcs-startup-check__item {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.gcs-startup-check__ok {
+  color: #8ddd9b;
+}
+
+.gcs-startup-check__bad {
+  color: #ff9b9b;
+}
+
+.gcs-startup-check__hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #aeb7c3;
+}
+
 .gcs-prefetch-modal {
   position: fixed;
   inset: 0;
