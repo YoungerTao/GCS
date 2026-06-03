@@ -3,9 +3,16 @@ rem Developer helper (visible errors). Customers use desktop GCS / GCS.cmd (no c
 setlocal
 cd /d "%~dp0"
 
-set "PY=pythonw"
-where pythonw >nul 2>&1 || set "PY=python"
-where %PY% >nul 2>&1 || (
+set "PY=%CD%\.venv\Scripts\pythonw.exe"
+if not exist "%PY%" set "PY=%CD%\.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=pythonw"
+where pythonw >nul 2>&1 || if /I "%PY%"=="pythonw" set "PY=python"
+if /I "%PY%"=="python" where python >nul 2>&1 || (
+  echo Python not found.
+  pause
+  exit /b 1
+)
+if /I not "%PY%"=="python" if /I not "%PY%"=="pythonw" if not exist "%PY%" (
   echo Python not found.
   pause
   exit /b 1

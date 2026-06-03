@@ -40,11 +40,12 @@ echo.>"%TEMP%\gcs-launch.lock"
 
 
 
-set "PY=pythonw"
-
-where pythonw >nul 2>&1 || set "PY=python"
-
-where %PY% >nul 2>&1 || goto :no_python
+set "PY=%CD%\.venv\Scripts\pythonw.exe"
+if not exist "%PY%" set "PY=%CD%\.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=pythonw"
+where pythonw >nul 2>&1 || if /I "%PY%"=="pythonw" set "PY=python"
+if /I "%PY%"=="python" where python >nul 2>&1 || goto :no_python
+if /I not "%PY%"=="python" if /I not "%PY%"=="pythonw" if not exist "%PY%" goto :no_python
 
 
 
