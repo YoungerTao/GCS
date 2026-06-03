@@ -1,11 +1,12 @@
-/**
- * 顶栏：地图预取 / 仅缓存 / 瓦片服务状态。
- */
 (function () {
-  const TILE_API = typeof window.TILE_SERVER === "string" ? window.TILE_SERVER : "http://127.0.0.1:8768";
-
   function $(id) {
     return document.getElementById(id);
+  }
+
+  function currentBaseLayer() {
+    return typeof window.getCurrentMapBaseLayerConfig === "function"
+      ? window.getCurrentMapBaseLayerConfig()
+      : null;
   }
 
   function setStatus(text, ok) {
@@ -18,22 +19,59 @@
     el.classList.toggle("map-tile-status--err", ok === false);
   }
 
+  function renderBaseLayerOptions() {
+    const select = $("mapBaseLayerSelect");
+    if (!select || typeof window.getAvailableMapBaseLayers !== "function") {
+      return;
+    }
+    const layers = window.getAvailableMapBaseLayers();
+    const activeId =
+      typeof window.getCurrentMapBaseLayerId === "function"
+        ? window.getCurrentMapBaseLayerId()
+        : "";
+    select.innerHTML = layers
+      .map(function (item) {
+        const selected = item.id === activeId ? ' selected="selected"' : "";
+        return (
+          '<option value="' +
+          item.id +
+          '"' +
+          selected +
+          ">" +
+          item.label +
+          "</option>"
+        );
+      })
+      .join("");
+  }
+
   function renderHealth(snapshot) {
+    const baseLayer = currentBaseLayer();
+    if (!baseLayer) {
+      setStatus("底图未就绪", false);
+      return;
+    }
+
+    if (!baseLayer.supportsLocalTileServer) {
+      setStatus(baseLayer.label + " · 在线", true);
+      return;
+    }
+
     if (!snapshot) {
-      setStatus("检测中…", null);
+      setStatus(baseLayer.label + " · 检测中…", null);
       return;
     }
     if (snapshot.status === "offline") {
-      setStatus("瓦片服务离线", false);
+      setStatus(baseLayer.label + " · 在线回退", false);
       return;
     }
     const health = snapshot.health;
     if (!health || !health.ok) {
       if (snapshot.status === "checking" || snapshot.status === "idle") {
-        setStatus("检测中…", null);
+        setStatus(baseLayer.label + " · 检测中…", null);
         return;
       }
-      setStatus("瓦片服务离线", false);
+      setStatus(baseLayer.label + " · 在线回退", false);
       return;
     }
     const cached = health.cachedTiles != null ? health.cachedTiles : 0;
@@ -50,14 +88,29 @@
     if (snapshot.inFlight && snapshot.lastError) {
       extra += " · 重试中";
     }
-    const terrainNote = health.terrainReady ? " · 地形就绪" : terrainCached ? " · 地形 " + terrainCached : "";
-    setStatus("缓存 " + cached + " 张" + terrainNote + extra, true);
+    const terrainNote = health.terrainReady
+      ? " · 地形就绪"
+      : terrainCached
+        ? " · 地形 " + terrainCached
+        : "";
+    setStatus(baseLayer.label + " · 缓存 " + cached + " 张" + terrainNote + extra, true);
   }
 
   function wireUi() {
     const cacheOnly = $("mapCacheOnly");
     const prefetchBtn = $("mapPrefetchBtn");
+    const baseLayerSelect = $("mapBaseLayerSelect");
     let bindTimer = 0;
+
+    renderBaseLayerOptions();
+
+    if (baseLayerSelect) {
+      baseLayerSelect.addEventListener("change", function () {
+        if (typeof window.setCurrentMapBaseLayerId === "function") {
+          window.setCurrentMapBaseLayerId(baseLayerSelect.value);
+        }
+      });
+    }
 
     if (cacheOnly && typeof window.getGcsMapCacheOnly === "function") {
       cacheOnly.checked = window.getGcsMapCacheOnly();
@@ -65,7 +118,16 @@
         if (typeof window.setGcsMapCacheOnly === "function") {
           window.setGcsMapCacheOnly(!!cacheOnly.checked);
         }
-        setStatus("仅缓存已" + (cacheOnly.checked ? "开启" : "关闭") + "，刷新地图生效", true);
+        if (typeof window.refreshGcsMapBaseLayers === "function") {
+          window.refreshGcsMapBaseLayers();
+        }
+        const baseLayer = currentBaseLayer();
+        setStatus(
+          (baseLayer ? baseLayer.label : "底图") +
+            " · 仅缓存已" +
+            (cacheOnly.checked ? "开启" : "关闭"),
+          true
+        );
       });
     }
 
@@ -76,11 +138,14 @@
           window.flightPlanMap ||
           (window.GcsMapPrefetch && window.GcsMapPrefetch._lastMap);
         if (!map) {
-          setStatus("请打开含地图的视图", false);
+          setStatus("请打开包含地图的页面", false);
           return;
         }
         const b = map.getBounds();
-        if (window.GcsMapPrefetch && typeof window.GcsMapPrefetch.openPrefetchDialog === "function") {
+        if (
+          window.GcsMapPrefetch &&
+          typeof window.GcsMapPrefetch.openPrefetchDialog === "function"
+        ) {
           window.GcsMapPrefetch.openPrefetchDialog(b);
         }
       });
@@ -100,10 +165,35 @@
           });
         }
       } else {
-        setStatus("检测中…", null);
+        const baseLayer = currentBaseLayer();
+        if (baseLayer && !baseLayer.supportsLocalTileServer) {
+          renderHealth(null);
+        } else {
+          setStatus((baseLayer ? baseLayer.label : "底图") + " · 检测中…", null);
+        }
         bindTimer = window.setTimeout(bindHealth, 1000);
       }
     }
+
+    window.addEventListener("gcs:map-base-layer-changed", function () {
+      renderBaseLayerOptions();
+      const TS = window.TerrainService;
+      if (TS && typeof TS.getHealthState === "function") {
+        renderHealth(TS.getHealthState());
+      } else {
+        renderHealth(null);
+      }
+    });
+
+    window.addEventListener("gcs:map-base-layer-runtime-changed", function () {
+      const TS = window.TerrainService;
+      if (TS && typeof TS.getHealthState === "function") {
+        renderHealth(TS.getHealthState());
+      } else {
+        renderHealth(null);
+      }
+    });
+
     bindHealth();
   }
 

@@ -76,40 +76,101 @@
   function fetchJson(url, options) {
     const opts = Object.assign({ mode: "cors", cache: "no-store" }, options || {});
     const timeoutMs = Number(opts.timeoutMs);
+    const externalSignal = opts.signal || null;
     delete opts.timeoutMs;
+    delete opts.signal;
     let controller = null;
     let timer = 0;
-    if (Number.isFinite(timeoutMs) && timeoutMs > 0 && typeof AbortController === "function") {
+    let removeAbortListener = null;
+    let abortedByCaller = false;
+    let abortedByTimeout = false;
+    if (
+      typeof AbortController === "function" &&
+      (Number.isFinite(timeoutMs) && timeoutMs > 0 || externalSignal)
+    ) {
       controller = new AbortController();
       opts.signal = controller.signal;
-      timer = window.setTimeout(function () {
-        controller.abort();
-      }, timeoutMs);
-    }
-    return fetch(url, opts).then(
-      function (r) {
-        if (timer) {
-          window.clearTimeout(timer);
+      if (externalSignal) {
+        if (externalSignal.aborted) {
+          abortedByCaller = true;
+          controller.abort();
+        } else if (typeof externalSignal.addEventListener === "function") {
+          const onAbort = function () {
+            abortedByCaller = true;
+            try {
+              controller.abort();
+            } catch (_) {
+              /* ignore */
+            }
+          };
+          externalSignal.addEventListener("abort", onAbort, { once: true });
+          removeAbortListener = function () {
+            try {
+              externalSignal.removeEventListener("abort", onAbort);
+            } catch (_) {
+              /* ignore */
+            }
+          };
         }
+      }
+    } else if (externalSignal) {
+      opts.signal = externalSignal;
+    }
+
+    const requestPromise = fetch(url, opts).then(
+      function (r) {
         if (!r.ok) {
-          return r.json().catch(function () {
-            throw new Error("HTTP " + r.status);
-          }).then(function (body) {
-            throw new Error(body && body.error ? body.error : "HTTP " + r.status);
-          });
+          return r
+            .json()
+            .catch(function () {
+              throw new Error("HTTP " + r.status);
+            })
+            .then(function (body) {
+              throw new Error(body && body.error ? body.error : "HTTP " + r.status);
+            });
         }
         return r.json();
       },
       function (err) {
-        if (timer) {
-          window.clearTimeout(timer);
-        }
         if (err && err.name === "AbortError") {
+          if (abortedByCaller) {
+            throw new Error("请求已取消");
+          }
+          if (abortedByTimeout) {
+            throw new Error("请求超时");
+          }
           throw new Error("请求超时");
         }
         throw err;
       }
     );
+
+    if (!(Number.isFinite(timeoutMs) && timeoutMs > 0)) {
+      return requestPromise;
+    }
+
+    const timeoutPromise = new Promise(function (_, reject) {
+      timer = window.setTimeout(function () {
+        if (controller) {
+          abortedByTimeout = true;
+          try {
+            controller.abort();
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        reject(new Error("请求超时"));
+      }, timeoutMs);
+    });
+
+    return Promise.race([requestPromise, timeoutPromise]).finally(function () {
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+      if (typeof removeAbortListener === "function") {
+        removeAbortListener();
+      }
+    });
   }
 
   function applyHealthSuccess(data) {
@@ -242,6 +303,7 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       timeoutMs: opts.timeoutMs != null ? opts.timeoutMs : 60000,
+      signal: opts.signal,
       body: JSON.stringify({
         points: points || [],
         cacheOnly: !!opts.cacheOnly
@@ -273,6 +335,7 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       timeoutMs: opts.timeoutMs != null ? opts.timeoutMs : 60000,
+      signal: opts.signal,
       body: JSON.stringify({
         polygon: polygon || [],
         cacheOnly: !!opts.cacheOnly

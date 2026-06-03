@@ -1744,3 +1744,32 @@
     margin: 10px;
   }
 }
+
+/* survey vertex context menu (right-click delete) */
+.fp-survey-ctx-menu {
+  position: absolute;
+  z-index: 2500;
+  background: #1f242b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  min-width: 120px;
+  font-size: 13px;
+  color: #ddd;
+  overflow: hidden;
+}
+.fp-ctx-item {
+  padding: 8px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fp-ctx-item:hover {
+  background: #2a313a;
+}
+.fp-ctx-item.fp-ctx-danger {
+  color: #ff8a8a;
+}
+.fp-ctx-item.fp-ctx-danger:hover {
+  background: #3a2626;
+}

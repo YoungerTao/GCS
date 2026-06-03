@@ -7,14 +7,18 @@
   const WPL_VERSION = "QGC WPL 110";
 
   function commandToRow(wp, seq) {
-    const frame = wp.frame != null ? wp.frame : MM.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT;
+    const frame =
+      wp.frame != null ? wp.frame : MM.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT;
     const p1 = Number(wp.param1) || 0;
     const p2 = Number(wp.param2) || 0;
     const p3 = Number(wp.param3) || 0;
     const p4 = Number(wp.param4) || 0;
     const lat = Number(wp.lat) || 0;
     const lng = Number(wp.lng) || 0;
-    const alt = Number(wp.alt) != null && Number.isFinite(Number(wp.alt)) ? Number(wp.alt) : 0;
+    const alt =
+      Number(wp.alt) != null && Number.isFinite(Number(wp.alt))
+        ? Number(wp.alt)
+        : 0;
     const cmd = Number(wp.command) || MM.MAV_CMD.NAV_WAYPOINT;
     const AP = window.ArdupilotMissionCompat;
     const isHome = AP && AP.isHomeRow && AP.isHomeRow(wp, seq);
@@ -43,7 +47,10 @@
       list = FWP.normalizeWaypointsForPlatform(list, platform);
     }
     list = MM.renumberWaypoints(list);
-    if (window.ArdupilotMissionCompat && window.ArdupilotMissionCompat.expandWithHomeRow) {
+    if (
+      window.ArdupilotMissionCompat &&
+      window.ArdupilotMissionCompat.expandWithHomeRow
+    ) {
       list = window.ArdupilotMissionCompat.expandWithHomeRow(list);
     }
     list.forEach(function (wp, index) {
@@ -55,8 +62,8 @@
   function parseWaypointFile(text) {
     const lines = String(text || "")
       .split(/\r?\n/)
-      .map(function (l) {
-        return l.trim();
+      .map(function (line) {
+        return line.trim();
       })
       .filter(Boolean);
     if (!lines.length) {
@@ -65,17 +72,20 @@
     if (!/^QGC\s+WPL\s+\d+/i.test(lines[0])) {
       throw new Error("不是 QGC WPL 航点文件");
     }
+
     const waypoints = [];
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = 1; i < lines.length; i += 1) {
       const parts = lines[i].split(/\s+/);
       if (parts.length < 12) {
         continue;
       }
+
       const cmd = Number(parts[3]);
       const isCameraCmd =
         cmd === MM.MAV_CMD.DO_SET_CAM_TRIGG_DIST ||
         cmd === MM.MAV_CMD.IMAGE_START_CAPTURE ||
         cmd === MM.MAV_CMD.IMAGE_STOP_CAPTURE;
+
       waypoints.push(
         MM.createWaypoint({
           seq: waypoints.length,
@@ -98,7 +108,11 @@
         })
       );
     }
-    if (window.ArdupilotMissionCompat && window.ArdupilotMissionCompat.stripHomeRowForEditor) {
+
+    if (
+      window.ArdupilotMissionCompat &&
+      window.ArdupilotMissionCompat.stripHomeRowForEditor
+    ) {
       return window.ArdupilotMissionCompat.stripHomeRowForEditor(waypoints);
     }
     return MM.renumberWaypoints(waypoints);
