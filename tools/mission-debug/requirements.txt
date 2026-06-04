@@ -1,2 +1,4 @@
+# Legacy / subdir reference. See repo ROOT requirements.txt for the canonical list (includes pymavlink + pyserial + dronecan).
+# For this debug tool's venv: pip install -r ../../requirements.txt (from mission-debug/ dir).
 pymavlink>=2.4.40
 pyserial>=3.5

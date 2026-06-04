@@ -13,12 +13,35 @@ try:
 except Exception:
     serial = None
 
+
+def _is_microsoft_store_python(exe: str) -> bool:
+    """MS Store / sandboxed python cannot access COM ports or project files on arbitrary drives."""
+    s = (exe or "").lower().replace("\\", "/")
+    return "windowsapps" in s or "pythonsoftwarefoundation" in s
+
+
+if _is_microsoft_store_python(sys.executable):
+    raise RuntimeError(
+        "检测到 Microsoft Store 版 Python（sys.executable 含 WindowsApps），"
+        "该版本沙箱限制导致无法打开串口（WriteFile failed PermissionError '设备不识别此命令'）"
+        "和无法读取 JS/data/apm-param-db.json 等文件。\n"
+        "请安装 https://www.python.org/downloads/ 的官方 Python，删除 .venv 后重新 setup。"
+    )
+
 try:
     from pymavlink import mavutil
     from pymavlink.dialects.v20 import ardupilotmega as mavlink2
 except Exception:
     mavutil = None
     mavlink2 = None
+
+try:
+    import dronecan
+except Exception:
+    dronecan = None
+# 注意：当前 bridge 主要通过 SLCAN ASCII + MAVLink 交互实现 DroneCAN 功能（见 JS 侧 dronecan-setup.js）。
+# 引入 dronecan 包主要是为了让完整 Python DroneCAN 场景（或未来扩展）可用。
+# 如果这里为 None，后续若有使用 dronecan 的代码需像 serial/pymavlink 一样加 guard 并通过 _last_bridge_error 报错。
 
 
 OTA_SESSIONS = {}

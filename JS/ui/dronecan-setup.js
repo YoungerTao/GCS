@@ -425,7 +425,17 @@
       data = {};
     }
     if (!resp.ok || data?.ok === false) {
-      throw new Error(data?.error || `${path} failed (${resp.status})`);
+      let msg = data?.error || `${path} failed (${resp.status})`;
+      // Surface store-python / fs / serial startup errors from supervisor
+      if (typeof window.getBridgeStartupError === "function") {
+        try {
+          const startupErr = await window.getBridgeStartupError();
+          if (startupErr && /store|windowsapps|pythonsoftware|WriteFile|Permission|沙箱|设备不识别/i.test(String(startupErr))) {
+            msg = `${msg} | 启动错误: ${startupErr}`;
+          }
+        } catch (_) {}
+      }
+      throw new Error(msg);
     }
     return data;
   }

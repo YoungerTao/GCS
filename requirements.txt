@@ -1,0 +1,19 @@
+# GCS core runtime Python dependencies.
+# Used by the COM bridge (8765), launchers/watchdog/runtime (8766/8767), tile server, and DroneCAN support.
+#
+# For end users (recommended after git clone):
+#   Double-click "GCS-安装桌面快捷方式.bat" (it creates .venv + runs pip install -r + creates desktop shortcut).
+#
+# For manual / dev:
+#   python -m venv .venv
+#   .venv\Scripts\pip install -U pip
+#   .venv\Scripts\pip install -r requirements.txt
+#   (On macOS/Linux: use .venv/bin/...)
+#
+# To add a new core dependency: append here (with pin), then re-run the install .bat (or pip).
+# Dev-only / tool-only packages (playwright, deep-translator, numpy, pillow, etc.) are NOT listed here.
+# They are only needed for specific scripts under tools/ (e.g. translate, debug screenshots, icon build).
+
+pyserial>=3.5
+pymavlink>=2.4
+dronecan>=1.0

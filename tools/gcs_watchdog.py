@@ -10,6 +10,18 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+
+def _is_microsoft_store_python(exe: str) -> bool:
+    s = (exe or "").lower().replace("\\", "/")
+    return "windowsapps" in s or "pythonsoftwarefoundation" in s
+
+
+if _is_microsoft_store_python(sys.executable):
+    raise RuntimeError(
+        "GCS watchdog 启动使用的是 Microsoft Store 版 Python（沙箱），后续服务将无法正常访问文件/串口。"
+        "请改用官方 Python 安装。"
+    )
+
 TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
@@ -22,6 +34,9 @@ REPO_ROOT = TOOLS_DIR.parent
 RUNTIME_SCRIPT = TOOLS_DIR / "gcs-runtime.py"
 LAUNCHER_PORT = 8767
 RUNTIME_PING = "http://127.0.0.1:8766/__gcs/ping"
+
+RUNTIME_STDOUT_LOG = TOOLS_DIR / "gcs-runtime.stdout.log"
+RUNTIME_STDERR_LOG = TOOLS_DIR / "gcs-runtime.stderr.log"
 
 _launch_lock = threading.Lock()
 _runtime_proc: subprocess.Popen | None = None
@@ -40,11 +55,18 @@ def _spawn_runtime_locked() -> None:
     flags = 0
     if sys.platform == "win32":
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    RUNTIME_STDOUT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        out_h = RUNTIME_STDOUT_LOG.open("ab")
+        err_h = RUNTIME_STDERR_LOG.open("ab")
+    except Exception:
+        out_h = subprocess.DEVNULL
+        err_h = subprocess.DEVNULL
     _runtime_proc = subprocess.Popen(
         [gcs_python(), str(RUNTIME_SCRIPT), "--no-browser"],
         cwd=str(REPO_ROOT),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=out_h,
+        stderr=err_h,
         creationflags=flags,
     )
 

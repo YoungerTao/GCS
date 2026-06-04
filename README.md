@@ -74,13 +74,41 @@ python translate_params_ai.py --model gpt-5.4-mini --limit 200
 
 需要：**VS Code / Cursor + Live Server 扩展 + Python 3 + Chrome**；内置浏览器为可选第二条路线。
 
+**重要：必须使用官方 Python（python.org 下载的 installer），不要用 Microsoft Store / 应用商店版 Python。**
+Store 版 Python 路径含 `WindowsApps`，受 Windows 沙箱限制，会导致：
+- 无法读取 `JS/data/apm-param-db.json`（UI 显示“未加载 apm-param-db.json”）
+- DroneCAN 节点参数 Load/Refresh 失败：`WriteFile failed (PermissionError(13, '设备不识别此命令。'))`
+Store 版即使能启动，也无法访问串口和 clone 后的项目目录。
+
+推荐：从 https://www.python.org/downloads/windows/ 下载，安装时勾选 “Add Python to PATH” 和 “py launcher”。
+
+## 首次使用（新用户 / git clone 后 —— 最高优先级推荐流程）
+
+普通用户（非开发者）请严格按以下 4 步操作，即可实现：`git clone → 双击一个 bat → 双击桌面图标` 即可正常使用（包括 DroneCAN Node Tool 读取节点参数）。
+
+1. `git clone <你的仓库地址> GCS`  
+   `cd GCS`
+
+2. **双击仓库根目录的 `GCS-安装桌面快捷方式.bat`**  
+   - 它会自动完成：检查 Python → 创建 `.venv` 虚拟环境 → `pip install -r requirements.txt`（自动包含 `dronecan`、`pyserial`、`pymavlink` 等核心依赖）→ 创建桌面 + 开始菜单 “GCS” 快捷方式。
+   - 全程有清晰的中文进度提示（[1/4]、[2/4]...）和成功/失败反馈。
+   - **注意**：脚本会自动拒绝 Microsoft Store 版 Python（会给出详细错误 + python.org 官方安装指引）。
+
+3. 双击桌面生成的 “GCS” 图标（或双击 `GCS.cmd`）启动 GCS。
+
+4. 进入 DroneCAN 设置面板 → 选择对应 SLCAN / CAN 模式 → 打开 “DroneCAN 节点工具” 即可读取 Node 70 等设备的参数列表和详情。
+
+**requirements.txt** 是项目核心 Python 依赖的单一来源（位于仓库根目录）。以后添加新核心依赖只需编辑它，然后让用户重新运行安装 bat 即可。
+
+---
+
 **首次在本机（尤其 macOS）开发前执行一次：**
 
 ```bash
 ./tools/setup-python-deps.sh
 ```
 
-会在项目下创建 `.venv` 并安装 `pyserial`（COM 桥列举 `/dev/cu.*` 必需）。之后 Go Live / 内置浏览器才能在下拉里看到串口。
+会在项目下创建 `.venv` 并安装核心依赖（requirements.txt）。之后 Go Live / 内置浏览器才能在下拉里看到串口。
 
 ### 方式 A：Live Server → Go Live → Chrome（默认，与原先一致）
 
@@ -118,13 +146,58 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 8765  com-bridge     Windows COM 枚举 / 串口桥
 ```
 
-### Windows 一键安装快捷方式
+### Windows 一键安装快捷方式（详细说明）
 
 首次给别人使用时，可让对方在项目根目录直接双击：
 
 - `GCS-安装桌面快捷方式.bat`
 
-它会先调用 `tools/setup-python-deps.ps1` 创建 `.venv` 并安装 `pyserial`、`pymavlink`，然后再调用 `tools/install-gcs-desktop.ps1` 创建桌面和开始菜单的 `GCS` 快捷方式。之后日常只需要双击桌面的 `GCS` 图标即可启动。
+它会自动完成上面「首次使用」第 2 步的所有工作（创建 .venv + pip install -r requirements.txt（含 dronecan） + 创建桌面/开始菜单快捷方式）。之后日常只需要双击桌面的 `GCS` 图标即可启动。
+
+（setup 脚本已内置 Microsoft Store Python 检测 + 中文错误提示，会在检测到时中止并指导用户安装官方版。）
+
+**常见的一键流程总结**：git clone → 双击 `GCS-安装桌面快捷方式.bat` → 双击桌面 GCS 图标。
+
+## 常见问题排查
+
+### 依赖缺失 / DroneCAN 相关错误
+- `ModuleNotFoundError: No module named 'dronecan'`  
+  或 DroneCAN Node Tool 里 “Load failed: WriteFile failed (PermissionError(13, '设备不识别此命令。'))” / “Refresh failed”  
+  **解决**：双击根目录 `GCS-安装桌面快捷方式.bat` 重新运行一次（会自动补全 requirements.txt 中的 dronecan 等依赖，并确保使用正确的 .venv）。
+
+- “未加载 apm-param-db.json”  
+  通常是同一根源（Store Python 或 .venv 未正确安装）。重新运行安装 bat 即可。
+
+### Python 版本问题（最高频）
+- 必须使用**官方 python.org 下载的 installer**，**不要用 Microsoft Store / 应用商店版**。
+- Store 版路径含 `WindowsApps`，受沙箱限制，无法访问项目目录文件、无法稳定操作串口 COM 设备。
+- 安装 bat / GCS.cmd / 启动器都有检测，会在错误时给出明确指引（“请从 https://www.python.org/downloads/ 下载...” + “勾选 Add to PATH”）。
+- 建议安装时同时勾选 “py launcher”。
+
+### 路径含中文、空格或其他问题
+- 当前启动脚本（GCS-*.cmd、.bat、ps1 中的 %~dp0、Join-Path -LiteralPath、Path.resolve() 等）对中文路径有基本支持。
+- 如果仍遇到问题：
+  1. 尝试把仓库克隆到纯 ASCII 路径（如 `E:\GCS-test` 或 `D:\GCS`）。
+  2. 重新运行安装 bat。
+  3. 检查杀毒软件 / Windows Defender 是否拦截了 python.exe 或串口访问。
+- 后续版本会继续加强鲁棒性（当前已加入 chcp 65001 等）。
+
+### 安装 bat 运行失败
+- 以管理员身份运行试试。
+- 确保 PowerShell 可以执行脚本（bat 内部已使用 `-ExecutionPolicy Bypass`）。
+- 先手动安装官方 Python + Add to PATH，然后删除 .venv 目录再双击 bat。
+- 查看弹出的错误信息（通常会直接告诉你缺什么或 Store 问题）。
+
+### 启动后 DroneCAN 节点工具仍无法使用
+- 确认已用安装 bat 成功创建过 .venv 并看到 “核心依赖就绪” 提示。
+- 检查 `tools/com-bridge/server.stderr.log`（里面通常有详细 Python 错误）。
+- 确认硬件：CAN 线接对、飞控参数已启用 DroneCAN / CAN_D1 等。
+- 尝试重启电脑 / 重新拔插 USB-CAN 适配器后再次启动 GCS。
+- 仍不行：重新运行安装 bat → 重启 GCS。
+
+其他问题可参考代码中已有的 Store 警告信息（GCS.cmd 弹窗、ps1 抛错、README 本节）。
+
+---
 
 ### 以后交付客户时再用（现在可忽略）
 
