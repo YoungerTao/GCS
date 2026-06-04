@@ -1,23 +1,24 @@
 # Optional: install GCS launcher watchdog to Windows Startup (runs at login).
 $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$Watchdog = Join-Path $Root "tools\gcs_watchdog.py"
-$PyCmd = Get-Command pythonw -ErrorAction SilentlyContinue
-if (-not $PyCmd) {
-    throw "未找到 pythonw。请重装 Python 3 并勾选 py launcher，避免登录时弹出黑色命令行窗口。"
+$PrewarmLauncher = Join-Path $Root "GCS-Prewarm.cmd"
+if (-not (Test-Path -LiteralPath $PrewarmLauncher)) {
+    throw "GCS-Prewarm.cmd not found: $PrewarmLauncher"
 }
-$Py = $PyCmd.Source
 
 $Startup = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $Startup "GCS Watchdog.lnk"
+if (Test-Path -LiteralPath $ShortcutPath) {
+    Remove-Item -LiteralPath $ShortcutPath -Force
+}
 
 $Wsh = New-Object -ComObject WScript.Shell
 $Sc = $Wsh.CreateShortcut($ShortcutPath)
-$Sc.TargetPath = $Py
-$Sc.Arguments = "`"$Watchdog`""
+$Sc.TargetPath = $PrewarmLauncher
+$Sc.Arguments = ""
 $Sc.WorkingDirectory = $Root
 $Sc.WindowStyle = 7
-$Sc.Description = "GCS COM bridge launcher (port 8767)"
+$Sc.Description = "GCS launcher watchdog + runtime prewarm"
 $Sc.Save()
 
 Write-Host "Installed: $ShortcutPath"

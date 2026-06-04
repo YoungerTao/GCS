@@ -14,7 +14,7 @@ if errorlevel 1 (
 
 echo.
 echo Creating desktop shortcut...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install-gcs-desktop.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install-gcs-desktop.ps1" -WatchdogStartup
 if errorlevel 1 (
   echo.
   echo Install GCS desktop shortcut failed.

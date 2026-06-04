@@ -69,6 +69,7 @@
   20005: { shortName: "MovingBaselineData", fullName: "ardupilot.gnss.MovingBaselineData" },
   20006: { shortName: "RelPosHeading", fullName: "ardupilot.gnss.RelPosHeading" },
   20007: { shortName: "NotifyState", fullName: "ardupilot.indication.NotifyState" },
+  20013: { shortName: "GetEscID", fullName: "com.hobbywing.esc.GetEscID", category: "Vendor" },
   20200: { shortName: "Measurement", fullName: "com.hex.equipment.flow.Measurement" },
   20790: { shortName: "TrafficReport", fullName: "ardupilot.equipment.trafficmonitor.TrafficReport" }
   };
@@ -114,7 +115,7 @@
     }
     return {
       ...hit,
-      category: categoryFor(hit.fullName),
+      category: hit.category || categoryFor(hit.fullName),
       dataTypeId: id,
     };
   }

@@ -1,4 +1,5 @@
 import base64
+import binascii
 import json
 import re
 import subprocess
@@ -18,6 +19,9 @@ try:
 except Exception:
     mavutil = None
     mavlink2 = None
+
+
+OTA_SESSIONS = {}
 
 
 def _classify_port_item(item):
@@ -1354,6 +1358,76 @@ class Handler(BaseHTTPRequestHandler):
                 SLCAN_MONITOR.feed((line + "\r").encode("ascii"))
                 status = SLCAN_MONITOR.status()
                 send_json(self, 200, {"ok": True, "injected": line, **status})
+                return
+            if self.path == "/dronecan-ota-begin":
+                node_id = int(payload.get("nodeId") or 0)
+                total_size = int(payload.get("totalSize") or 0)
+                image_crc = str(payload.get("imageCrc") or "").strip().upper()
+                chunk_size = int(payload.get("chunkSize") or 240)
+                if node_id <= 0:
+                    raise RuntimeError("nodeId is required")
+                if total_size <= 0:
+                    raise RuntimeError("totalSize is required")
+                if not re.fullmatch(r"[0-9A-F]{8}", image_crc):
+                    raise RuntimeError("imageCrc must be 8 hex chars")
+                OTA_SESSIONS[node_id] = {
+                    "nodeId": node_id,
+                    "fileName": str(payload.get("fileName") or "").strip() or "firmware.bin",
+                    "totalSize": total_size,
+                    "imageCrc": image_crc,
+                    "chunkSize": max(64, chunk_size),
+                    "received": 0,
+                    "chunks": 0,
+                    "startedAt": time.time(),
+                    "crc32": 0,
+                }
+                send_json(self, 200, {"ok": True, "nodeId": node_id, "totalSize": total_size, "imageCrc": image_crc})
+                return
+            if self.path == "/dronecan-ota-chunk":
+                node_id = int(payload.get("nodeId") or 0)
+                session = OTA_SESSIONS.get(node_id)
+                if not session:
+                    raise RuntimeError("OTA session not found")
+                offset = int(payload.get("offset") or 0)
+                data_b64 = str(payload.get("data") or "")
+                chunk_crc = str(payload.get("chunkCrc") or "").strip().upper()
+                raw = base64.b64decode(data_b64.encode("ascii"))
+                if offset != int(session["received"]):
+                    raise RuntimeError(f"unexpected offset {offset}, expected {session['received']}")
+                calc = f"{binascii.crc32(raw) & 0xFFFFFFFF:08X}"
+                if calc != chunk_crc:
+                    raise RuntimeError(f"chunk CRC mismatch: {calc} != {chunk_crc}")
+                session["crc32"] = binascii.crc32(raw, session["crc32"]) & 0xFFFFFFFF
+                session["received"] += len(raw)
+                session["chunks"] += 1
+                send_json(self, 200, {
+                    "ok": True,
+                    "nodeId": node_id,
+                    "received": session["received"],
+                    "totalSize": session["totalSize"],
+                    "percent": round((session["received"] / max(1, session["totalSize"])) * 100, 1),
+                })
+                return
+            if self.path == "/dronecan-ota-finish":
+                node_id = int(payload.get("nodeId") or 0)
+                session = OTA_SESSIONS.get(node_id)
+                if not session:
+                    raise RuntimeError("OTA session not found")
+                final_crc = f"{int(session['crc32']) & 0xFFFFFFFF:08X}"
+                if session["received"] != session["totalSize"]:
+                    raise RuntimeError(f"incomplete image: {session['received']} / {session['totalSize']}")
+                if final_crc != session["imageCrc"]:
+                    raise RuntimeError(f"image CRC mismatch: {final_crc} != {session['imageCrc']}")
+                finished = {
+                    "ok": True,
+                    "nodeId": node_id,
+                    "received": session["received"],
+                    "chunks": session["chunks"],
+                    "imageCrc": final_crc,
+                    "elapsedSec": round(time.time() - float(session["startedAt"]), 3),
+                }
+                OTA_SESSIONS.pop(node_id, None)
+                send_json(self, 200, finished)
                 return
         except Exception as e:
             send_json(self, 500, {"ok": False, "error": str(e)})

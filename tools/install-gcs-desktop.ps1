@@ -7,8 +7,12 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Launcher = Join-Path $Root "GCS.cmd"
+$PrewarmLauncher = Join-Path $Root "GCS-Prewarm.cmd"
 if (-not (Test-Path -LiteralPath $Launcher)) {
     throw "GCS.cmd not found at repo root: $Launcher"
+}
+if (-not (Test-Path -LiteralPath $PrewarmLauncher)) {
+    throw "GCS-Prewarm.cmd not found at repo root: $PrewarmLauncher"
 }
 
 $IconIco = Join-Path $Root "assets\gcs-dog.ico"
@@ -39,6 +43,9 @@ function Get-GcsPython {
 
 function New-GcsShortcut {
     param([string]$ShortcutPath)
+    if (Test-Path -LiteralPath $ShortcutPath) {
+        Remove-Item -LiteralPath $ShortcutPath -Force
+    }
     $Wsh = New-Object -ComObject WScript.Shell
     $Sc = $Wsh.CreateShortcut($ShortcutPath)
     $Sc.TargetPath = $Launcher
@@ -70,18 +77,18 @@ if (Test-Path -LiteralPath $ie4u) {
 }
 
 if ($WatchdogStartup) {
-    $Watchdog = Join-Path $Root "tools\gcs_watchdog.py"
-    $Py = Get-GcsPython
-
     $Startup = [Environment]::GetFolderPath("Startup")
     $WdScPath = Join-Path $Startup "GCS Watchdog.lnk"
+    if (Test-Path -LiteralPath $WdScPath) {
+        Remove-Item -LiteralPath $WdScPath -Force
+    }
     $Wsh = New-Object -ComObject WScript.Shell
     $Sc = $Wsh.CreateShortcut($WdScPath)
-    $Sc.TargetPath = $Py
-    $Sc.Arguments = "`"$Watchdog`""
+    $Sc.TargetPath = $PrewarmLauncher
+    $Sc.Arguments = ""
     $Sc.WorkingDirectory = $Root
     $Sc.WindowStyle = 7
-    $Sc.Description = "GCS launcher watchdog (port 8767)"
+    $Sc.Description = "GCS launcher watchdog + runtime prewarm"
     $Sc.Save()
     Write-Host "Watchdog startup shortcut installed: $WdScPath"
 } else {

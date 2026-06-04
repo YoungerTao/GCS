@@ -150,6 +150,14 @@
     await sleep(80);
   }
 
+  async function sendSlcanLine(line) {
+    const text = String(line || "");
+    if (!text) return false;
+    if (!writer) return false;
+    await writeCmd(text.endsWith("\r") ? text : `${text}\r`);
+    return true;
+  }
+
   async function initAdapter(bitrateKbps = 1000) {
     const code = SLCAN_BITRATE_CODE[bitrateKbps] || SLCAN_BITRATE_CODE[1000];
     await writeCmd("C\r");
@@ -288,6 +296,7 @@
 
   global.ensureSlcanWebSerial = ensureSlcanWebSerial;
   global.closeSlcanWebSerial = closeSlcanWebSerial;
+  global.sendSlcanWebSerialLine = sendSlcanLine;
   global.resolveSlcanWebSerialAuthIndex = resolveSlcanAuthIndex;
   global.isSlcanWebSerialActive = () => !!global._slcanWebActive;
   global.requestSecondWebSerialPort = requestSecondWebSerialPort;

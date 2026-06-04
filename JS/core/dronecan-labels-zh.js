@@ -12,6 +12,7 @@
     "ardupilot.gnss.MovingBaselineData": "移动基线数据",
     "ardupilot.gnss.RelPosHeading": "相对位置航向",
     "ardupilot.equipment.power.BatteryInfoAux": "电池信息(扩展)",
+    "com.hobbywing.esc.GetEscID": "获取电调ID",
     "ardupilot.equipment.trafficmonitor.TrafficReport": "交通监视报告",
     "uavcan.protocol.NodeStatus": "节点运行状态",
     "uavcan.protocol.GetNodeInfo": "获取节点信息",
@@ -62,6 +63,7 @@
     Allocation: "节点 ID 分配",
     BatteryInfo: "电池信息",
     BatteryInfoAux: "电池信息(扩展)",
+    GetEscID: "获取电调ID",
     LogMessage: "日志消息",
     GetSet: "参数读写",
     Discovery: "服务发现",
@@ -243,6 +245,9 @@
     mode: "工作模式",
     sub_mode: "子模式",
     vendor_specific_status_code: "厂商状态码",
+    esc_node_id: "电调节点ID",
+    throttle_channel: "油门通道",
+    query_option: "查询选项",
   };
 
   function uiLabel(key) {
