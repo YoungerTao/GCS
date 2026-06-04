@@ -4,6 +4,8 @@ setlocal
 
 cd /d "%~dp0"
 
+set "BOOT_URL=%CD%\boot.html"
+
 
 
 rem 已在运行：只打开浏览器
@@ -28,7 +30,7 @@ if exist "%TEMP%\gcs-launch.lock" (
 
   if not errorlevel 1 (
 
-    start "" "http://127.0.0.1:8766/index.html"
+    start "" "%BOOT_URL%"
 
     exit /b 0
 
@@ -37,6 +39,8 @@ if exist "%TEMP%\gcs-launch.lock" (
 )
 
 echo.>"%TEMP%\gcs-launch.lock"
+
+start "" "%BOOT_URL%"
 
 
 
@@ -53,7 +57,7 @@ rem 无 cmd 黑窗：pythonw 后台启动（勿再调用 GCS.cmd _run）
 
 powershell -NoProfile -WindowStyle Hidden -Command ^
 
-  "Start-Process -FilePath '%PY%' -ArgumentList 'tools\gcs-launch.py' -WorkingDirectory '%CD%' -WindowStyle Hidden"
+  "Start-Process -FilePath '%PY%' -ArgumentList 'tools\gcs-launch.py','--boot-page' -WorkingDirectory '%CD%' -WindowStyle Hidden"
 
 exit /b 0
 

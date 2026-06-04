@@ -49,7 +49,7 @@ def _spawn_runtime_locked() -> None:
     )
 
 
-def launch_runtime(wait_s: float = 20.0) -> bool:
+def launch_runtime(wait_s: float = 4.0) -> bool:
     with _launch_lock:
         _spawn_runtime_locked()
     deadline = time.time() + wait_s
@@ -64,6 +64,15 @@ def launch_runtime(wait_s: float = 20.0) -> bool:
             return True
         time.sleep(0.3)
     return runtime_healthy()
+
+
+def prewarm_runtime_after(delay_s: float = 2.0, wait_s: float = 15.0) -> None:
+    if delay_s > 0:
+        time.sleep(delay_s)
+    try:
+        launch_runtime(wait_s=wait_s)
+    except Exception:
+        pass
 
 
 def send_json(handler, status: int, payload: dict) -> None:
@@ -104,9 +113,11 @@ class LauncherHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path == "/launch":
-            ok = launch_runtime(wait_s=25.0)
-            send_json(self, 200 if ok else 503, {
-                "ok": ok,
+            ok = launch_runtime(wait_s=4.0)
+            launched = _runtime_proc is not None and _runtime_proc.poll() is None
+            send_json(self, 200, {
+                "ok": ok or launched,
+                "launching": launched and not ok,
                 "runtimeUp": runtime_healthy(),
                 "bridgeUp": bridge_healthy(),
                 "tileServerUp": tile_server_healthy(),
@@ -121,6 +132,12 @@ class LauncherHandler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    if "--prewarm-runtime" in sys.argv:
+        threading.Thread(
+            target=prewarm_runtime_after,
+            kwargs={"delay_s": 2.0, "wait_s": 15.0},
+            daemon=True,
+        ).start()
     ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer(("127.0.0.1", LAUNCHER_PORT), LauncherHandler)
     if sys.stdout is not None and getattr(sys.stdout, "isatty", lambda: False)():

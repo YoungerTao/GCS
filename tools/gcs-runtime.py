@@ -6,6 +6,7 @@ import json
 import mimetypes
 import sys
 import threading
+import time
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +21,16 @@ from map_tiles_supervisor import ensure_tile_server_process, tile_server_healthy
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UI_PORT = 8766
+
+
+def bridge_warmup_loop(initial_wait_s: float = 15.0, retry_interval_s: float = 10.0) -> None:
+    while True:
+        try:
+            if ensure_bridge_process(wait_s=initial_wait_s):
+                return
+        except Exception:
+            pass
+        time.sleep(retry_interval_s)
 
 
 def tile_server_watchdog_loop(interval_s: float = 10.0) -> None:
@@ -100,14 +111,13 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> int:
-    if not ensure_bridge_process(wait_s=15.0):
-        print("Failed to start COM bridge on http://127.0.0.1:8765", file=sys.stderr)
-        return 1
-
-    # Tile service is optional during cold start: keep the UI reachable and retry in background.
-    if not ensure_tile_server_process(wait_s=3.0):
-        print("Tile server startup deferred; UI will continue and retry in background.", file=sys.stderr)
-
+    # Serve the UI first so cold-start waits do not block the browser window.
+    threading.Thread(target=bridge_warmup_loop, daemon=True).start()
+    threading.Thread(
+        target=ensure_tile_server_process,
+        kwargs={"wait_s": 3.0},
+        daemon=True,
+    ).start()
     threading.Thread(target=watchdog_loop, daemon=True).start()
     threading.Thread(target=tile_server_watchdog_loop, daemon=True).start()
 

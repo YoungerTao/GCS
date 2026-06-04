@@ -30,7 +30,7 @@
       subtitle: "飞翼 / 三角翼",
       accent: "#35c47a",
       badge: "Elevon",
-      description: "当前先保留为直接预览模式，预览参数仅写入 Q_ENABLE = 0。",
+      description: "进入控制面与混控参数配置流程，并生成 Elevon / 油门相关参数。",
       artSrc: "assets/airframe/flying-wing.png",
       artAlt: "飞翼 / 三角翼示意图",
     },
@@ -800,7 +800,7 @@
     const parts = [];
     if (state.frame_type) parts.push(frameTypeLabel(state.frame_type));
     if (state.frame_type === FRAME_TYPE.CONVENTIONAL) parts.push("控制面配置");
-    if (state.frame_type === FRAME_TYPE.FLYING_WING) parts.push("飞翼配置");
+    if (state.frame_type === FRAME_TYPE.FLYING_WING) parts.push("控制面配置");
     if (state.vtol_type) parts.push(vtolTypeLabel(state.vtol_type));
     if (state.vtol_type === VTOL_TYPE.TAILSITTER && state.q_tailsit_enable != null) {
       parts.push(tailsitterLabel(state.q_tailsit_enable));
@@ -1018,9 +1018,9 @@
   }
 
   function stepHint() {
-    if (state.step === 1) return "常规固定翼、飞翼都会进入控制面配置；VTOL 会进入第二步。";
+    if (state.step === 1) return "常规固定翼、飞翼 / 三角翼都会进入控制面配置；VTOL 会进入第二步。";
     if (state.step === 2 && state.frame_type === FRAME_TYPE.FLYING_WING) return "配置左右 Elevon、油门与可选方向舵，并按飞翼需求调整 MIXING_GAIN / MIXING_OFFSET。";
-    if (state.step === 1) return "常规固定翼会进入控制面配置；Flying Wing 当前保留直接预览；VTOL 会进入第二步。";
+    if (state.step === 1) return "常规固定翼、飞翼 / 三角翼都会进入控制面配置；VTOL 会进入第二步。";
     if (state.step === 2 && state.frame_type === FRAME_TYPE.CONVENTIONAL) return "为每个控制面选择类型并分配 SERVO1 ~ SERVO16，底部会实时检查通道冲突。";
     if (state.step === 2 && !state.vtol_type) return "TailSitter 会进入控制方式选择；QuadPlane 和 TiltRotor 需要继续配置 Q_FRAME。";
     if (state.step === 2 && state.vtol_type === VTOL_TYPE.TAILSITTER) return "TailSitter 会自动锁定 Q_FRAME_CLASS = 10。";
@@ -1312,32 +1312,47 @@
       return a.localeCompare(b, undefined, { numeric: true });
     });
     if (!entries.length) return "等待配置...";
-    return entries.map(([key, value]) => `${key} = ${value}`).join("\n");
+    return entries
+      .map(([key, value]) => {
+        const row = findFlyingWingRowByServoKey(key.replace("_FUNCTION", ""));
+        const comment = row ? row.comment : "";
+        return `${key} = ${value}${comment ? `  # ${comment}` : ""}`;
+      })
+      .join("\n");
+  }
+
+  function findFlyingWingRowByServoKey(servoName) {
+    for (const section of FLYING_WING_SECTIONS) {
+      const rows = Object.values(section.rowsByOption).flat();
+      for (const row of rows) {
+        if (state.flyingWing.servos[row.key] === servoName) return row;
+      }
+    }
+    return null;
   }
 
   function renderFlyingWingConfig() {
     const conflicts = getFlyingWingConflictList();
-    const canProceed = isStepComplete(2);
     return `
-      <div class="afw-conventional-shell afw-flying-shell">
+      <div class="afw-conventional-shell">
         <div class="afw-surface-list">
           ${FLYING_WING_SECTIONS.map(renderFlyingWingSection).join("")}
+          ${renderFlyingWingMixingCard()}
         </div>
         <div class="afw-conventional-side">
           ${conflicts.length ? `
             <div class="afw-conflict-bar">
-              ${conflicts.map((conflict) => `通道冲突：${conflict.servo} 被 ${conflict.owners.join(" 和 ")} 同时使用`).join("<br>")}
+              ${conflicts.map((conflict) => `⚠ 通道冲突：${conflict.servo} 被 ${conflict.owners.join(" 和 ")} 同时使用`).join("<br>")}
             </div>
           ` : ""}
-          ${renderFlyingWingMixingCard()}
           <div class="afw-conventional-preview">
-            <strong>参数预览稿</strong>
+            <strong>参数预览栏</strong>
             <pre>${renderFlyingWingParamPreview()}</pre>
           </div>
         </div>
       </div>
       <div class="afw-breadcrumb-row afw-breadcrumb-row-wide">
-        <span>${buildPathParts().join(" > ") || "飞翼 / 三角翼 > 飞翼配置"}</span>
+        <span>${buildPathParts().join(" > ") || "飞翼 / 三角翼 > 控制面配置"}</span>
         <button type="button" class="afw-primary-btn afw-inline-next" id="afw-flying-wing-next-btn">下一步：参数预览</button>
       </div>
     `;

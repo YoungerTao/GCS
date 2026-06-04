@@ -55,7 +55,7 @@ def _spawn_watchdog() -> None:
         time.sleep(0.15)
 
 
-def _post_launch(wait_s: float = 45.0) -> bool:
+def _post_launch(wait_s: float = 4.0) -> bool:
     if str(TOOLS_DIR) not in sys.path:
         sys.path.insert(0, str(TOOLS_DIR))
     from gcs_http import local_http_post_ok
@@ -63,14 +63,14 @@ def _post_launch(wait_s: float = 45.0) -> bool:
     return local_http_post_ok(LAUNCH_URL, timeout_s=wait_s)
 
 
-def _ensure_runtime_stack(wait_s: float = 45.0) -> bool:
-    if not _post_launch(wait_s=wait_s):
+def _ensure_runtime_stack(wait_s: float = 4.5) -> bool:
+    if not _post_launch(wait_s=min(wait_s, 4.0)):
         return False
-    deadline = time.time() + min(wait_s, 10.0)
+    deadline = time.time() + wait_s
     while time.time() < deadline:
         if _url_ok(RUNTIME_PING, 1.0):
             return True
-        time.sleep(0.25)
+        time.sleep(0.15)
     return _url_ok(RUNTIME_PING, 1.0)
 
 
@@ -84,25 +84,28 @@ def _clear_launch_lock() -> None:
 
 def main() -> int:
     code = 1
+    open_browser = "--boot-page" not in sys.argv
     try:
         if _url_ok(RUNTIME_PING, 1.5):
             _spawn_watchdog()
             if not _url_ok(TILE_SERVER_HEALTH, 1.5):
                 _post_launch(wait_s=5.0)
-            webbrowser.open(UI_URL)
+            if open_browser:
+                webbrowser.open(UI_URL)
             return 0
 
         _spawn_watchdog()
-        if not _ensure_runtime_stack():
-            return 1
-
-        for _ in range(30):
-            if _url_ok(RUNTIME_PING, 1.0):
-                webbrowser.open(UI_URL)
+        _ensure_runtime_stack(wait_s=4.5)
+        deadline = time.time() + 4.5
+        while time.time() < deadline:
+            if _url_ok(RUNTIME_PING, 0.8):
+                if open_browser:
+                    webbrowser.open(UI_URL)
                 return 0
-            time.sleep(0.2)
+            time.sleep(0.15)
 
-        webbrowser.open(UI_URL)
+        if open_browser:
+            webbrowser.open(UI_URL)
         code = 0
         return code
     finally:

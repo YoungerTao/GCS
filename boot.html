@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GCS 正在启动</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-a: #f5efe4;
+      --bg-b: #e4f0df;
+      --ink: #1d2a1f;
+      --muted: #536257;
+      --panel: rgba(255, 252, 246, 0.88);
+      --accent: #2f7a45;
+      --accent-soft: rgba(47, 122, 69, 0.14);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.9), transparent 35%),
+        linear-gradient(135deg, var(--bg-a), var(--bg-b));
+      display: grid;
+      place-items: center;
+    }
+    .shell {
+      width: min(92vw, 520px);
+      padding: 28px 24px;
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: 0 20px 50px rgba(48, 63, 48, 0.14);
+      backdrop-filter: blur(8px);
+    }
+    .eyebrow {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    h1 {
+      margin: 16px 0 10px;
+      font-size: clamp(28px, 6vw, 40px);
+      line-height: 1.05;
+    }
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.72);
+      font-size: 15px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 3px solid rgba(47, 122, 69, 0.18);
+      border-top-color: var(--accent);
+      animation: spin 0.9s linear infinite;
+      flex: 0 0 auto;
+    }
+    .hint {
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <span class="eyebrow">GCS BOOT</span>
+    <h1>正在启动地面站</h1>
+    <p>浏览器已经打开。后台服务准备好后，会自动进入 GCS 主界面。</p>
+    <div class="status" id="status">正在连接本地启动服务...</div>
+    <div class="row">
+      <div class="spinner" aria-hidden="true"></div>
+      <strong id="phase">启动中</strong>
+    </div>
+    <div class="hint">如果超过 15 秒仍未跳转，请保留此页面并联系维护人员检查 Python 环境。</div>
+  </main>
+  <script>
+    (function () {
+      const runtimePing = "http://127.0.0.1:8766/__gcs/ping";
+      const runtimeUi = "http://127.0.0.1:8766/index.html";
+      const launcherPing = "http://127.0.0.1:8767/ping";
+      const launcherLaunch = "http://127.0.0.1:8767/launch";
+      const statusEl = document.getElementById("status");
+      const phaseEl = document.getElementById("phase");
+
+      function setStatus(phase, text) {
+        phaseEl.textContent = phase;
+        statusEl.textContent = text;
+      }
+
+      async function fetchOk(url, opts) {
+        try {
+          const resp = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
+          return resp.ok;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      async function triggerLaunch() {
+        if (await fetchOk(launcherPing)) {
+          setStatus("唤醒中", "已连接启动服务，正在拉起 GCS 主界面...");
+          await fetchOk(launcherLaunch, { method: "POST" });
+          return true;
+        }
+        return false;
+      }
+
+      async function waitForRuntime() {
+        const startedAt = Date.now();
+        let launchSent = false;
+        while (Date.now() - startedAt < 30000) {
+          if (await fetchOk(runtimePing)) {
+            setStatus("即将进入", "主界面已就绪，正在跳转...");
+            window.location.replace(runtimeUi);
+            return;
+          }
+          if (!launchSent) {
+            launchSent = await triggerLaunch();
+          } else {
+            await fetchOk(launcherPing);
+          }
+          const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+          setStatus("启动中", `后台服务正在准备，第 ${elapsed + 1} 秒...`);
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+        setStatus("等待中", "后台服务仍在启动，请稍候；本页会继续自动重试。");
+        window.setTimeout(waitForRuntime, 1200);
+      }
+
+      setStatus("启动中", "浏览器已打开，正在检查 GCS 主界面...");
+      waitForRuntime();
+    })();
+  </script>
+</body>
+</html>

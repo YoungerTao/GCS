@@ -275,7 +275,7 @@ body {
 /* Industrial overview layout */
 .ov-page {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 147px 1fr;
   grid-template-rows: 52px 1fr;
   height: 100%;
   min-height: 0;
@@ -1285,54 +1285,79 @@ body {
 /* conventional / surface config bits (used in step 2) */
 .afw-conventional-shell {
   display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: 14px;
 }
 
 .afw-surface-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-content: start;
+}
+
+.afw-conventional-side {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .afw-surface-section {
   border: 1px solid #3a425f;
-  background: #1c2235;
-  border-radius: 8px;
-  padding: 8px 10px;
+  background: #161c28;
+  border-radius: 16px;
+  padding: 14px 16px 16px;
+  min-height: 168px;
+}
+
+.afw-surface-section.is-configured {
+  border-color: #1a9b66;
+  box-shadow: inset 0 0 0 1px rgba(26, 155, 102, 0.2);
 }
 
 .afw-surface-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
 .afw-surface-title {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 18px;
+  color: #f5f7ff;
 }
 
 .afw-surface-icon {
-  width: 18px;
-  height: 18px;
-  background: #2a3046;
-  border-radius: 4px;
-  font-size: 9px;
+  width: 36px;
+  height: 36px;
+  background: #1e3653;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #9aa3c0;
+  color: #d8e7ff;
+}
+
+.afw-surface-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .afw-badge {
-  font-size: 9.5px;
-  padding: 0 5px;
-  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.8;
+  padding: 0 10px;
+  border-radius: 999px;
   background: #2a3046;
   color: #8a95b8;
 }
@@ -1343,51 +1368,68 @@ body {
 .afw-choice-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 10px;
 }
 
 .afw-choice-btn {
-  font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 5px;
-  border: 1px solid #3a425f;
-  background: #161b2d;
-  color: #c8d0e8;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(58, 66, 95, 0.85);
+  background: #ffffff;
+  color: #162033;
   cursor: pointer;
 }
 
 .afw-choice-btn.selected {
-  border-color: var(--afw-accent, #4da3ff);
-  background: #252b42;
-  color: #fff;
+  border-color: #8ce0ab;
+  background: #dff6e6;
+  color: #0d5a34;
+}
+
+.afw-surface-divider {
+  height: 1px;
+  background: #334155;
+  margin: 14px 0 12px;
 }
 
 .afw-servo-list {
-  margin-top: 6px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 10px;
 }
 
 .afw-servo-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 16px;
+}
+
+.afw-servo-label {
+  color: #f5f7ff;
+  font-weight: 600;
 }
 
 .afw-servo-select {
-  background: #161b2d;
+  min-width: 92px;
+  background: #111827;
   color: #e6ebff;
   border: 1px solid #3a425f;
-  border-radius: 4px;
-  padding: 2px 4px;
-  font-size: 11px;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
 }
 
 .afw-func-badge {
-  font-size: 10px;
-  color: #6f7999;
+  font-size: 12px;
+  color: #8fc4ff;
+  background: #15253b;
+  border-radius: 999px;
+  padding: 5px 10px;
   font-family: ui-monospace, monospace;
 }
 
@@ -1405,26 +1447,77 @@ body {
 .afw-flying-mix-card {
   background: #161b2d;
   border: 1px solid #3a425f;
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 11px;
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-size: 13px;
+}
+
+.afw-conventional-preview strong,
+.afw-flying-mix-card strong {
+  display: block;
+  font-size: 18px;
+  color: #f5f7ff;
+  margin-bottom: 10px;
 }
 
 .afw-conventional-preview pre {
-  margin: 4px 0 0;
+  margin: 0;
   white-space: pre;
-  font-size: 10px;
-  color: #a8b3d0;
+  font-size: 14px;
+  line-height: 1.35;
+  color: #d4dbe9;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: auto;
+}
+
+.afw-wing-mix-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.afw-wing-mix-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #c8d0e8;
+  font-size: 13px;
+}
+
+.afw-wing-mix-field input {
+  background: #111827;
+  color: #e6ebff;
+  border: 1px solid #3a425f;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.afw-wing-mix-help,
+.afw-wing-mix-explain p {
+  color: #a8b3d0;
+  line-height: 1.5;
+}
+
+.afw-wing-mix-help {
+  margin: 12px 0 0;
+}
+
+.afw-wing-mix-explain {
+  margin-top: 10px;
+}
+
+.afw-wing-mix-explain p {
+  margin: 8px 0 0;
 }
 
 .afw-breadcrumb-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 13px;
   color: #8a95b8;
-  margin-top: 8px;
+  margin-top: 14px;
 }
 
 .afw-breadcrumb-row-wide {
@@ -1473,12 +1566,24 @@ body {
   .afw-conventional-shell {
     grid-template-columns: 1fr;
   }
+  .afw-surface-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
   .afw-grid-3,
   .afw-grid-2 {
     grid-template-columns: 1fr;
+  }
+  .afw-surface-list,
+  .afw-wing-mix-grid {
+    grid-template-columns: 1fr;
+  }
+  .afw-breadcrumb-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
   }
 }
 
