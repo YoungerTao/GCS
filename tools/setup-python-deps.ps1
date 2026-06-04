@@ -75,6 +75,10 @@ if ($LASTEXITCODE -ne 0) {
 
 & $VenvPy -c "import serial; from pymavlink import mavutil; import dronecan; print('OK: 核心依赖就绪 (pyserial, pymavlink, dronecan)')"
 if ($LASTEXITCODE -ne 0) {
+    Write-Host "警告：核心依赖导入失败。请检查以下几点：" -ForegroundColor Red
+    Write-Host "  1. 确认已安装 Visual C++ Build Tools（某些 wheel 需要编译）" -ForegroundColor Yellow
+    Write-Host "  2. 运行：$VenvPy -m pip show dronecan（验证 dronecan 是否正确安装）" -ForegroundColor Yellow
+    Write-Host "  3. 查看具体错误：$VenvPy -c 'import dronecan'（获取详细错误信息）" -ForegroundColor Yellow
     throw "核心依赖安装完成，但 import 验证失败（缺少 dronecan / serial / pymavlink）。请检查 requirements.txt 内容后重试。"
 }
 

@@ -22,3 +22,4 @@
 pyserial>=3.5
 pymavlink>=2.4
 dronecan>=1.0
+monotonic; python_version < '3.3'
