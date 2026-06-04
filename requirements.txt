@@ -6,9 +6,14 @@
 #
 # For manual / dev:
 #   python -m venv .venv
-#   .venv\Scripts\pip install -U pip
+#   .venv\Scripts\pip install -U pip setuptools wheel
 #   .venv\Scripts\pip install -r requirements.txt
 #   (On macOS/Linux: use .venv/bin/...)
+#
+# Windows system requirements:
+#   - Python 3.8+ from python.org (NOT Microsoft Store Python)
+#   - Visual C++ Build Tools (for compiling dronecan if wheels not available)
+#     Download: https://visualstudio.microsoft.com/downloads/ → Desktop development with C++
 #
 # To add a new core dependency: append here (with pin), then re-run the install .bat (or pip).
 # Dev-only / tool-only packages (playwright, deep-translator, numpy, pillow, etc.) are NOT listed here.

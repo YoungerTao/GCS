@@ -60,13 +60,16 @@ if (Test-IsBadMicrosoftStorePython $VenvPy) {
 }
 
 Write-Host "Installing GCS core dependencies (requirements.txt: pyserial + pymavlink + dronecan) into .venv ..."
-& $VenvPy -m pip install --upgrade pip
+& $VenvPy -m pip install --upgrade pip setuptools wheel
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to upgrade pip in .venv."
+    throw "Failed to upgrade pip/setuptools/wheel in .venv."
 }
 
 & $VenvPy -m pip install -r $Req
 if ($LASTEXITCODE -ne 0) {
+    Write-Host "提示：如果某些包（如 dronecan）编译失败，可能是缺少 C++ 编译工具。" -ForegroundColor Yellow
+    Write-Host "请安装 Visual C++ Build Tools: https://visualstudio.microsoft.com/zh-hans/downloads/" -ForegroundColor Yellow
+    Write-Host "选择「Desktop development with C++」，然后重新运行本脚本。" -ForegroundColor Yellow
     throw "Failed to install requirements from root requirements.txt (dronecan 等核心依赖)。"
 }
 
