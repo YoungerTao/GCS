@@ -2842,9 +2842,18 @@
       }
       return true;
     } catch (e) {
+      const errMsg = String(e?.message || e);
+      // 如果是"slcan is not open"错误，说明没有CAN硬件，不再重试
+      if (errMsg.includes("slcan is not open")) {
+        slcanInitRetryAt = 0;
+        if ($("sc-dc-hint")) {
+          $("sc-dc-hint").textContent = "⚠️ 未检测到 CAN 硬件。若无 USB-CAN 适配器，请改用上方「MAVLink CAN_FORWARD」或联系开发者。";
+        }
+        return false;
+      }
       slcanInitRetryAt = Date.now() + 30000;
       if ($("sc-dc-hint")) {
-        $("sc-dc-hint").textContent = `SLCAN 初始化失败: ${e?.message || e}`;
+        $("sc-dc-hint").textContent = `SLCAN 初始化失败: ${errMsg}`;
       }
       return false;
     }
