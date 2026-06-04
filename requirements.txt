@@ -10,9 +10,14 @@
 #   .venv\Scripts\pip install -r requirements.txt
 #   (On macOS/Linux: use .venv/bin/...)
 #
+# Python requirements:
+#   - Minimum: Python 3.8 (auto-checked during setup)
+#   - Source: Official python.org installer (NOT Microsoft Store Python - sandboxed)
+#   - Include: pip, setuptools, wheel (auto-installed)
+#
 # Windows system requirements:
-#   - Python 3.8+ from python.org (NOT Microsoft Store Python)
-#   - Visual C++ Build Tools (for compiling dronecan if wheels not available)
+#   - Python 3.8+ from python.org
+#   - Visual C++ Build Tools (for compiling packages like dronecan if wheels unavailable)
 #     Download: https://visualstudio.microsoft.com/downloads/ → Desktop development with C++
 #
 # To add a new core dependency: append here (with pin), then re-run the install .bat (or pip).
