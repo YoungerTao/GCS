@@ -43,6 +43,108 @@ function trackGcsRxMsg(msgid, ver) {
 }
 
 const ESC_TELEMETRY_MSG_IDS = new Set([11030, 11031, 11032, 11033]);
+const LOCAL_TELEMETRY_STATE = {
+  navGuidance: {},
+  home: {}
+};
+
+function normalizeHeadingDegrees(deg) {
+  if (!Number.isFinite(deg)) return null;
+  return ((deg % 360) + 360) % 360;
+}
+
+function getNavGuidanceState() {
+  try {
+    window.telemetry = window.telemetry || {};
+    window.telemetry.navGuidance = window.telemetry.navGuidance || LOCAL_TELEMETRY_STATE.navGuidance;
+    window.navGuidance = window.telemetry.navGuidance;
+    return window.navGuidance || LOCAL_TELEMETRY_STATE.navGuidance;
+  } catch (_) {
+    return LOCAL_TELEMETRY_STATE.navGuidance;
+  }
+}
+
+function getHomeState() {
+  try {
+    window.telemetry = window.telemetry || {};
+    window.telemetry.home = window.telemetry.home || LOCAL_TELEMETRY_STATE.home;
+    window.homeState = window.telemetry.home;
+    return window.homeState || LOCAL_TELEMETRY_STATE.home;
+  } catch (_) {
+    return LOCAL_TELEMETRY_STATE.home;
+  }
+}
+
+function refreshNavGuidanceValidity() {
+  const nav = getNavGuidanceState();
+  const gpsFix = Number(window.gps_fix_type) || 0;
+  const latValid = Number.isFinite(window.lat) && Math.abs(window.lat) <= 90;
+  const lonValid = Number.isFinite(window.lon) && Math.abs(window.lon) <= 180;
+  const gpsFresh = Date.now() - Math.max(window._lastGpsRawMs || 0, window._lastGposMs || 0) < 4000;
+  nav.gpsValid = gpsFix >= 2 && latValid && lonValid && gpsFresh;
+}
+
+function dispatchCompatEvent(target, name, detail) {
+  if (!target || typeof target.dispatchEvent !== "function") return;
+  try {
+    if (typeof CustomEvent === "function") {
+      target.dispatchEvent(new CustomEvent(name, { detail: detail || null }));
+      return;
+    }
+  } catch (_) {
+    /* fall through */
+  }
+  try {
+    if (document && typeof document.createEvent === "function") {
+      const evt = document.createEvent("Event");
+      evt.initEvent(name, false, false);
+      evt.detail = detail || null;
+      target.dispatchEvent(evt);
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function emitTelemetryFrame() {
+  try {
+    const nav = getNavGuidanceState();
+    dispatchCompatEvent(document, "gcs:telemetry-frame", {
+      yawRad: Number.isFinite(window.yaw) ? window.yaw : null,
+      lat: Number.isFinite(window.lat) ? window.lat : null,
+      lon: Number.isFinite(window.lon) ? window.lon : null,
+      altitude: Number.isFinite(window.altitude) ? window.altitude : null,
+      gpsFixType: Number(window.gps_fix_type) || 0,
+      lastGposMs: Number(window._lastGposMs) || 0,
+      lastGpsRawMs: Number(window._lastGpsRawMs) || 0,
+      navGuidance: {
+        headingDeg: Number.isFinite(nav.headingDeg) ? nav.headingDeg : null,
+        groundTrackDeg: Number.isFinite(nav.groundTrackDeg) ? nav.groundTrackDeg : null,
+        desiredHeadingDeg: Number.isFinite(nav.desiredHeadingDeg) ? nav.desiredHeadingDeg : null,
+        waypointBearingDeg: Number.isFinite(nav.waypointBearingDeg) ? nav.waypointBearingDeg : null,
+        xtrackErrorM: Number.isFinite(nav.xtrackErrorM) ? nav.xtrackErrorM : null,
+        turnRateDegS: Number.isFinite(nav.turnRateDegS) ? nav.turnRateDegS : null,
+        gpsValid: nav.gpsValid === true
+      }
+    });
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function setHomeState(lat, lng, altMeters, source) {
+  const home = getHomeState();
+  home.lat = Number(lat);
+  home.lng = Number(lng);
+  home.alt = Number(altMeters);
+  home.valid =
+    Number.isFinite(home.lat) &&
+    Number.isFinite(home.lng) &&
+    Math.abs(home.lat) <= 90 &&
+    Math.abs(home.lng) <= 180 &&
+    !(home.lat === 0 && home.lng === 0);
+  home.source = source || home.source || "telemetry";
+}
 
 /** MAVLink 负载可能是父缓冲区的子视图，必须用 byteOffset，否则 HEARTBEAT 等会读错内存 */
 function mavlinkPayloadView(payload) {
@@ -357,6 +459,8 @@ if(id === 0){ // HEARTBEAT — 本项目约定线序（与 MAVLink common.xml �
       window.gps_satellites_visible = Math.max(prevSats, newSats);
     }
     window._lastGpsRawMs = Date.now();
+    refreshNavGuidanceValidity();
+    emitTelemetryFrame();
   }
 
   if(id === 30){ // ATTITUDE
@@ -364,6 +468,9 @@ if(id === 0){ // HEARTBEAT — 本项目约定线序（与 MAVLink common.xml �
     window.roll = dv.getFloat32(4,true);
     window.pitch = dv.getFloat32(8,true);
     window.yaw = dv.getFloat32(12,true);
+    const nav = getNavGuidanceState();
+    nav.headingDeg = normalizeHeadingDegrees(window.yaw * 180 / Math.PI);
+    emitTelemetryFrame();
   }
 
   if (id === 33 && payload.length >= 20) {
@@ -371,10 +478,37 @@ if(id === 0){ // HEARTBEAT — 本项目约定线序（与 MAVLink common.xml �
     window.lat = dv.getInt32(4, true) / 1e7;
     window.lon = dv.getInt32(8, true) / 1e7;
     window.altitude = dv.getInt32(16, true) / 1000;
+    if (payload.length >= 28) {
+      const cogCdeg = dv.getUint16(26, true);
+      const nav = getNavGuidanceState();
+      nav.groundTrackDeg = cogCdeg === 65535 ? null : normalizeHeadingDegrees(cogCdeg / 100);
+    }
     window._lastGposMs = Date.now();
+    refreshNavGuidanceValidity();
     if (window.updateMap) {
       window.updateMap(window.lat, window.lon);
     }
+    emitTelemetryFrame();
+  }
+
+  if (id === 49 && payload.length >= 12) { // GPS_GLOBAL_ORIGIN
+    const dv = mavlinkPayloadView(payload);
+    setHomeState(
+      dv.getInt32(0, true) / 1e7,
+      dv.getInt32(4, true) / 1e7,
+      dv.getInt32(8, true) / 1000,
+      "gps_global_origin"
+    );
+  }
+
+  if (id === 242 && payload.length >= 52) { // HOME_POSITION
+    const dv = mavlinkPayloadView(payload);
+    setHomeState(
+      dv.getInt32(0, true) / 1e7,
+      dv.getInt32(4, true) / 1e7,
+      dv.getInt32(8, true) / 1000,
+      "home_position"
+    );
   }
 
   if(id === 74){ // VFR_HUD
@@ -388,6 +522,19 @@ if(id === 0){ // HEARTBEAT — 本项目约定线序（与 MAVLink common.xml �
     let dv = mavlinkPayloadView(payload);
     // seq: uint16 at offset 0
     window.wp_current = dv.getUint16(0, true);
+  }
+
+  if (id === 62 && payload.length >= 26) { // NAV_CONTROLLER_OUTPUT
+    // Layout: nav_roll(f32@0), nav_pitch(f32@4), nav_bearing(i16 cdeg@8), target_bearing(i16 cdeg@10),
+    // wp_dist(u16@12), alt_error(f32@14), aspd_error(f32@18), xtrack_error(f32@22)
+    const dv = mavlinkPayloadView(payload);
+    const nav = getNavGuidanceState();
+    const navBearCdeg = dv.getInt16(8, true);
+    nav.desiredHeadingDeg = Number.isFinite(navBearCdeg) ? normalizeHeadingDegrees(navBearCdeg / 100) : null;
+    const tgtBearCdeg = dv.getInt16(10, true);
+    nav.waypointBearingDeg = Number.isFinite(tgtBearCdeg) ? normalizeHeadingDegrees(tgtBearCdeg / 100) : null;
+    nav.xtrackErrorM = dv.getFloat32(22, true);
+    emitTelemetryFrame();
   }
 
   if (id === 44 && payload.length >= 4) {

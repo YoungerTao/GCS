@@ -1,6 +1,44 @@
-<!-- JS/ui.js 完整替换内容 -->
 const canvas = document.getElementById("hud");
-const ctx = canvas.getContext("2d");
+
+function createNoopCanvasContext() {
+  const noop = function () {};
+  return {
+    save: noop,
+    restore: noop,
+    translate: noop,
+    rotate: noop,
+    fillRect: noop,
+    strokeRect: noop,
+    clearRect: noop,
+    beginPath: noop,
+    moveTo: noop,
+    lineTo: noop,
+    stroke: noop,
+    fill: noop,
+    closePath: noop,
+    arc: noop,
+    fillText: noop,
+    strokeText: noop,
+    measureText: function (text) {
+      return { width: String(text || "").length * 10 };
+    },
+    setLineDash: noop,
+    rect: noop,
+    clip: noop,
+    globalAlpha: 1,
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    font: "",
+    textAlign: "left",
+    textBaseline: "alphabetic"
+  };
+}
+
+const ctx =
+  canvas && typeof canvas.getContext === "function"
+    ? canvas.getContext("2d")
+    : createNoopCanvasContext();
 
 // State Layer
 let smoothed_roll = 0, smoothed_pitch = 0, smoothed_yaw = 0;
@@ -17,6 +55,89 @@ const HUD_COLORS = {
   DANGER: "#FF3333",
   BACKGROUND: "rgba(10, 15, 28, 0.7)"
 };
+
+const localGuidanceState = {
+  yawRad: 0,
+  lat: null,
+  lon: null,
+  altitude: 0,
+  gpsFixType: 0,
+  lastGposMs: 0,
+  lastGpsRawMs: 0,
+  navGuidance: {
+    headingDeg: null,
+    groundTrackDeg: null,
+    desiredHeadingDeg: null,
+    waypointBearingDeg: null,
+    xtrackErrorM: null,
+    turnRateDegS: null,
+    gpsValid: false
+  }
+};
+
+function safeSetWindowProp(name, value) {
+  try {
+    window[name] = value;
+    return window[name] === value;
+  } catch (_) {
+    return false;
+  }
+}
+
+function safeGetWindowProp(name) {
+  try {
+    return window[name];
+  } catch (_) {
+    return undefined;
+  }
+}
+
+function scheduleFrame(callback) {
+  if (typeof requestAnimationFrame === "function") {
+    return requestAnimationFrame(callback);
+  }
+  return setTimeout(function () {
+    callback(Date.now());
+  }, 16);
+}
+
+function dispatchCompatEvent(target, name, detail) {
+  if (!target || typeof target.dispatchEvent !== "function") return;
+  try {
+    if (typeof CustomEvent === "function") {
+      target.dispatchEvent(new CustomEvent(name, { detail: detail || null }));
+      return;
+    }
+  } catch (_) {
+    /* fall through */
+  }
+  try {
+    if (document && typeof document.createEvent === "function") {
+      const evt = document.createEvent("Event");
+      evt.initEvent(name, false, false);
+      evt.detail = detail || null;
+      target.dispatchEvent(evt);
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function getGuidanceSnapshot() {
+  const nav = safeGetWindowProp("navGuidance");
+  return {
+    yawRad: typeof window.yaw === "number" ? window.yaw : localGuidanceState.yawRad,
+    lat: typeof window.lat === "number" ? window.lat : localGuidanceState.lat,
+    lon: typeof window.lon === "number" ? window.lon : localGuidanceState.lon,
+    altitude: typeof window.altitude === "number" ? window.altitude : localGuidanceState.altitude,
+    gpsFixType: Number.isFinite(Number(window.gps_fix_type))
+      ? Number(window.gps_fix_type)
+      : localGuidanceState.gpsFixType,
+    lastGposMs: Number(window._lastGposMs) || localGuidanceState.lastGposMs,
+    lastGpsRawMs: Number(window._lastGpsRawMs) || localGuidanceState.lastGpsRawMs,
+    navGuidance: nav && typeof nav === "object" ? nav : localGuidanceState.navGuidance
+  };
+}
 
 function toDegrees(rad) {
   return rad * RAD_TO_DEG;
@@ -471,19 +592,272 @@ function renderHudToCanvas() {
   ctx.fillText(`Speed:${getSafe(window.airspeed).toFixed(1)}`, 20, 130);
 }
 
-window.renderHudToCanvas = renderHudToCanvas;
+safeSetWindowProp("renderHudToCanvas", renderHudToCanvas);
 // drawHUD 为调度器与兜底定时器使用的别名（实际绘制函数体为 renderHudToCanvas）
-window.drawHUD = renderHudToCanvas;
+safeSetWindowProp("drawHUD", renderHudToCanvas);
 console.log("✅ HUD 绘制已导出为 window.renderHudToCanvas / window.drawHUD");
 
 
 
 // ==================== 地图初始化（新增） ====================
-let mapInstance, mapMarker;
+let mapInstance, mapMarker, mapMissionHomeLayer, mapMissionRouteLayer;
 let mapInfoDiv = null;
 let mapBootstrapped = false;
 let mapInitScheduled = false;
 let mapMarkerIconSignature = "";
+let latestMissionOverlayPayload = null;
+let currentMainView = "flight-data";
+
+const MAIN_MAP_OVERLAY_CENTER = 40;
+// 调大长度让指示线从飞机图标中“伸出来”，避免被粗描边机身完全覆盖（尤其是 Plane）。
+const MAIN_MAP_LINE_BASE_LENGTH = 110;
+const MAIN_MAP_XTRACK_SCALE_M = 2.4;
+const MAIN_MAP_XTRACK_MAX_DEG = 35;
+
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
+}
+
+function mapLineEndpoint(lengthPx) {
+  return (MAIN_MAP_OVERLAY_CENTER - lengthPx).toFixed(1);
+}
+
+function buildGuidanceLineSvg(angleDeg, color, width, lengthPx, innerLengthPx = 0) {
+  if (!Number.isFinite(angleDeg)) return "";
+  const y2 = mapLineEndpoint(lengthPx);
+  // 支持 innerLengthPx：从中心偏移一段距离开始画短线，避免被机身/中心圆完全覆盖
+  if (innerLengthPx > 0) {
+    const y1 = mapLineEndpoint(innerLengthPx);
+    return (
+      '<line x1="' + MAIN_MAP_OVERLAY_CENTER + '" y1="' + y1 +
+      '" x2="' + MAIN_MAP_OVERLAY_CENTER + '" y2="' + y2 +
+      '" stroke="' + color + '" stroke-width="' + width +
+      '" stroke-linecap="round" transform="rotate(' + angleDeg.toFixed(1) + " " +
+      MAIN_MAP_OVERLAY_CENTER + " " + MAIN_MAP_OVERLAY_CENTER + ')"/>'
+    );
+  }
+  return (
+    '<line x1="' + MAIN_MAP_OVERLAY_CENTER + '" y1="' + MAIN_MAP_OVERLAY_CENTER +
+    '" x2="' + MAIN_MAP_OVERLAY_CENTER + '" y2="' + y2 +
+    '" stroke="' + color + '" stroke-width="' + width +
+    '" stroke-linecap="round" transform="rotate(' + angleDeg.toFixed(1) + " " +
+    MAIN_MAP_OVERLAY_CENTER + " " + MAIN_MAP_OVERLAY_CENTER + ')"/>'
+  );
+}
+
+function buildMainMapGuidanceOverlay() {
+  const snap = getGuidanceSnapshot();
+  const nav = snap.navGuidance || {};
+  const gpsValid = nav.gpsValid === true;
+  const headingDeg = normalizeHeadingDegrees(toDegrees(getSafe(snap.yawRad)));
+
+  // 只要有最近的位置更新（GPOS 驱动了 updateMap 和 marker 移动），就显示引导指示线。
+  // 原来只看 gpsFix>=2（仅来自 GPS_RAW_INT）会导致很多情况下（尤其是只有 GPOS + NAV 时）只剩绿线。
+  const hasRecentPosition =
+    Number.isFinite(snap.lat) &&
+    Number.isFinite(snap.lon) &&
+    (Date.now() - Math.max(snap.lastGposMs || 0, snap.lastGpsRawMs || 0) < 5000);
+
+  const showGuidance = gpsValid || hasRecentPosition;
+
+  // 不再绘制绿色的“当前航向”线：飞机图标本身已经通过旋转 + 暖色鼻尖（WARM）清晰表示了 heading。
+  // 以前的绿线与机身长轴重合，看起来“在飞机的体内”，用户反馈强烈。
+  // 保留红（desired）、黑/灰（groundTrack）、黄（waypoint）、粉（xtrack）作为真正的“指示线”。
+  // 使用 inner 让线从中心向外“悬浮”一段距离，避开机身粗描边和中心结构，视觉上更像从飞机伸出的指示线
+  const inner = 34;
+  const headingInner = 38;
+  const green = Number.isFinite(headingDeg)
+    ? buildGuidanceLineSvg(headingDeg, "#34d399", 3.2, MAIN_MAP_LINE_BASE_LENGTH + 1, headingInner)
+    : "";
+  const red = Number.isFinite(nav.desiredHeadingDeg)
+    ? buildGuidanceLineSvg(nav.desiredHeadingDeg, "#ff6b3d", 3.2, MAIN_MAP_LINE_BASE_LENGTH, inner)
+    : "";
+  // 黑色在卫星影像上太暗，改用中灰更醒目
+  const black = Number.isFinite(nav.groundTrackDeg)
+    ? buildGuidanceLineSvg(nav.groundTrackDeg, "#4b5563", 2.8, MAIN_MAP_LINE_BASE_LENGTH - 1, inner)
+    : "";
+  const yellow = Number.isFinite(nav.waypointBearingDeg)
+    ? buildGuidanceLineSvg(nav.waypointBearingDeg, "#ffd94a", 3.0, MAIN_MAP_LINE_BASE_LENGTH + 2, inner)
+    : "";
+  let xtrackLine = "";
+  if (Number.isFinite(nav.desiredHeadingDeg) && Number.isFinite(nav.xtrackErrorM) && nav.xtrackErrorM !== 0) {
+    const offsetDeg =
+      clamp(Math.abs(nav.xtrackErrorM) / MAIN_MAP_XTRACK_SCALE_M, 0, MAIN_MAP_XTRACK_MAX_DEG) *
+      (nav.xtrackErrorM > 0 ? -1 : 1);
+    xtrackLine = buildGuidanceLineSvg(
+      nav.desiredHeadingDeg + offsetDeg,
+      "#ff5fd2",
+      2.2,
+      MAIN_MAP_LINE_BASE_LENGTH - 3,
+      inner
+    );
+  }
+  return (
+    '<span class="fp-vehicle-marker-overlay" aria-hidden="true">' +
+    '<svg class="fp-vehicle-marker-guidance" viewBox="0 0 80 80">' +
+    green + red + black + yellow + xtrackLine +
+    "</svg>" +
+    "</span>"
+  );
+}
+
+function getFlightDataHomeMarkerIcon(homeSource) {
+  const live = homeSource === "home_position" || homeSource === "gps_global_origin" || homeSource === "telemetry";
+  return L.divIcon({
+    className: "fp-home-marker" + (live ? " fp-home-marker--live" : ""),
+    html:
+      '<span class="fp-home-marker-wrap" title="Home">' +
+      '<span class="fp-home-marker-badge">H</span>' +
+      '<span class="fp-home-marker-label">Home</span>' +
+      "</span>",
+    iconSize: [56, 28],
+    iconAnchor: [14, 14]
+  });
+}
+
+function getFlightDataWaypointMarkerIcon(waypointNumber, altitude, roleLabel, labelQuadrant) {
+  const altText =
+    typeof altitude === "number" && isFinite(altitude) ? Math.round(altitude) + " m" : "--";
+  const title = roleLabel
+    ? roleLabel + " · " + altText
+    : "航点 " + waypointNumber + " · " + altText;
+  const quad = labelQuadrant || "ne";
+  const roleHtml = roleLabel
+    ? '<span class="fp-waypoint-marker-role-label fp-waypoint-marker-role-label--' +
+      quad +
+      '">' +
+      roleLabel +
+      "</span>"
+    : "";
+  return L.divIcon({
+    className: "fp-waypoint-marker",
+    html:
+      '<span class="fp-waypoint-marker-wrap" title="' +
+      title +
+      '">' +
+      '<span class="fp-waypoint-marker-body">' +
+      '<span class="fp-waypoint-marker-dot">' +
+      waypointNumber +
+      "</span>" +
+      roleHtml +
+      "</span>" +
+      '<span class="fp-waypoint-marker-alt-tag">' +
+      altText +
+      "</span>" +
+      "</span>",
+    iconSize: [72, 28],
+    iconAnchor: [14, 14]
+  });
+}
+
+function clearFlightDataMissionOverlay() {
+  if (mapMissionHomeLayer) {
+    mapMissionHomeLayer.clearLayers();
+  }
+  if (mapMissionRouteLayer) {
+    mapMissionRouteLayer.clearLayers();
+  }
+}
+
+function buildFlightDataMissionRenderablePoints(payload) {
+  const detail = payload || {};
+  const MM = window.MissionModel;
+  const AMP = window.ArdupilotMissionCompat;
+  const waypoints = Array.isArray(detail.waypoints) ? detail.waypoints : [];
+  const renderable = [];
+
+  for (let i = 0; i < waypoints.length; i += 1) {
+    const wp = waypoints[i];
+    if (!wp) continue;
+    if (AMP && typeof AMP.isHomeRow === "function" && AMP.isHomeRow(wp, i)) {
+      continue;
+    }
+    if (!MM || typeof MM.isRenderableNavCommand !== "function" || !MM.isRenderableNavCommand(wp.command)) {
+      continue;
+    }
+    if (!MM.isValidMissionGeo(wp.lat, wp.lng)) {
+      continue;
+    }
+    renderable.push({
+      seq: Number.isFinite(Number(wp.seq)) ? Number(wp.seq) : i + 1,
+      lat: Number(wp.lat),
+      lng: Number(wp.lng),
+      alt: Number(wp.alt) || 0,
+      command: wp.command,
+      label: typeof MM.getMapRoleLabel === "function" ? MM.getMapRoleLabel(wp) : (wp.label || "")
+    });
+  }
+  return renderable;
+}
+
+function renderFlightDataMissionOverlay(payload) {
+  latestMissionOverlayPayload = payload || latestMissionOverlayPayload;
+  const detail = latestMissionOverlayPayload;
+  if (!detail || !detail.home || detail.home.valid !== true) {
+    return false;
+  }
+
+  const inst = mapInstance || ensureMainMapReady();
+  if (!inst || !mapMissionHomeLayer || !mapMissionRouteLayer || typeof L === "undefined") {
+    return false;
+  }
+
+  clearFlightDataMissionOverlay();
+
+  const home = detail.home;
+  const homeMarker = L.marker([home.lat, home.lng], {
+    icon: getFlightDataHomeMarkerIcon(home.source),
+    interactive: false,
+    zIndexOffset: 600
+  });
+  homeMarker.bindPopup(
+    "<strong>Home</strong><br>" +
+      Number(home.lng).toFixed(6) +
+      ", " +
+      Number(home.lat).toFixed(6) +
+      "<br>高度 " +
+      (Number.isFinite(Number(home.alt)) ? Number(home.alt).toFixed(1) : "0.0") +
+      " m"
+  );
+  mapMissionHomeLayer.addLayer(homeMarker);
+
+  const routePoints = buildFlightDataMissionRenderablePoints(detail);
+  const labelQuadrants = ["ne", "nw", "se", "sw"];
+  routePoints.forEach(function (point, index) {
+    const marker = L.marker([point.lat, point.lng], {
+      icon: getFlightDataWaypointMarkerIcon(point.seq, point.alt, point.label, labelQuadrants[index % labelQuadrants.length]),
+      interactive: false,
+      zIndexOffset: 500
+    });
+    marker.bindPopup(
+      "<strong>" +
+        (point.label || ("航点 " + point.seq)) +
+        "</strong><br>" +
+        Number(point.lng).toFixed(6) +
+        ", " +
+        Number(point.lat).toFixed(6) +
+        "<br>高度 " +
+        Number(point.alt).toFixed(1) +
+        " m"
+    );
+    mapMissionRouteLayer.addLayer(marker);
+  });
+
+  if (routePoints.length > 0) {
+    const polylinePoints = [[home.lat, home.lng]].concat(
+      routePoints.map(function (point) {
+        return [point.lat, point.lng];
+      })
+    );
+    L.polyline(polylinePoints, {
+      color: "#4fc3f7",
+      weight: 3,
+      opacity: 0.92
+    }).addTo(mapMissionRouteLayer);
+  }
+
+  return true;
+}
 
 function detectMainMapVehicleKind() {
   const VMI = window.VehicleMarkerIcons;
@@ -507,6 +881,7 @@ function createMainMapVehicleIcon(kind, headingDeg) {
     className: "fp-vehicle-marker fp-vehicle-marker--" + kind,
     html:
       '<span class="fp-vehicle-marker-wrap" title="飞行器位置">' +
+      buildMainMapGuidanceOverlay() +
       '<span class="fp-vehicle-marker-rot" style="transform:rotate(' + rotation.toFixed(1) + 'deg)">' +
       mainMapVehicleMarkerSvg(kind) +
       "</span>" +
@@ -519,11 +894,22 @@ function createMainMapVehicleIcon(kind, headingDeg) {
 function refreshMainMapMarkerIcon() {
   if (!mapMarker || typeof L === "undefined") return;
   const kind = detectMainMapVehicleKind();
+  const snap = getGuidanceSnapshot();
+  const nav = snap.navGuidance || {};
   const heading =
     kind === "disconnected"
       ? 0
-      : normalizeHeadingDegrees(toDegrees(getSafe(window.yaw)));
-  const signature = kind + ":" + heading.toFixed(1);
+      : normalizeHeadingDegrees(toDegrees(getSafe(snap.yawRad)));
+  const signature = [
+    kind,
+    heading.toFixed(1),
+    Number.isFinite(nav.headingDeg) ? nav.headingDeg.toFixed(1) : "na",
+    nav.gpsValid ? 1 : 0,
+    Number.isFinite(nav.groundTrackDeg) ? nav.groundTrackDeg.toFixed(1) : "na",
+    Number.isFinite(nav.desiredHeadingDeg) ? nav.desiredHeadingDeg.toFixed(1) : "na",
+    Number.isFinite(nav.waypointBearingDeg) ? nav.waypointBearingDeg.toFixed(1) : "na",
+    Number.isFinite(nav.xtrackErrorM) ? nav.xtrackErrorM.toFixed(2) : "na"
+  ].join(":");
   if (signature === mapMarkerIconSignature) return;
   mapMarkerIconSignature = signature;
   mapMarker.setIcon(createMainMapVehicleIcon(kind, heading));
@@ -548,7 +934,7 @@ function initMap() {
   mapInstance = L.map('map', { zoomControl: true }).setView(center, 11);
   mapBootstrapped = true;
   // expose for other modules (e.g. splitter resizing)
-  window.mapInstance = mapInstance;
+  safeSetWindowProp("mapInstance", mapInstance);
   
   // 卫星 + 道路/地名（均为 WGS84，与飞控 GPS 一致）
   if (typeof window.addGcsMapBaseLayers === "function") {
@@ -558,6 +944,9 @@ function initMap() {
     window.GcsMapPrefetch.setupMap(mapInstance);
   }
 
+  mapMissionRouteLayer = L.layerGroup().addTo(mapInstance);
+  mapMissionHomeLayer = L.layerGroup().addTo(mapInstance);
+
   mapMarker = L.marker(center, {
     icon: createMainMapVehicleIcon(
       detectMainMapVehicleKind(),
@@ -565,6 +954,9 @@ function initMap() {
     )
   }).addTo(mapInstance);
   refreshMainMapMarkerIcon();
+  if (latestMissionOverlayPayload) {
+    renderFlightDataMissionOverlay(latestMissionOverlayPayload);
+  }
 
   // 创建一个自定义控件显示经纬度与海拔（左下角）
   const MapInfoControl = L.Control.extend({
@@ -577,7 +969,7 @@ function initMap() {
   });
   mapInstance.addControl(new MapInfoControl({ position: 'bottomleft' }));
 
-  window.updateMap = function(lat, lon) {
+  const updateMap = function(lat, lon) {
     if (mapMarker) mapMarker.setLatLng([lat, lon]);
     refreshMainMapMarkerIcon();
     // 仅平移中心点，保留用户当前缩放级别
@@ -590,6 +982,7 @@ function initMap() {
       mapInfoDiv.innerHTML = `经度: ${lonStr}<br>纬度: ${latStr}<br>海拔: ${altStr} m`;
     }
   };
+  safeSetWindowProp("updateMap", updateMap);
 
   console.log("✅ 地图初始化成功");
   return mapInstance;
@@ -603,15 +996,15 @@ function ensureMainMapReady() {
     return null;
   }
   mapInitScheduled = true;
-  requestAnimationFrame(() => {
+  scheduleFrame(() => {
     mapInitScheduled = false;
     const inst = initMap();
     if (inst) {
       setTimeout(() => {
         try {
           inst.invalidateSize();
-          if (typeof window.lat === "number" && typeof window.lon === "number" && window.updateMap) {
-            window.updateMap(window.lat, window.lon);
+          if (typeof window.lat === "number" && typeof window.lon === "number") {
+            updateMap(window.lat, window.lon);
           }
         } catch (_) { /* ignore */ }
       }, 80);
@@ -620,21 +1013,47 @@ function ensureMainMapReady() {
   return null;
 }
 
-window.ensureMainMapReady = ensureMainMapReady;
+function recoverMainMapIfNeeded() {
+  if (currentMainView !== "flight-data") return;
+  const mapEl = document.getElementById("map");
+  if (!mapEl) return;
+  const missingLeaflet = !mapEl.querySelector(".leaflet-pane");
+  const missingMarker = !mapEl.querySelector(".fp-vehicle-marker");
+  if (!missingLeaflet && !missingMarker) return;
+  const inst = ensureMainMapReady();
+  const target = inst || mapInstance || safeGetWindowProp("mapInstance");
+  if (!target) return;
+  setTimeout(() => {
+    try {
+      target.invalidateSize();
+      if (typeof window.lat === "number" && typeof window.lon === "number") {
+        const updater = safeGetWindowProp("updateMap");
+        if (typeof updater === "function") updater(window.lat, window.lon);
+      }
+      refreshMainMapMarkerIcon();
+    } catch (_) { /* ignore */ }
+  }, 80);
+}
+
+safeSetWindowProp("ensureMainMapReady", ensureMainMapReady);
+safeSetWindowProp("recoverMainMapIfNeeded", recoverMainMapIfNeeded);
+safeSetWindowProp("renderFlightDataMissionOverlay", renderFlightDataMissionOverlay);
+safeSetWindowProp("clearFlightDataMissionOverlay", clearFlightDataMissionOverlay);
 
 // 页面完全加载后强制刷新地图尺寸
 window.addEventListener('load', () => {
   setTimeout(() => {
-    if (window._currentMainView === 'flight-data') {
+    if (currentMainView === 'flight-data') {
       const inst = ensureMainMapReady();
       if (inst) inst.invalidateSize();
+      recoverMainMapIfNeeded();
     }
   }, 800);
 });
 
 window.addEventListener('resize', () => {
   try {
-    if (window.mapInstance?.invalidateSize) window.mapInstance.invalidateSize();
+    if (mapInstance?.invalidateSize) mapInstance.invalidateSize();
   } catch (_) { /* ignore */ }
 });
 
@@ -659,13 +1078,33 @@ function initLogTabs() {
   if (tabs.length) setActive(tabs[0].dataset.panel);
 
   // 暴露给全局用于外部切换
-  window.setLogTab = setActive;
+  safeSetWindowProp("setLogTab", setActive);
 }
 
 // DOM 准备好后初始化日志选项卡
-window.addEventListener('DOMContentLoaded', () => {
+function bootstrapHudMapTabs() {
   initMainTabs();
   initLogTabs();
+  document.addEventListener("gcs:telemetry-frame", function (event) {
+    const detail = event.detail || {};
+    if (Number.isFinite(Number(detail.yawRad))) localGuidanceState.yawRad = Number(detail.yawRad);
+    if (Number.isFinite(Number(detail.lat))) localGuidanceState.lat = Number(detail.lat);
+    if (Number.isFinite(Number(detail.lon))) localGuidanceState.lon = Number(detail.lon);
+    if (Number.isFinite(Number(detail.altitude))) localGuidanceState.altitude = Number(detail.altitude);
+    if (Number.isFinite(Number(detail.gpsFixType))) localGuidanceState.gpsFixType = Number(detail.gpsFixType);
+    if (Number.isFinite(Number(detail.lastGposMs))) localGuidanceState.lastGposMs = Number(detail.lastGposMs);
+    if (Number.isFinite(Number(detail.lastGpsRawMs))) localGuidanceState.lastGpsRawMs = Number(detail.lastGpsRawMs);
+    if (detail.navGuidance && typeof detail.navGuidance === "object") {
+      Object.assign(localGuidanceState.navGuidance, detail.navGuidance);
+    }
+    if (mapMarker && Number.isFinite(localGuidanceState.lat) && Number.isFinite(localGuidanceState.lon)) {
+      mapMarker.setLatLng([localGuidanceState.lat, localGuidanceState.lon]);
+      if (mapInstance) {
+        mapInstance.panTo([localGuidanceState.lat, localGuidanceState.lon], { animate: false });
+      }
+      refreshMainMapMarkerIcon();
+    }
+  });
   document.addEventListener("gcs-connection", () => {
     mapMarkerIconSignature = "";
     refreshMainMapMarkerIcon();
@@ -674,7 +1113,22 @@ window.addEventListener('DOMContentLoaded', () => {
     mapMarkerIconSignature = "";
     refreshMainMapMarkerIcon();
   });
-});
+  document.addEventListener("gcs-mission-sync-success", function (event) {
+    renderFlightDataMissionOverlay(event.detail || null);
+  });
+  setTimeout(() => {
+    if (document.getElementById("view-flight-data")?.classList.contains("active")) {
+      ensureMainMapReady();
+      recoverMainMapIfNeeded();
+    }
+  }, 50);
+}
+
+if (document.readyState === "loading") {
+  window.addEventListener('DOMContentLoaded', bootstrapHudMapTabs, { once: true });
+} else {
+  bootstrapHudMapTabs();
+}
 
 // ==================== 主页面选项卡切换 ====================
 function initMainTabs() {
@@ -683,19 +1137,21 @@ function initMainTabs() {
   if (!tabs.length || !views.length) return;
 
   function setMainView(name) {
-    window._currentMainView = name;
+    currentMainView = name;
+    safeSetWindowProp("_currentMainView", name);
     tabs.forEach(t => t.classList.toggle('active', t.dataset.view === name));
     views.forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
 
-    window.dispatchEvent(new CustomEvent('gcs:main-view-changed', {
-      detail: { name }
-    }));
+    dispatchCompatEvent(window, 'gcs:main-view-changed', { name });
 
     // 切换回飞行数据页时，刷新地图尺寸避免 Leaflet 拉伸异常
     if (name === 'flight-data') {
       const inst = ensureMainMapReady();
       if (inst) {
-        setTimeout(() => inst.invalidateSize(), 80);
+        setTimeout(() => {
+          inst.invalidateSize();
+          recoverMainMapIfNeeded();
+        }, 80);
       }
     }
   }
@@ -706,11 +1162,11 @@ function initMainTabs() {
 
   // 默认激活第一个
   setMainView(tabs[0].dataset.view);
-  window.setMainView = setMainView;
+  safeSetWindowProp("setMainView", setMainView);
 }
 
 // 一个便捷函数：把消息写到日志（默认写进最后的日志面板中的 #log）
-window.appendLog = function(msg) {
+const appendLog = function(msg) {
   const logEl = document.getElementById('log');
   if (!logEl) return;
   const line = document.createElement('div');
@@ -718,6 +1174,7 @@ window.appendLog = function(msg) {
   logEl.appendChild(line);
   logEl.scrollTop = logEl.scrollHeight;
 };
+safeSetWindowProp("appendLog", appendLog);
 
 // ==================== 遥测 → canvas#hud / #quick-grid 调度 ====================
 // MAVLink 高频时若每条消息都 RAF 重绘 800×800 HUD，CPU/GPU 会拉满。这里合并 RAF 并限制最高刷新率。
@@ -727,16 +1184,18 @@ let _uiRaf = null;
 let _uiLastDrawMs = 0;
 
 function _runHudAndQuickGrid() {
-  if (typeof window.drawHUD === "function") window.drawHUD();
+  renderHudToCanvas();
   if (typeof window.refreshQuickGrid === "function") window.refreshQuickGrid();
+  recoverMainMapIfNeeded();
+  refreshMainMapMarkerIcon();
 }
 
-window.scheduleUIUpdate = function () {
+const scheduleUIUpdate = function () {
   if (document.hidden) return;
   if (_uiRaf != null) return;
-  _uiRaf = requestAnimationFrame(function tick(now) {
+  _uiRaf = scheduleFrame(function tick(now) {
     if (_uiLastDrawMs > 0 && now - _uiLastDrawMs < _UI_MIN_INTERVAL_MS) {
-      _uiRaf = requestAnimationFrame(tick);
+      _uiRaf = scheduleFrame(tick);
       return;
     }
     _uiLastDrawMs = now;
@@ -744,6 +1203,7 @@ window.scheduleUIUpdate = function () {
     _runHudAndQuickGrid();
   });
 };
+safeSetWindowProp("scheduleUIUpdate", scheduleUIUpdate);
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;

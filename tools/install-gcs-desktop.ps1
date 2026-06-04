@@ -13,6 +13,30 @@ if (-not (Test-Path -LiteralPath $Launcher)) {
 
 $IconIco = Join-Path $Root "assets\gcs-dog.ico"
 
+function Get-GcsPython {
+    $venvPythons = @(
+        (Join-Path $Root ".venv\Scripts\pythonw.exe"),
+        (Join-Path $Root ".venv\Scripts\python.exe")
+    )
+    foreach ($candidate in $venvPythons) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+
+    $pyw = Get-Command pythonw -ErrorAction SilentlyContinue
+    if ($pyw) {
+        return $pyw.Source
+    }
+
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if ($py) {
+        return $py.Source
+    }
+
+    throw "Python not found. Please create .venv or install Python 3 first."
+}
+
 function New-GcsShortcut {
     param([string]$ShortcutPath)
     $Wsh = New-Object -ComObject WScript.Shell
@@ -47,11 +71,7 @@ if (Test-Path -LiteralPath $ie4u) {
 
 if ($WatchdogStartup) {
     $Watchdog = Join-Path $Root "tools\gcs_watchdog.py"
-    $PyCmd = Get-Command pythonw -ErrorAction SilentlyContinue
-    if (-not $PyCmd) {
-        throw "pythonw not found. Install Python 3 (with pythonw) before enabling -WatchdogStartup."
-    }
-    $Py = $PyCmd.Source
+    $Py = Get-GcsPython
 
     $Startup = [Environment]::GetFolderPath("Startup")
     $WdScPath = Join-Path $Startup "GCS Watchdog.lnk"

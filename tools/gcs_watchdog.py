@@ -56,7 +56,11 @@ def launch_runtime(wait_s: float = 20.0) -> bool:
     while time.time() < deadline:
         if runtime_healthy():
             ensure_bridge_process(wait_s=10.0, force_restart=not bridge_healthy())
-            ensure_tile_server(wait_s=10.0)
+            threading.Thread(
+                target=ensure_tile_server,
+                kwargs={"wait_s": 15.0, "force_restart": not tile_server_healthy()},
+                daemon=True,
+            ).start()
             return True
         time.sleep(0.3)
     return runtime_healthy()

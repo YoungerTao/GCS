@@ -28,7 +28,7 @@
 <link rel="stylesheet" href="CSS/components/map-prefetch.css">
 <link rel="stylesheet" href="CSS/components/serial-setup.css">
 <link rel="stylesheet" href="CSS/components/safety-setup.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css"/>
 </head>
 <body>
 
@@ -64,7 +64,6 @@
     自动匹配
   </label>
   <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
-  <button id="loadParamsBtn" type="button" onclick="loadParams({ force: true })">加载参数</button>
   <span class="map-tile-controls">
     <label for="mapBaseLayerSelect" title="切换地图底图">
       底图
@@ -923,7 +922,7 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="vendor/leaflet/leaflet.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
 <script src="JS/core/globals.js" defer></script>
@@ -948,6 +947,7 @@
 <script src="JS/core/ardupilot-telemetry.js" defer></script>
 <script src="JS/core/gcs-mission-debug.js" defer></script>
 <script src="JS/core/gcs-auto-start.js?v=9"></script>
+<script src="JS/core/startup-self-check.js?v=20260602a" defer></script>
 <script src="JS/services/baud-probe.js?v=2" defer></script>
 <script src="JS/services/serial.js?v=11" defer></script>
 <script src="JS/services/com-bridge.js?v=13" defer></script>
@@ -979,7 +979,7 @@
 <script src="JS/ui/rc-setup.js" defer></script>
 <script src="JS/ui/serial-setup.js" defer></script>
 <script src="JS/ui/motor-maps.js" defer></script>
-<script src="JS/ui/airframe-setup.js?v=14" defer></script>
+<script src="JS/ui/airframe-setup.js?v=15" defer></script>
 <script src="JS/ui/motor-setup.js?v=8" defer></script>
 <script src="JS/ui/power-setup.js" defer></script>
 <script src="JS/ui/safety-setup.js" defer></script>
@@ -990,7 +990,7 @@
 <script src="JS/ui/accel-calibration.js" defer></script>
 <script src="JS/ui/compass-calibration.js" defer></script>
 <script src="JS/ui/sensor-calibration.js" defer></script>
-<script src="JS/ui/dronecan-setup.js?v=162" defer></script>
+<script src="JS/ui/dronecan-setup.js?v=163" defer></script>
 <script src="JS/ui/all-params.js?v=20260528a" defer></script>
 
 </body>

@@ -58,27 +58,31 @@
     }
 
     if (!snapshot) {
-      setStatus(baseLayer.label + " · 检测中…", null);
+      setStatus(baseLayer.label + " · 检测中...", null);
       return;
     }
+
     if (snapshot.status === "offline") {
-      setStatus(baseLayer.label + " · 在线回退", false);
+      setStatus(baseLayer.label + " · 离线回退", false);
       return;
     }
+
     const health = snapshot.health;
     if (!health || !health.ok) {
       if (snapshot.status === "checking" || snapshot.status === "idle") {
-        setStatus(baseLayer.label + " · 检测中…", null);
+        setStatus(baseLayer.label + " · 检测中...", null);
         return;
       }
-      setStatus(baseLayer.label + " · 在线回退", false);
+      setStatus(baseLayer.label + " · 离线回退", false);
       return;
     }
+
     const cached = health.cachedTiles != null ? health.cachedTiles : 0;
     const terrainCached = health.cachedTerrainTiles != null ? health.cachedTerrainTiles : 0;
     const pf = health.prefetch || {};
     const tpf = health.terrainPrefetch || {};
     let extra = "";
+
     if (pf.running) {
       extra = " · 影像 " + (pf.done || 0) + "/" + (pf.total || 0);
     }
@@ -88,11 +92,13 @@
     if (snapshot.inFlight && snapshot.lastError) {
       extra += " · 重试中";
     }
+
     const terrainNote = health.terrainReady
       ? " · 地形就绪"
       : terrainCached
         ? " · 地形 " + terrainCached
         : "";
+
     setStatus(baseLayer.label + " · 缓存 " + cached + " 张" + terrainNote + extra, true);
   }
 
@@ -138,29 +144,29 @@
           window.flightPlanMap ||
           (window.GcsMapPrefetch && window.GcsMapPrefetch._lastMap);
         if (!map) {
-          setStatus("请打开包含地图的页面", false);
+          setStatus("请先打开包含地图的页面", false);
           return;
         }
-        const b = map.getBounds();
+        const bounds = map.getBounds();
         if (
           window.GcsMapPrefetch &&
           typeof window.GcsMapPrefetch.openPrefetchDialog === "function"
         ) {
-          window.GcsMapPrefetch.openPrefetchDialog(b);
+          window.GcsMapPrefetch.openPrefetchDialog(bounds);
         }
       });
     }
 
     function bindHealth() {
-      const TS = window.TerrainService;
-      if (TS && typeof TS.subscribeHealth === "function") {
-        TS.subscribeHealth(renderHealth);
-        if (typeof TS.ensureHealthPolling === "function") {
-          TS.ensureHealthPolling();
-        } else if (typeof TS.probeHealth === "function") {
-          TS.probeHealth(true).then(function () {
-            if (typeof TS.getHealthState === "function") {
-              renderHealth(TS.getHealthState());
+      const terrainService = window.TerrainService;
+      if (terrainService && typeof terrainService.subscribeHealth === "function") {
+        terrainService.subscribeHealth(renderHealth);
+        if (typeof terrainService.ensureHealthPolling === "function") {
+          terrainService.ensureHealthPolling();
+        } else if (typeof terrainService.probeHealth === "function") {
+          terrainService.probeHealth(true).then(function () {
+            if (typeof terrainService.getHealthState === "function") {
+              renderHealth(terrainService.getHealthState());
             }
           });
         }
@@ -169,7 +175,7 @@
         if (baseLayer && !baseLayer.supportsLocalTileServer) {
           renderHealth(null);
         } else {
-          setStatus((baseLayer ? baseLayer.label : "底图") + " · 检测中…", null);
+          setStatus((baseLayer ? baseLayer.label : "底图") + " · 检测中...", null);
         }
         bindTimer = window.setTimeout(bindHealth, 1000);
       }
@@ -177,18 +183,18 @@
 
     window.addEventListener("gcs:map-base-layer-changed", function () {
       renderBaseLayerOptions();
-      const TS = window.TerrainService;
-      if (TS && typeof TS.getHealthState === "function") {
-        renderHealth(TS.getHealthState());
+      const terrainService = window.TerrainService;
+      if (terrainService && typeof terrainService.getHealthState === "function") {
+        renderHealth(terrainService.getHealthState());
       } else {
         renderHealth(null);
       }
     });
 
     window.addEventListener("gcs:map-base-layer-runtime-changed", function () {
-      const TS = window.TerrainService;
-      if (TS && typeof TS.getHealthState === "function") {
-        renderHealth(TS.getHealthState());
+      const terrainService = window.TerrainService;
+      if (terrainService && typeof terrainService.getHealthState === "function") {
+        renderHealth(terrainService.getHealthState());
       } else {
         renderHealth(null);
       }

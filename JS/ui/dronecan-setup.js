@@ -508,7 +508,7 @@
       const pick = Array.from(sel.options).find((o) => o.value.startsWith("auth:") && !o.disabled);
       if (!pick) {
         if ($("sc-dc-hint")) {
-          $("sc-dc-hint").textContent = "仍未检测到第2路。请在弹窗中选另一个 COM，或先用「MAVLink-CAN1」。";
+          $("sc-dc-hint").textContent = "仍未检测到第2路。请在弹窗中选另一个 COM，或先用「MAVLink CAN1」。";
         }
         return;
       }
@@ -995,8 +995,8 @@
           <div class="sc-dc-toolbar-eyebrow">${dcText("Transport mode", "传输模式")}</div>
           <div class="sc-dc-mode-tabs" role="tablist" aria-label="${dcText("DroneCAN modes", "DroneCAN 模式")}">
             <button type="button" class="sc-dc-mode-tab active" data-dc-mode="slcan">${dcText("SLCAN Direct", "SLCAN 直连")}</button>
-            <button type="button" class="sc-dc-mode-tab" data-dc-mode="can1">${dcText("MAVLink CAN1", "MAVLink 经 CAN1")}</button>
-            <button type="button" class="sc-dc-mode-tab" data-dc-mode="can2">${dcText("MAVLink CAN2", "MAVLink 经 CAN2")}</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-mode="can1">${dcText("MAVLink CAN1", "MAVLink CAN1")}</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-mode="can2">${dcText("MAVLink CAN2", "MAVLink CAN2")}</button>
             <button type="button" class="sc-dc-mode-tab" data-dc-mode="filter">${dcText("Filter", "筛选")}</button>
             <button type="button" class="sc-dc-mode-tab" data-dc-mode="inspector">${dcText("Inspector", "解析器")}</button>
             <button type="button" class="sc-dc-mode-tab" data-dc-mode="stats">${dcText("Stats", "统计")}</button>
@@ -1103,8 +1103,8 @@
         </div>
       </div>
 
-      <div class="sc-dc-panel" data-dc-panel="can1"><div class="sc-dc-mini-grid"><div class="sc-subcard"><h4>${dcText("MAVLink CAN1", "MAVLink 经 CAN1")}</h4><dl id="sc-dc-can1-meta" class="sc-dl"></dl></div><div class="sc-subcard"><h4>${dcText("Topology", "拓扑")}</h4><div class="sc-topology-host"><svg id="sc-dc-svg" viewBox="0 0 420 420" class="sc-dc-svg" aria-label="${dcText("DroneCAN topology", "DroneCAN 拓扑")}"></svg></div></div></div></div>
-      <div class="sc-dc-panel" data-dc-panel="can2"><div class="sc-dc-mini-grid"><div class="sc-subcard"><h4>${dcText("MAVLink CAN2", "MAVLink 经 CAN2")}</h4><dl id="sc-dc-can2-meta" class="sc-dl"></dl></div><div class="sc-subcard"><h4>${dcText("Status", "状态")}</h4><p class="sc-prose sc-prose--sm" id="sc-dc-can2-note">${dcText("CAN2 info is still MAVLink-routed metadata only.", "CAN2 仍仅显示 MAVLink 路由的元数据。")}</p></div></div></div>
+      <div class="sc-dc-panel" data-dc-panel="can1"><div class="sc-dc-mini-grid"><div class="sc-subcard"><h4>${dcText("MAVLink CAN1", "MAVLink CAN1")}</h4><dl id="sc-dc-can1-meta" class="sc-dl"></dl></div><div class="sc-subcard"><h4>${dcText("Topology", "拓扑")}</h4><div class="sc-topology-host"><svg id="sc-dc-svg" viewBox="0 0 420 420" class="sc-dc-svg" aria-label="${dcText("DroneCAN topology", "DroneCAN 拓扑")}"></svg></div></div></div></div>
+      <div class="sc-dc-panel" data-dc-panel="can2"><div class="sc-dc-mini-grid"><div class="sc-subcard"><h4>${dcText("MAVLink CAN2", "MAVLink CAN2")}</h4><dl id="sc-dc-can2-meta" class="sc-dl"></dl></div><div class="sc-subcard"><h4>${dcText("Status", "状态")}</h4><p class="sc-prose sc-prose--sm" id="sc-dc-can2-note">${dcText("CAN2 info is still MAVLink-routed metadata only.", "CAN2 仍仅显示 MAVLink 路由的元数据。")}</p></div></div></div>
       <div class="sc-dc-panel" data-dc-panel="filter"><div class="sc-dc-filter-grid"><div class="sc-subcard"><h4>${dcText("Filter", "筛选")}</h4><label class="sc-field"><span>${dcText("Filter by name / node ID", "按名称或节点 ID 筛选")}</span><input id="sc-dc-filter-input" type="search" placeholder="${dcText("e.g. 10 / ardupilot", "例如 10 / ardupilot")}"></label><label class="sc-field"><span>${dcText("Health", "健康")}</span><select id="sc-dc-health-filter"><option value="all">${dcText("All", "全部")}</option><option value="online">${dcText("Online only", "仅在线")}</option><option value="offline">${dcText("Offline only", "仅离线")}</option></select></label></div><div class="sc-subcard"><h4>${dcText("Filtered results", "筛选结果")}</h4><div class="sc-table-wrap sc-dc-node-table-wrap"><table class="sc-dsdl-table sc-dc-node-table"><thead><tr><th>${dcText("ID", "编号")}</th><th>${dcText("Name", "名称")}</th><th>${dcText("Mode", "模式")}</th><th>${dcText("Health", "健康")}</th><th>${dcText("Source", "来源")}</th></tr></thead><tbody id="sc-dc-filter-body"></tbody></table></div></div></div></div>
       <div class="sc-dc-panel" data-dc-panel="inspector">
         <div class="sc-dc-inspector-grid">
@@ -1881,7 +1881,7 @@
       slcanBoundPort = "mavlink";
       slcanInitDone = true;
       slcanPortLostAt = 0;
-      setLiveText("sc-dc-transport-badge", bus === 2 ? dcText("MAVLink CAN2", "MAVLink 经 CAN2") : dcText("MAVLink CAN1", "MAVLink 经 CAN1"));
+      setLiveText("sc-dc-transport-badge", bus === 2 ? dcText("MAVLink CAN2", "MAVLink CAN2") : dcText("MAVLink CAN1", "MAVLink CAN1"));
       if ($("sc-dc-hint") && hint) $("sc-dc-hint").textContent = hint;
     };
 
@@ -1981,7 +1981,7 @@
       if ($("sc-dc-hint")) {
         $("sc-dc-hint").textContent = ok
           ? "当前仅授权 1 路串口（已被顶部 MAVLink 占用）。已自动 CAN_FORWARD 经同一 USB 读 DroneCAN；若仍为 0 帧/s：检查 CAN 线/参数，或在下拉「＋ 授权第二路」后重试 SLCAN Direct。"
-          : "仅 1 路串口且 CAN_FORWARD 失败。请在下拉点「＋ 授权第二路 USB 串口」，或改点「MAVLink-CAN1」。";
+          : "仅 1 路串口且 CAN_FORWARD 失败。请在下拉点「＋ 授权第二路 USB 串口」，或改点「MAVLink CAN1」。";
       }
       if (ok) return;
     }
@@ -2085,7 +2085,7 @@
       }
       if ($("sc-dc-hint")) {
         const liveHint = window.__gcsLiveServerDev && isGcsSerialConnected()
-          ? " 可改用「MAVLink-CAN1」标签，或运行 GCS.cmd 启用 SLCAN 桥。"
+          ? " 可改用「MAVLink CAN1」标签，或运行 GCS.cmd 启用 SLCAN 桥。"
           : "";
         $("sc-dc-hint").textContent = `SLCAN Direct 打开失败: ${e?.message || e}.${liveHint}`;
       }
@@ -2128,9 +2128,9 @@
         mode === "slcan"
           ? dcText("SLCAN Direct", "SLCAN 直连")
           : mode === "can1"
-            ? dcText("MAVLink CAN1", "MAVLink 经 CAN1")
+            ? dcText("MAVLink CAN1", "MAVLink CAN1")
             : mode === "can2"
-              ? dcText("MAVLink CAN2", "MAVLink 经 CAN2")
+              ? dcText("MAVLink CAN2", "MAVLink CAN2")
               : mode.toUpperCase();
       setLiveText("sc-dc-transport-badge", text);
       transportBadge.classList.toggle("sc-dc-live", mode === "slcan" && slcanSessionReady);

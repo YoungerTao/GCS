@@ -107,11 +107,9 @@
 
     if (k === "plane") {
       return (
-        "<svg" + SVG_CLS + ' viewBox="0 0 800 800" aria-hidden="true">' +
-        '<g transform="translate(400,430)">' +
-        '<path d="M 0,-280 C 45,-280 75,-160 75,-40 L 310,60 C 325,70 310,110 280,100 L 75,20 L 75,150 L 150,220 C 160,230 145,260 120,250 L 0,190 L -120,250 C -145,260 -160,230 -150,220 L -75,150 L -75,20 L -280,100 C -310,110 -325,70 -310,60 L -75,-40 C -75,-160 -45,-280 0,-280 Z" fill="none" stroke="currentColor" stroke-width="32" stroke-linejoin="round" stroke-linecap="round"/>' +
-        '<path d="M 0,-310 L 32,-248 L -32,-248 Z" fill="' + WARM + '"/>' +
-        "</g>" +
+        "<svg" + SVG_CLS + ' viewBox="0 0 32 32" aria-hidden="true">' +
+        '<path d="M16 3.4 C17.3 3.4 18.2 6.4 18.2 9.2 L18.2 12.1 L27.2 15.3 C27.8 15.5 27.6 16.7 26.8 16.6 L18.2 14.9 L18.2 20.3 L21.1 24.4 C21.5 25 20.8 25.7 20.1 25.4 L16 22.8 L11.9 25.4 C11.2 25.7 10.5 25 10.9 24.4 L13.8 20.3 L13.8 14.9 L5.2 16.6 C4.4 16.7 4.2 15.5 4.8 15.3 L13.8 12.1 L13.8 9.2 C13.8 6.4 14.7 3.4 16 3.4 Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>' +
+        '<path d="M16 1.4 L18.2 5.2 L13.8 5.2 Z" fill="' + WARM + '"/>' +
         "</svg>"
       );
     }

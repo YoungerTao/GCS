@@ -1673,6 +1673,7 @@
   display: block;
   width: 80px;
   height: 80px;
+  position: relative;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.55));
 }
 
@@ -1680,6 +1681,8 @@
   display: block;
   width: 80px;
   height: 80px;
+  position: relative;
+  z-index: 1;
   transform-origin: 50% 50%;
 }
 
@@ -1687,6 +1690,23 @@
   display: block;
   width: 80px;
   height: 80px;
+  position: relative;
+  z-index: 2;
+}
+
+.fp-vehicle-marker-overlay {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.fp-vehicle-marker-guidance {
+  display: block;
+  width: 80px;
+  height: 80px;
+  overflow: visible;
 }
 
 .fp-vehicle-marker--multirotor,
