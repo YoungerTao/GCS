@@ -12,11 +12,23 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
+
+def _is_microsoft_store_python(exe: str) -> bool:
+    s = (exe or "").lower().replace("\\", "/")
+    return "windowsapps" in s or "pythonsoftwarefoundation" in s
+
+
+if _is_microsoft_store_python(sys.executable):
+    raise RuntimeError(
+        "GCS runtime 检测到 Microsoft Store 版 Python（受沙箱限制），静态文件（如 JS/data/apm-param-db.json）可能无法服务，"
+        "串口桥也会失败。使用官方 python.org Python 重新创建 .venv 后启动。"
+    )
+
 TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from gcs_supervisor import bridge_healthy, ensure_bridge_process, watchdog_loop  # noqa: E402
+from gcs_supervisor import bridge_healthy, ensure_bridge_process, watchdog_loop, get_last_bridge_error  # noqa: E402
 from map_tiles_supervisor import ensure_tile_server_process, tile_server_healthy  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +95,7 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
                 "service": "gcs-runtime",
                 "bridgeUp": bridge_healthy(),
                 "tileServerUp": tile_server_healthy(),
+                "bridgeError": get_last_bridge_error() or None,
             }).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")

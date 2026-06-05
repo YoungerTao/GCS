@@ -610,7 +610,7 @@ let currentMainView = "flight-data";
 
 const MAIN_MAP_OVERLAY_CENTER = 40;
 // 调大长度让指示线从飞机图标中“伸出来”，避免被粗描边机身完全覆盖（尤其是 Plane）。
-const MAIN_MAP_LINE_BASE_LENGTH = 110;
+const MAIN_MAP_LINE_BASE_LENGTH = 220;
 const MAIN_MAP_XTRACK_SCALE_M = 2.4;
 const MAIN_MAP_XTRACK_MAX_DEG = 35;
 
@@ -645,9 +645,147 @@ function buildGuidanceLineSvg(angleDeg, color, width, lengthPx, innerLengthPx = 
   );
 }
 
+function missionBearingDegrees(from, to) {
+  if (!from || !to) return null;
+  const lat1 = Number(from.lat);
+  const lon1 = Number(from.lng != null ? from.lng : from.lon);
+  const lat2 = Number(to.lat);
+  const lon2 = Number(to.lng != null ? to.lng : to.lon);
+  if (
+    !Number.isFinite(lat1) ||
+    !Number.isFinite(lon1) ||
+    !Number.isFinite(lat2) ||
+    !Number.isFinite(lon2)
+  ) {
+    return null;
+  }
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const dLambda = ((lon2 - lon1) * Math.PI) / 180;
+  const y = Math.sin(dLambda) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
+  return normalizeHeadingDegrees((Math.atan2(y, x) * 180) / Math.PI);
+}
+
+function projectMissionPointMeters(origin, point) {
+  if (!origin || !point) return null;
+  const lat0 = Number(origin.lat);
+  const lon0 = Number(origin.lng != null ? origin.lng : origin.lon);
+  const lat = Number(point.lat);
+  const lon = Number(point.lng != null ? point.lng : point.lon);
+  if (
+    !Number.isFinite(lat0) ||
+    !Number.isFinite(lon0) ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lon)
+  ) {
+    return null;
+  }
+  const metersPerDegLat = 111320;
+  const metersPerDegLon = metersPerDegLat * Math.cos((lat0 * Math.PI) / 180);
+  return {
+    x: (lon - lon0) * metersPerDegLon,
+    y: (lat - lat0) * metersPerDegLat
+  };
+}
+
+function missionCrossTrackErrorMeters(point, legStart, legEnd) {
+  const start = projectMissionPointMeters(legStart, legStart);
+  const end = projectMissionPointMeters(legStart, legEnd);
+  const cur = projectMissionPointMeters(legStart, point);
+  if (!start || !end || !cur) return null;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const legLen = Math.sqrt(dx * dx + dy * dy);
+  if (legLen < 1e-3) return null;
+  // Positive means the aircraft is right of the commanded leg.
+  return ((dy * cur.x) - (dx * cur.y)) / legLen;
+}
+
+function resolveMissionGuidanceFallback(snap) {
+  if (!latestMissionOverlayPayload || !latestMissionOverlayPayload.home) return null;
+  if (!Number.isFinite(snap.lat) || !Number.isFinite(snap.lon)) return null;
+  const MM = window.MissionModel;
+  if (!MM || typeof MM.isRenderableNavCommand !== "function" || typeof MM.isValidMissionGeo !== "function") {
+    return null;
+  }
+  const waypoints = Array.isArray(latestMissionOverlayPayload.waypoints)
+    ? latestMissionOverlayPayload.waypoints
+    : [];
+  if (!waypoints.length) return null;
+  const currentSeq = Number(window.wp_current);
+  if (!Number.isFinite(currentSeq)) return null;
+
+  const renderable = waypoints.filter(function (wp) {
+    return wp &&
+      MM.isRenderableNavCommand(wp.command) &&
+      MM.isValidMissionGeo(wp.lat, wp.lng) &&
+      Number.isFinite(Number(wp.seq));
+  });
+  if (!renderable.length) return null;
+
+  let target = renderable.find(function (wp) {
+    return Number(wp.seq) >= currentSeq;
+  }) || null;
+  if (!target) {
+    target = renderable[renderable.length - 1] || null;
+  }
+  if (!target) return null;
+
+  let previous = null;
+  for (let i = renderable.length - 1; i >= 0; i -= 1) {
+    if (Number(renderable[i].seq) < Number(target.seq)) {
+      previous = renderable[i];
+      break;
+    }
+  }
+  if (!previous) {
+    previous = latestMissionOverlayPayload.home;
+  }
+
+  const aircraftPoint = { lat: snap.lat, lng: snap.lon };
+  const waypointBearingDeg = missionBearingDegrees(aircraftPoint, target);
+  const desiredHeadingDeg = missionBearingDegrees(previous, target);
+  const xtrackErrorM = missionCrossTrackErrorMeters(aircraftPoint, previous, target);
+
+  if (
+    !Number.isFinite(waypointBearingDeg) &&
+    !Number.isFinite(desiredHeadingDeg) &&
+    !Number.isFinite(xtrackErrorM)
+  ) {
+    return null;
+  }
+
+  return {
+    desiredHeadingDeg: Number.isFinite(desiredHeadingDeg) ? desiredHeadingDeg : null,
+    waypointBearingDeg: Number.isFinite(waypointBearingDeg) ? waypointBearingDeg : null,
+    xtrackErrorM: Number.isFinite(xtrackErrorM) ? xtrackErrorM : null
+  };
+}
+
+function resolveMainMapGuidance(snap, nav) {
+  const resolved = Object.assign({}, nav || {});
+  const fallback = resolveMissionGuidanceFallback(snap);
+  if (!fallback) {
+    return resolved;
+  }
+  if (!Number.isFinite(resolved.desiredHeadingDeg) && Number.isFinite(fallback.desiredHeadingDeg)) {
+    resolved.desiredHeadingDeg = fallback.desiredHeadingDeg;
+  }
+  if (!Number.isFinite(resolved.waypointBearingDeg) && Number.isFinite(fallback.waypointBearingDeg)) {
+    resolved.waypointBearingDeg = fallback.waypointBearingDeg;
+  }
+  if (!Number.isFinite(resolved.xtrackErrorM) && Number.isFinite(fallback.xtrackErrorM)) {
+    resolved.xtrackErrorM = fallback.xtrackErrorM;
+  }
+  return resolved;
+}
+
 function buildMainMapGuidanceOverlay() {
   const snap = getGuidanceSnapshot();
-  const nav = snap.navGuidance || {};
+  const nav = resolveMainMapGuidance(snap, snap.navGuidance || {});
   const gpsValid = nav.gpsValid === true;
   const headingDeg = normalizeHeadingDegrees(toDegrees(getSafe(snap.yawRad)));
 
@@ -660,24 +798,21 @@ function buildMainMapGuidanceOverlay() {
 
   const showGuidance = gpsValid || hasRecentPosition;
 
-  // 不再绘制绿色的“当前航向”线：飞机图标本身已经通过旋转 + 暖色鼻尖（WARM）清晰表示了 heading。
-  // 以前的绿线与机身长轴重合，看起来“在飞机的体内”，用户反馈强烈。
-  // 保留红（desired）、黑/灰（groundTrack）、黄（waypoint）、粉（xtrack）作为真正的“指示线”。
-  // 使用 inner 让线从中心向外“悬浮”一段距离，避开机身粗描边和中心结构，视觉上更像从飞机伸出的指示线
+  // 使用 inner 让引导线从中心向外“悬浮”一段距离，避开机身粗描边和中心结构。
   const inner = 34;
   const headingInner = 38;
   const green = Number.isFinite(headingDeg)
-    ? buildGuidanceLineSvg(headingDeg, "#34d399", 3.2, MAIN_MAP_LINE_BASE_LENGTH + 1, headingInner)
+    ? buildGuidanceLineSvg(headingDeg, "#00ff00", 1.6, MAIN_MAP_LINE_BASE_LENGTH + 1, headingInner)
     : "";
   const red = Number.isFinite(nav.desiredHeadingDeg)
-    ? buildGuidanceLineSvg(nav.desiredHeadingDeg, "#ff6b3d", 3.2, MAIN_MAP_LINE_BASE_LENGTH, inner)
+    ? buildGuidanceLineSvg(nav.desiredHeadingDeg, "#ff6b3d", 1.6, MAIN_MAP_LINE_BASE_LENGTH, inner)
     : "";
   // 黑色在卫星影像上太暗，改用中灰更醒目
   const black = Number.isFinite(nav.groundTrackDeg)
-    ? buildGuidanceLineSvg(nav.groundTrackDeg, "#4b5563", 2.8, MAIN_MAP_LINE_BASE_LENGTH - 1, inner)
+    ? buildGuidanceLineSvg(nav.groundTrackDeg, "#4b5563", 1.4, MAIN_MAP_LINE_BASE_LENGTH - 1, inner)
     : "";
   const yellow = Number.isFinite(nav.waypointBearingDeg)
-    ? buildGuidanceLineSvg(nav.waypointBearingDeg, "#ffd94a", 3.0, MAIN_MAP_LINE_BASE_LENGTH + 2, inner)
+    ? buildGuidanceLineSvg(nav.waypointBearingDeg, "#ffd94a", 1.5, MAIN_MAP_LINE_BASE_LENGTH + 2, inner)
     : "";
   let xtrackLine = "";
   if (Number.isFinite(nav.desiredHeadingDeg) && Number.isFinite(nav.xtrackErrorM) && nav.xtrackErrorM !== 0) {
@@ -687,7 +822,7 @@ function buildMainMapGuidanceOverlay() {
     xtrackLine = buildGuidanceLineSvg(
       nav.desiredHeadingDeg + offsetDeg,
       "#ff5fd2",
-      2.2,
+      1.1,
       MAIN_MAP_LINE_BASE_LENGTH - 3,
       inner
     );
@@ -895,7 +1030,7 @@ function refreshMainMapMarkerIcon() {
   if (!mapMarker || typeof L === "undefined") return;
   const kind = detectMainMapVehicleKind();
   const snap = getGuidanceSnapshot();
-  const nav = snap.navGuidance || {};
+  const nav = resolveMainMapGuidance(snap, snap.navGuidance || {});
   const heading =
     kind === "disconnected"
       ? 0
@@ -1115,6 +1250,8 @@ function bootstrapHudMapTabs() {
   });
   document.addEventListener("gcs-mission-sync-success", function (event) {
     renderFlightDataMissionOverlay(event.detail || null);
+    mapMarkerIconSignature = "";
+    refreshMainMapMarkerIcon();
   });
   setTimeout(() => {
     if (document.getElementById("view-flight-data")?.classList.contains("active")) {

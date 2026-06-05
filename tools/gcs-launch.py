@@ -11,9 +11,25 @@ import webbrowser
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _is_microsoft_store_python(exe: str) -> bool:
+    s = (exe or "").lower().replace("\\", "/")
+    return "windowsapps" in s or "pythonsoftwarefoundation" in s
+
+
+if _is_microsoft_store_python(sys.executable):
+    # Still try to continue (spawn may pick venv), but note it.
+    # Real protection is in gcs_python() and child entry points.
+    try:
+        with open(REPO_ROOT / "tools" / "launch-python-warn.txt", "w", encoding="utf-8") as f:
+            f.write(f"警告：gcs-launch.py 由 Microsoft Store Python 启动：{sys.executable}\n")
+    except Exception:
+        pass
 TOOLS_DIR = REPO_ROOT / "tools"
 WATCHDOG_SCRIPT = TOOLS_DIR / "gcs_watchdog.py"
 RUNTIME_PING = "http://127.0.0.1:8766/__gcs/ping"
+WATCHDOG_ERR_LOG = REPO_ROOT / "tools" / "watchdog.stderr.log"
 LAUNCHER_PING = "http://127.0.0.1:8767/ping"
 LAUNCH_URL = "http://127.0.0.1:8767/launch"
 TILE_SERVER_HEALTH = "http://127.0.0.1:8768/health"
@@ -42,11 +58,16 @@ def _spawn_watchdog() -> None:
         pyw = Path(exe).with_name("pythonw.exe")
         if pyw.is_file():
             exe = str(pyw)
+    WATCHDOG_ERR_LOG.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        werr = WATCHDOG_ERR_LOG.open("ab")
+    except Exception:
+        werr = subprocess.DEVNULL
     subprocess.Popen(
         [exe, str(WATCHDOG_SCRIPT)],
         cwd=str(REPO_ROOT),
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=werr,
         creationflags=_no_window_flags(),
     )
     for _ in range(40):
@@ -75,7 +96,7 @@ def _ensure_runtime_stack(wait_s: float = 4.5) -> bool:
 
 
 def _clear_launch_lock() -> None:
-    lock = Path(os.environ.get("TEMP", "")) / "gcs-launch.lock"
+    lock = Path(os.environ.get("TEMP") or os.environ.get("TMPDIR", "/tmp")) / "gcs-launch.lock"
     try:
         lock.unlink(missing_ok=True)
     except OSError:
@@ -114,3 +135,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

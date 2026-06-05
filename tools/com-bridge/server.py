@@ -13,12 +13,35 @@ try:
 except Exception:
     serial = None
 
+
+def _is_microsoft_store_python(exe: str) -> bool:
+    """MS Store / sandboxed python cannot access COM ports or project files on arbitrary drives."""
+    s = (exe or "").lower().replace("\\", "/")
+    return "windowsapps" in s or "pythonsoftwarefoundation" in s
+
+
+if _is_microsoft_store_python(sys.executable):
+    raise RuntimeError(
+        "检测到 Microsoft Store 版 Python（sys.executable 含 WindowsApps），"
+        "该版本沙箱限制导致无法打开串口（WriteFile failed PermissionError '设备不识别此命令'）"
+        "和无法读取 JS/data/apm-param-db.json 等文件。\n"
+        "请安装 https://www.python.org/downloads/ 的官方 Python，删除 .venv 后重新 setup。"
+    )
+
 try:
     from pymavlink import mavutil
     from pymavlink.dialects.v20 import ardupilotmega as mavlink2
 except Exception:
     mavutil = None
     mavlink2 = None
+
+try:
+    import dronecan
+except Exception:
+    dronecan = None
+# 注意：当前 bridge 主要通过 SLCAN ASCII + MAVLink 交互实现 DroneCAN 功能（见 JS 侧 dronecan-setup.js）。
+# 引入 dronecan 包主要是为了让完整 Python DroneCAN 场景（或未来扩展）可用。
+# 如果这里为 None，后续若有使用 dronecan 的代码需像 serial/pymavlink 一样加 guard 并通过 _last_bridge_error 报错。
 
 
 OTA_SESSIONS = {}
@@ -371,7 +394,7 @@ def _collect_port_sample_mavlink_only(port, baudrate=115200):
 
 
 def probe_baud_for_port(port, baud_list=None):
-    """Try baud rates (high to low); return first with MAVLink score > 0."""
+    """Try baud rates and return the strongest MAVLink candidate instead of the first hit."""
     port = str(port or "").strip()
     if not port:
         return {"ok": False, "error": "port required"}
@@ -398,6 +421,7 @@ def probe_baud_for_port(port, baud_list=None):
     t0 = time.time()
     tried = []
     best_slcan_score = 0
+    best_match = None
     with _BAUD_PROBE_LOCK:
         for baud in bauds:
             if time.time() - t0 > _BAUD_PROBE_MAX_ELAPSED_S:
@@ -418,21 +442,30 @@ def probe_baud_for_port(port, baud_list=None):
                 row["probeRole"] = analysis.get("probeRole")
             tried.append(row)
             if score > 0:
-                elapsed_ms = int((time.time() - t0) * 1000)
-                return {
-                    "ok": True,
-                    "baud": baud,
-                    "score": score,
-                    "probeRole": (analysis or {}).get("probeRole", "mavlink"),
-                    "tried": tried,
-                    "elapsedMs": elapsed_ms,
-                }
+                if (
+                    best_match is None
+                    or score > best_match["score"]
+                ):
+                    best_match = {
+                        "baud": baud,
+                        "score": score,
+                        "probeRole": (analysis or {}).get("probeRole", "mavlink"),
+                    }
             slcan_score = 0
             if analysis and str(analysis.get("probeRole")) == "slcan":
                 slcan_score = int(analysis.get("probeSlcanLines") or 0) + 50
             best_slcan_score = max(best_slcan_score, slcan_score)
 
     elapsed_ms = int((time.time() - t0) * 1000)
+    if best_match is not None:
+        return {
+            "ok": True,
+            "baud": best_match["baud"],
+            "score": best_match["score"],
+            "probeRole": best_match["probeRole"],
+            "tried": tried,
+            "elapsedMs": elapsed_ms,
+        }
     if best_slcan_score > 0:
         return {
             "ok": False,
@@ -807,6 +840,8 @@ class SerialHub:
                         self.rx_buffer.extend(data)
                         self._last_rx_at = now
                         self._rx_bytes_total = getattr(self, "_rx_bytes_total", 0) + len(data)
+                    if self.label == "bridge":
+                        _bridge_broadcast(data)
                     if self.label in ("slcan", "bridge"):
                         SLCAN_MONITOR.feed(data)
             except Exception as exc:
@@ -819,6 +854,103 @@ class SerialHub:
 
 MAVLINK_HUB = SerialHub("bridge")
 SLCAN_HUB = SerialHub("slcan")
+
+# ============================================================
+# Bridge subscribers — allow multiple pages to share one MAVLink stream
+# 每个 tab 拥有自己的接收缓冲区；hub 只在最后一个订阅者断开时真正关闭串口
+# ============================================================
+_bridge_subscribers = {}  # tab_id -> bytearray
+_bridge_subscribers_lock = threading.Lock()
+_bridge_probe_last = {
+    "at": None,
+    "port": None,
+    "bauds": [],
+    "result": None,
+}
+_bridge_probe_last_lock = threading.Lock()
+
+
+def _get_tab_id(handler):
+    """从请求头获取 Tab ID"""
+    return handler.headers.get('X-GCS-Tab-Id', '')
+
+
+def _subscribe_bridge_tab(tab_id):
+    tab = str(tab_id or "").strip()
+    if not tab:
+        return False
+    with _bridge_subscribers_lock:
+        _bridge_subscribers.setdefault(tab, bytearray())
+    return True
+
+
+def _unsubscribe_bridge_tab(tab_id):
+    tab = str(tab_id or "").strip()
+    if not tab:
+        return False
+    with _bridge_subscribers_lock:
+        existed = tab in _bridge_subscribers
+        _bridge_subscribers.pop(tab, None)
+        return existed
+
+
+def _bridge_subscriber_count():
+    with _bridge_subscribers_lock:
+        return len(_bridge_subscribers)
+
+
+def _record_bridge_probe(port, bauds, result):
+    normalized_bauds = []
+    for item in bauds or []:
+        try:
+            normalized_bauds.append(int(item))
+        except Exception:
+            continue
+    with _bridge_probe_last_lock:
+        _bridge_probe_last["at"] = int(time.time() * 1000)
+        _bridge_probe_last["port"] = str(port or "").strip() or None
+        _bridge_probe_last["bauds"] = normalized_bauds
+        _bridge_probe_last["result"] = result
+
+
+def _get_bridge_probe_snapshot():
+    with _bridge_probe_last_lock:
+        return {
+            "at": _bridge_probe_last.get("at"),
+            "port": _bridge_probe_last.get("port"),
+            "bauds": list(_bridge_probe_last.get("bauds") or []),
+            "result": _bridge_probe_last.get("result"),
+        }
+
+
+def _bridge_broadcast(data):
+    if not data:
+        return
+    with _bridge_subscribers_lock:
+        stale = []
+        for tab_id, buf in _bridge_subscribers.items():
+            try:
+                buf.extend(data)
+                if len(buf) > 2_000_000:
+                    del buf[:-1_000_000]
+            except Exception:
+                stale.append(tab_id)
+        for tab_id in stale:
+            _bridge_subscribers.pop(tab_id, None)
+
+
+def _bridge_read_for_tab(tab_id, max_bytes=65536):
+    tab = str(tab_id or "").strip()
+    if not tab:
+        return b""
+    with _bridge_subscribers_lock:
+        buf = _bridge_subscribers.get(tab)
+        if not buf:
+            return b""
+        data = bytes(buf[:max_bytes])
+        del buf[:max_bytes]
+        return data
+
 
 # Lawicel SLCAN bitrate codes (S0..S8)
 SLCAN_BITRATE_CODE = {
@@ -1180,7 +1312,7 @@ def send_json(handler, status, payload):
 class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-GCS-Tab-Id")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
 
@@ -1228,10 +1360,14 @@ class Handler(BaseHTTPRequestHandler):
                 send_json(self, 500, {"ok": False, "error": str(exc)})
             return
         if self.path == "/bridge-status":
-            send_json(self, 200, MAVLINK_HUB.status())
+            send_json(self, 200, {
+                **MAVLINK_HUB.status(),
+                "subscribers": _bridge_subscriber_count(),
+                "lastProbe": _get_bridge_probe_snapshot(),
+            })
             return
         if self.path == "/bridge-read":
-            data = MAVLINK_HUB.read_buffer()
+            data = _bridge_read_for_tab(_get_tab_id(self))
             send_json(self, 200, {"data": base64.b64encode(data).decode("ascii")})
             return
         if self.path == "/slcan-status":
@@ -1265,6 +1401,7 @@ class Handler(BaseHTTPRequestHandler):
                 if bauds is not None and not isinstance(bauds, list):
                     bauds = None
                 result = probe_baud_for_port(port, bauds)
+                _record_bridge_probe(port, bauds or DEFAULT_BAUD_PROBE_LIST, result)
                 send_json(self, 200, result)
                 return
             if self.path == "/bridge-open":
@@ -1272,19 +1409,62 @@ class Handler(BaseHTTPRequestHandler):
                 baudrate = int(payload.get("baudrate") or 115200)
                 if not port:
                     raise RuntimeError("port is required")
+                tab_id = _get_tab_id(self)
+                current = MAVLINK_HUB.status()
+                already_open = (
+                    current.get("open")
+                    and str(current.get("port") or "").strip() == port
+                    and int(current.get("baudrate") or 0) == baudrate
+                )
+                if already_open:
+                    _subscribe_bridge_tab(tab_id)
+                    status = MAVLINK_HUB.status()
+                    send_json(self, 200, {"ok": True, "shared": True, **status, "subscribers": _bridge_subscriber_count()})
+                    return
                 status = MAVLINK_HUB.open(port, baudrate)
+                if status.get("open"):
+                    _subscribe_bridge_tab(tab_id)
                 send_json(self, 200, {"ok": True, **status})
                 return
             if self.path == "/bridge-close":
+                tab_id = _get_tab_id(self)
                 prev = MAVLINK_HUB.status()
-                MAVLINK_HUB.close()
-                send_json(self, 200, {"ok": True, "sessionClosed": prev.get("sessionId", 0), **MAVLINK_HUB.status()})
+                _unsubscribe_bridge_tab(tab_id)
+                if _bridge_subscriber_count() <= 0:
+                    MAVLINK_HUB.close()
+                send_json(self, 200, {
+                    "ok": True,
+                    "sessionClosed": prev.get("sessionId", 0) if _bridge_subscriber_count() <= 0 else 0,
+                    **MAVLINK_HUB.status(),
+                    "subscribers": _bridge_subscriber_count(),
+                })
                 return
             if self.path == "/bridge-write":
                 b64 = payload.get("data") or ""
                 data = base64.b64decode(b64.encode("ascii"))
                 written = MAVLINK_HUB.write(data)
                 send_json(self, 200, {"ok": True, "written": written})
+                return
+            if self.path == "/bridge-force-connect":
+                port = str(payload.get("port") or "").strip()
+                baudrate = int(payload.get("baudrate") or 115200)
+                if not port:
+                    raise RuntimeError("port is required")
+                tab_id = _get_tab_id(self)
+                with _bridge_subscribers_lock:
+                    _bridge_subscribers.clear()
+                MAVLINK_HUB.close()
+                status = MAVLINK_HUB.open(port, baudrate)
+                if status.get("open"):
+                    _subscribe_bridge_tab(tab_id)
+                send_json(self, 200, {"ok": True, **status})
+                return
+            if self.path == "/disconnect-all":
+                tab_id = payload.get("tabId") or _get_tab_id(self)
+                removed = _unsubscribe_bridge_tab(tab_id)
+                if removed and _bridge_subscriber_count() <= 0:
+                    MAVLINK_HUB.close()
+                send_json(self, 200, {"ok": True, "subscribers": _bridge_subscriber_count()})
                 return
             if self.path == "/slcan-open":
                 port = str(payload.get("port") or "").strip() or str(detect_slcan_port() or "").strip()

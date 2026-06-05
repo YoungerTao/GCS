@@ -1,9 +1,9 @@
 /**
- * COM 波特率自动探测：连接前扫描多档速率，选用可解析 MAVLink 的最高档。
+ * COM 波特率自动探测：连接前扫描多档速率，优先选用更稳的中高档。
  */
 (function () {
   const BRIDGE_API = "http://127.0.0.1:8765";
-  const DEFAULT_CANDIDATES = [921600, 460800, 230400, 115200, 57600];
+  const DEFAULT_CANDIDATES = [460800, 230400, 115200, 57600, 921600];
   const HIGH_EXTRA = [3000000, 2000000, 1500000];
 
   function getSelectedBaudRate() {
@@ -24,6 +24,8 @@
     const selected = getSelectedBaudRate();
     const merged = [...DEFAULT_CANDIDATES];
     if (selected > 921600) merged.unshift(selected);
+    else if (selected === 921600) merged.push(selected);
+    else if (selected > 0 && !merged.includes(selected)) merged.unshift(selected);
     for (const b of HIGH_EXTRA) {
       if (b === selected && !merged.includes(b)) merged.unshift(b);
     }
@@ -36,8 +38,47 @@
       out.push(n);
     }
     if (!seen.has(selected)) out.push(selected);
-    out.sort((a, b) => b - a);
     return out;
+  }
+
+  function buildPortHintText(opts) {
+    const sp = opts?.systemPort || null;
+    const parts = [
+      opts?.portName,
+      opts?.portLabel,
+      sp?.deviceId,
+      sp?.name,
+      sp?.manufacturer,
+      sp?.friendlyName,
+      sp?.path,
+      sp?.description,
+    ];
+    return parts
+      .filter((v) => typeof v === "string" && v.trim())
+      .join(" | ")
+      .toLowerCase();
+  }
+
+  function isLikelyUsbFlightControllerPort(opts) {
+    const sp = opts?.systemPort || null;
+    const hint = buildPortHintText(opts);
+    if (!hint) return false;
+    if (/radio|telemetry|telem|uart|ttl|ftdi|cp210|ch340|bridge|rf|sik|expresslrs|elrs|rx|tx/.test(hint)) {
+      return false;
+    }
+    if (/usbmodem|usbserial|ttyacm|ttyusb|cu\.usb|\/dev\/tty\.acm|\/dev\/cu\.usb/.test(hint)) {
+      return true;
+    }
+    if (/pixhawk|cuav|cube|holybro|ardupilot|px4|fmuv|mavlink/.test(hint)) {
+      return true;
+    }
+    return typeof sp?.usbVendorId === "number" && typeof sp?.usbProductId === "number";
+  }
+
+  function shouldAutoProbeBaud(opts) {
+    if (!isAutoBaudProbeEnabled()) return false;
+    if (!opts?.useBridge) return true;
+    return isLikelyUsbFlightControllerPort(opts);
   }
 
   function applyDetectedBaud(baud) {
@@ -208,7 +249,7 @@
 
   async function resolveConnectBaudRate(opts) {
     const options = opts || {};
-    if (!isAutoBaudProbeEnabled()) {
+    if (!shouldAutoProbeBaud(options)) {
       return getSelectedBaudRate();
     }
     if (window._baudProbeInFlight) {
@@ -259,6 +300,8 @@
 
   window.isAutoBaudProbeEnabled = isAutoBaudProbeEnabled;
   window.getBaudProbeCandidates = getBaudProbeCandidates;
+  window.isLikelyUsbFlightControllerPort = isLikelyUsbFlightControllerPort;
+  window.shouldAutoProbeBaud = shouldAutoProbeBaud;
   window.applyDetectedBaud = applyDetectedBaud;
   window.probeBaudViaBridge = probeBaudViaBridge;
   window.probeBaudViaWebSerial = probeBaudViaWebSerial;

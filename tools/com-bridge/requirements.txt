@@ -1,2 +1,4 @@
+# Legacy / subdir reference. See repo ROOT requirements.txt for the canonical list (pyserial + pymavlink + dronecan + future core deps).
+# Standalone tool venvs can do: pip install -r ../../requirements.txt (from com-bridge/ dir).
 pyserial>=3.5
 pymavlink>=2.4

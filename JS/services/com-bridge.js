@@ -100,6 +100,18 @@ async function probeBridgeHealth() {
   }
 }
 
+async function getBridgeStartupError() {
+  try {
+    const r = await fetch("http://127.0.0.1:8766/__gcs/ping", { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      return j?.bridgeError || null;
+    }
+  } catch (_) {}
+  return null;
+}
+window.getBridgeStartupError = getBridgeStartupError;
+
 async function requestBridgeStartup() {
   const attempts = [
     { url: "http://127.0.0.1:8766/__gcs/ensure-bridge", method: "POST" },
