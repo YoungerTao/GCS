@@ -312,3 +312,12 @@ type tools\watchdog.stderr.log
 
 **鏍稿績鐞嗗康**: 璁╃敤鎴峰彧闇€鍙屽嚮鎸夐挳锛屽叾浣欎竴鍒囬兘鑷姩澶勭悊锛侌煄?
 
+## 2026-06 stale service hygiene + mtime self-heal (per plan)
+- Added windows/tools/stop-gcs-services.ps1 (Get-NetTCP + netstat fallback) + early call from GCS-智能安装.bat [0/4] + gcs-stop.py --force (before python).
+- bridge/tile /health now surface scriptMtime + scriptPath.
+- gcs_supervisor + map_tiles_supervisor: _query_live_*_mtime + stale detection in ensure (if disk > live+3s => force, log, reap even on win, spawn fresh).
+- gcs_ports.py: now cross-plat with _reap_windows (CREATE_NO_WINDOW, PS/netstat/taskkill, python name filter).
+- gcs-stop.py: --force / -f support (bypass runtime_healthy).
+- Minor: comments in gcs_watchdog/gcs-runtime/GCS.cmd; added X-GCS-Tab-Id to runtime do_OPTIONS for hygiene.
+- Docs updated (INSTALL.md FAQ+steps, windows/README.md, root README 常见问题排查, this file).
+- Self-heal on ensure paths (from gcs-runtime ensure-bridge called by JS, watchdog etc). Reinstall bat now truly cleans stale after git pull.

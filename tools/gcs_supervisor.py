@@ -1,10 +1,13 @@
 """Start and supervise the local COM bridge (tools/com-bridge/server.py)."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from gcs_http import local_http_ok
@@ -93,6 +96,33 @@ def bridge_healthy(timeout_s: float = 1.5) -> bool:
     return local_http_ok(BRIDGE_API, timeout_s=timeout_s)
 
 
+def _query_live_bridge_mtime(timeout_s: float = 1.0) -> int | None:
+    """Fetch /health from live bridge and return its reported scriptMtime (or None on any failure)."""
+    try:
+        with urllib.request.urlopen(BRIDGE_API, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                return None
+            data = json.loads(resp.read().decode("utf-8", "ignore"))
+            m = data.get("scriptMtime")
+            if isinstance(m, (int, float)):
+                return int(m)
+    except Exception:
+        pass
+    # socket fallback (mirrors gcs_http)
+    try:
+        req = urllib.request.Request(BRIDGE_API, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                return None
+            data = json.loads(resp.read().decode("utf-8", "ignore"))
+            m = data.get("scriptMtime")
+            if isinstance(m, (int, float)):
+                return int(m)
+    except Exception:
+        pass
+    return None
+
+
 def get_last_bridge_error() -> str:
     global _last_bridge_error
     return _last_bridge_error or ""
@@ -130,7 +160,26 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
     global _proc, _stdout_handle, _stderr_handle, _last_bridge_error
     with _lock:
         if not force_restart and bridge_healthy():
-            return True
+            live_m = _query_live_bridge_mtime()
+            try:
+                disk_m = int(SERVER_SCRIPT.stat().st_mtime)
+            except Exception:
+                disk_m = 0
+            if live_m and disk_m > live_m + 3:  # tolerance for FS clock skew (per plan: 2-5s)
+                # stale in-memory code (e.g. after git pull); force refresh of listener
+                force_restart = True
+                try:
+                    with BRIDGE_STDERR_LOG.open("ab") as f:
+                        f.write(f"[stale-bridge] disk mtime {disk_m} > live {live_m}, forcing restart\n".encode("utf-8", "ignore"))
+                except Exception:
+                    pass
+                try:
+                    reap_stale_python_listener(BRIDGE_PORT)
+                except Exception:
+                    pass
+                # fall through (do not return) to stop+spawn below
+            else:
+                return True
         if force_restart:
             _stop_locked()
         elif _proc is not None and _proc.poll() is None and bridge_healthy():

@@ -2,6 +2,7 @@ import base64
 import binascii
 import json
 import re
+import os
 import subprocess
 import sys
 import threading
@@ -1329,6 +1330,8 @@ class Handler(BaseHTTPRequestHandler):
             send_json(self, 200, {
                 "ok": True,
                 "service": "com-bridge",
+                "scriptMtime": int(os.path.getmtime(__file__)),
+                "scriptPath": __file__,
                 "mavlinkBridge": {
                     "sessionId": mav.get("sessionId"),
                     "open": mav.get("open", False),
@@ -1362,6 +1365,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/bridge-status":
             send_json(self, 200, {
                 **MAVLINK_HUB.status(),
+                "scriptMtime": int(os.path.getmtime(__file__)),
+                "scriptPath": __file__,
                 "subscribers": _bridge_subscriber_count(),
                 "lastProbe": _get_bridge_probe_snapshot(),
             })

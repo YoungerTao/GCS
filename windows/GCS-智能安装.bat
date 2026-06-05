@@ -21,6 +21,12 @@ echo GCS Windows one-click installer
 echo.
 echo Log file: %LOG_FILE%
 
+echo.
+echo [0/4] Stopping any stale GCS background services (important after git updates)...
+call :log Running stop-gcs-services.ps1 (early, no Python required)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WINDOWS_DIR%\tools\stop-gcs-services.ps1" >> "%LOG_FILE%" 2>&1
+python "%CD%\tools\gcs-stop.py" --force >> "%LOG_FILE%" 2>&1
+
 call :ensure_python
 if errorlevel 1 goto :fail
 

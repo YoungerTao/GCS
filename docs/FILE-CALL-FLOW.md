@@ -322,3 +322,7 @@ t=4:     鐢ㄦ埛鐪嬪埌 UI 鉁?
 ```
 
 
+## 2026-06 update (stale bridge fix)
+- ensure_bridge_process now does mtime freshness check before early healthy return (queries live /health, stats SERVER_SCRIPT, forces reap+restart if disk newer).
+- This affects launch paths: watchdog -> launch_runtime -> ensure; runtime bridge_warmup + /__gcs/ensure-bridge (from gcs-auto-start / com-bridge.js).
+- New stop-gcs-services.ps1 used only in install path.

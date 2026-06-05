@@ -75,6 +75,7 @@ window.rankSerialPort = rankSerialPort;
 
 const BRIDGE_OFFLINE_BACKOFF_MS = 45000;
 const BRIDGE_HEALTH_PROBE_MS = 15000;
+const _PAGE_LOAD_TS = Math.floor(Date.now() / 1000);
 
 function isBridgeBackoffActive() {
   return typeof window._comBridgeBackoffUntil === "number" && Date.now() < window._comBridgeBackoffUntil;
@@ -85,13 +86,22 @@ async function probeBridgeHealth() {
   if (typeof window._comBridgeProbeBackoffUntil === "number" && Date.now() < window._comBridgeProbeBackoffUntil) {
     return false;
   }
-  try {
+    try {
     const resp = await fetch(`${BRIDGE_API}/health`, { cache: "no-store" });
     window._comBridgeProbeBackoffUntil = 0;
     if (resp.ok) {
       window._comBridgeOnline = true;
       window._comBridgeBackoffUntil = 0;
       resetAutoConnectAttempts();
+      try {
+        const j = await resp.clone().json();
+        window._lastBridgeScriptMtime = j && j.scriptMtime ? j.scriptMtime : null;
+        window._lastBridgeScriptPath = j && j.scriptPath ? j.scriptPath : null;
+        if (!window._loggedBridgeMtimeDiag && window._lastBridgeScriptMtime && Math.abs(window._lastBridgeScriptMtime - _PAGE_LOAD_TS) > 600) {
+          window._loggedBridgeMtimeDiag = true;
+          console.log("[gcs] probeBridgeHealth: bridge scriptMtime differs sig from page load ts (possible stale-code case before self-heal):", window._lastBridgeScriptMtime, "path=", window._lastBridgeScriptPath);
+        }
+      } catch (_) {}
     }
     return resp.ok;
   } catch (_) {

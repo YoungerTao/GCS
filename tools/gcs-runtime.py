@@ -38,6 +38,7 @@ UI_PORT = 8766
 def bridge_warmup_loop(initial_wait_s: float = 15.0, retry_interval_s: float = 10.0) -> None:
     while True:
         try:
+            # ensure_bridge_process now includes mtime-based stale code detection (self-heal after git pull)
             if ensure_bridge_process(wait_s=initial_wait_s):
                 return
         except Exception:
@@ -61,13 +62,14 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-GCS-Tab-Id")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path == "/__gcs/ensure-bridge":
+            # calls into supervisor which does mtime check vs disk for bridge; force-restarts if stale
             ok = ensure_bridge_process(wait_s=15.0)
             body = json.dumps({"ok": ok, "bridgeReady": ok}).encode("utf-8")
             self.send_response(200 if ok else 503)
@@ -77,6 +79,7 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         if path == "/__gcs/ensure-tile-server":
+            # ensure_tile_server_process now includes mtime-based stale detection for parity
             ok = ensure_tile_server_process(wait_s=15.0)
             body = json.dumps({"ok": ok, "tileServerUp": ok}).encode("utf-8")
             self.send_response(200 if ok else 503)
@@ -96,6 +99,7 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
                 "bridgeUp": bridge_healthy(),
                 "tileServerUp": tile_server_healthy(),
                 "bridgeError": get_last_bridge_error() or None,
+                # scriptMtime for bridge/tile available on their /health (auto self-heal on stale)
             }).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")

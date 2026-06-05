@@ -10,3 +10,4 @@ Windows 安装与环境入口。
 - `tools/install-gcs-desktop.ps1`
 - `tools/install-gcs-autostart.ps1`
 - `tools/update-gcs-shortcut-icon.ps1`
+- `tools/stop-gcs-services.ps1` (early cleanup of stale python listeners on GCS ports; used by installer)

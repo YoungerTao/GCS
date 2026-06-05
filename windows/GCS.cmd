@@ -7,6 +7,12 @@ set "PY=%CD%\.venv\Scripts\pythonw.exe"
 if not exist "%PY%" set "PY=%CD%\.venv\Scripts\python.exe"
 if not exist "%PY%" set "PY=pythonw"
 
+rem Surgical mtime-based stale detection (in ensure_bridge_process) handles post-git-pull
+rem bridge refresh on-demand via JS ensure-bridge calls. We do NOT call stop-gcs-services.ps1
+rem unconditionally here: that would kill a healthy runtime on every desktop icon click
+rem (the early 8766 ping short-circuit path must stay fast and non-disruptive).
+rem See plan and gcs_supervisor.py for details. PS1 stop is used in the install .bat only.
+
 curl -s -m 1 http://127.0.0.1:8766/__gcs/ping >nul 2>&1
 if not errorlevel 1 (
   start "" "http://127.0.0.1:8766/index.html"

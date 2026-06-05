@@ -1,10 +1,13 @@
 """Start and supervise the local map tile server (tools/map-tiles/tile_server.py)."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from gcs_http import local_http_ok
@@ -62,6 +65,32 @@ def tile_server_healthy(timeout_s: float = 1.5) -> bool:
     return local_http_ok(TILE_SERVER_API, timeout_s=timeout_s)
 
 
+def _query_live_tile_mtime(timeout_s: float = 1.0) -> int | None:
+    """Fetch /health from live tile server and return its reported scriptMtime (or None on any failure)."""
+    try:
+        with urllib.request.urlopen(TILE_SERVER_API, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                return None
+            data = json.loads(resp.read().decode("utf-8", "ignore"))
+            m = data.get("scriptMtime")
+            if isinstance(m, (int, float)):
+                return int(m)
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(TILE_SERVER_API, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                return None
+            data = json.loads(resp.read().decode("utf-8", "ignore"))
+            m = data.get("scriptMtime")
+            if isinstance(m, (int, float)):
+                return int(m)
+    except Exception:
+        pass
+    return None
+
+
 def _stop_locked() -> None:
     global _proc
     if _proc is None:
@@ -80,7 +109,26 @@ def ensure_tile_server_process(force_restart: bool = False, wait_s: float = 12.0
     global _proc
     with _lock:
         if not force_restart and tile_server_healthy():
-            return True
+            live_m = _query_live_tile_mtime()
+            try:
+                disk_m = int(SERVER_SCRIPT.stat().st_mtime)
+            except Exception:
+                disk_m = 0
+            if live_m and disk_m > live_m + 3:  # tolerance for FS clock skew
+                force_restart = True
+                try:
+                    handle = _tile_server_log_handle()
+                    handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [stale-tile] disk mtime {disk_m} > live {live_m}, forcing restart\n")
+                    handle.flush()
+                except Exception:
+                    pass
+                try:
+                    _reap_stale_port_owner()
+                except Exception:
+                    pass
+                # fall through to stop + spawn
+            else:
+                return True
         if force_restart:
             _stop_locked()
         elif _proc is not None and _proc.poll() is None and tile_server_healthy():
