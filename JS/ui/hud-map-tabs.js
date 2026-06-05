@@ -610,7 +610,7 @@ let currentMainView = "flight-data";
 
 const MAIN_MAP_OVERLAY_CENTER = 40;
 // 调大长度让指示线从飞机图标中“伸出来”，避免被粗描边机身完全覆盖（尤其是 Plane）。
-const MAIN_MAP_LINE_BASE_LENGTH = 110;
+const MAIN_MAP_LINE_BASE_LENGTH = 220;
 const MAIN_MAP_XTRACK_SCALE_M = 2.4;
 const MAIN_MAP_XTRACK_MAX_DEG = 35;
 
@@ -802,17 +802,17 @@ function buildMainMapGuidanceOverlay() {
   const inner = 34;
   const headingInner = 38;
   const green = Number.isFinite(headingDeg)
-    ? buildGuidanceLineSvg(headingDeg, "#00ff00", 3.2, MAIN_MAP_LINE_BASE_LENGTH + 1, headingInner)
+    ? buildGuidanceLineSvg(headingDeg, "#00ff00", 1.6, MAIN_MAP_LINE_BASE_LENGTH + 1, headingInner)
     : "";
   const red = Number.isFinite(nav.desiredHeadingDeg)
-    ? buildGuidanceLineSvg(nav.desiredHeadingDeg, "#ff6b3d", 3.2, MAIN_MAP_LINE_BASE_LENGTH, inner)
+    ? buildGuidanceLineSvg(nav.desiredHeadingDeg, "#ff6b3d", 1.6, MAIN_MAP_LINE_BASE_LENGTH, inner)
     : "";
   // 黑色在卫星影像上太暗，改用中灰更醒目
   const black = Number.isFinite(nav.groundTrackDeg)
-    ? buildGuidanceLineSvg(nav.groundTrackDeg, "#4b5563", 2.8, MAIN_MAP_LINE_BASE_LENGTH - 1, inner)
+    ? buildGuidanceLineSvg(nav.groundTrackDeg, "#4b5563", 1.4, MAIN_MAP_LINE_BASE_LENGTH - 1, inner)
     : "";
   const yellow = Number.isFinite(nav.waypointBearingDeg)
-    ? buildGuidanceLineSvg(nav.waypointBearingDeg, "#ffd94a", 3.0, MAIN_MAP_LINE_BASE_LENGTH + 2, inner)
+    ? buildGuidanceLineSvg(nav.waypointBearingDeg, "#ffd94a", 1.5, MAIN_MAP_LINE_BASE_LENGTH + 2, inner)
     : "";
   let xtrackLine = "";
   if (Number.isFinite(nav.desiredHeadingDeg) && Number.isFinite(nav.xtrackErrorM) && nav.xtrackErrorM !== 0) {
@@ -822,7 +822,7 @@ function buildMainMapGuidanceOverlay() {
     xtrackLine = buildGuidanceLineSvg(
       nav.desiredHeadingDeg + offsetDeg,
       "#ff5fd2",
-      2.2,
+      1.1,
       MAIN_MAP_LINE_BASE_LENGTH - 3,
       inner
     );
