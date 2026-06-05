@@ -6,7 +6,16 @@
 
 ## ⚡ 快速开始
 
-👉 **新用户？** 查看 [`INSTALL.md`](INSTALL.md)（3 步启动）
+👉 **新用户？** 查看 [`INSTALL.md`](INSTALL.md)（3 步启动）  |  [`macOS 指南`](macos/README.md)
+
+---
+
+### 平台入口
+
+| 平台 | 首次安装 | 日常启动 | 关闭服务 |
+|------|---------|---------|---------|
+| **macOS** | `macos/install.command` | 桌面 `GCS.app`（狗图标） | `macos/stop.command` |
+| **Windows** | `GCS-智能安装.bat` | 桌面 `GCS` 图标 | 任务管理器 |
 
 ---
 

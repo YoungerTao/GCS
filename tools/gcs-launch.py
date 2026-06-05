@@ -96,7 +96,7 @@ def _ensure_runtime_stack(wait_s: float = 4.5) -> bool:
 
 
 def _clear_launch_lock() -> None:
-    lock = Path(os.environ.get("TEMP", "")) / "gcs-launch.lock"
+    lock = Path(os.environ.get("TEMP") or os.environ.get("TMPDIR", "/tmp")) / "gcs-launch.lock"
     try:
         lock.unlink(missing_ok=True)
     except OSError:
@@ -135,3 +135,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

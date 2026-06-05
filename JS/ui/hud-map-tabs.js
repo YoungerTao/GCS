@@ -660,14 +660,11 @@ function buildMainMapGuidanceOverlay() {
 
   const showGuidance = gpsValid || hasRecentPosition;
 
-  // 不再绘制绿色的“当前航向”线：飞机图标本身已经通过旋转 + 暖色鼻尖（WARM）清晰表示了 heading。
-  // 以前的绿线与机身长轴重合，看起来“在飞机的体内”，用户反馈强烈。
-  // 保留红（desired）、黑/灰（groundTrack）、黄（waypoint）、粉（xtrack）作为真正的“指示线”。
-  // 使用 inner 让线从中心向外“悬浮”一段距离，避开机身粗描边和中心结构，视觉上更像从飞机伸出的指示线
+  // 使用 inner 让引导线从中心向外“悬浮”一段距离，避开机身粗描边和中心结构。
   const inner = 34;
   const headingInner = 38;
   const green = Number.isFinite(headingDeg)
-    ? buildGuidanceLineSvg(headingDeg, "#34d399", 3.2, MAIN_MAP_LINE_BASE_LENGTH + 1, headingInner)
+    ? buildGuidanceLineSvg(headingDeg, "#00ff00", 3.2, MAIN_MAP_LINE_BASE_LENGTH + 1, headingInner)
     : "";
   const red = Number.isFinite(nav.desiredHeadingDeg)
     ? buildGuidanceLineSvg(nav.desiredHeadingDeg, "#ff6b3d", 3.2, MAIN_MAP_LINE_BASE_LENGTH, inner)

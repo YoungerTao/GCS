@@ -6,6 +6,17 @@
  *   - param-loader.js: 参数加载遮罩/进度条 UI
  */
 
+// ============================================================
+// GCS Tab ID — 每个页面唯一标识（刷新保留，新标签页重新生成）
+// 用于串口所有权冲突检测（防止多个标签页连同一个串口）
+// ============================================================
+let _gcsTabId = sessionStorage.getItem('gcs-tab-id');
+if (!_gcsTabId) {
+    _gcsTabId = 'gcs-' + Date.now() + '-' + Math.random().toString(36).substr(2, 8);
+    sessionStorage.setItem('gcs-tab-id', _gcsTabId);
+}
+const GCS_TAB_ID = _gcsTabId;
+
 window._pendingParamRequest = false;
 window._bridgeMode = window._bridgeMode || "bridge";
 window._bridgeConnActive = window._bridgeConnActive || false;
@@ -24,9 +35,15 @@ async function bridgeFetch(path, body = null, bridgeOpts = {}) {
   }
   const fetchOpts = body ? {
     method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    headers: {
+        "Content-Type": "text/plain;charset=utf-8",
+        "X-GCS-Tab-Id": GCS_TAB_ID
+    },
     body: JSON.stringify(body),
-  } : { method: "GET" };
+  } : {
+    method: "GET",
+    headers: { "X-GCS-Tab-Id": GCS_TAB_ID }
+  };
   const resp = await fetch(`http://127.0.0.1:8765${path}`, fetchOpts);
   const text = await resp.text();
   let data = {};
@@ -447,6 +464,145 @@ function getSelectedBaudRate() {
   return Number.isFinite(n) && n > 0 ? n : 115200;
 }
 
+function ensureBridgeBaudPolicyHelpers() {
+  if (typeof window.isAutoBaudProbeEnabled !== "function") {
+    window.isAutoBaudProbeEnabled = function isAutoBaudProbeEnabledFallback() {
+      try {
+        return localStorage.getItem("gcs.autoBaudProbe") !== "0";
+      } catch (_) {
+        return true;
+      }
+    };
+  }
+
+  if (typeof window.getBaudProbeCandidates !== "function") {
+    window.getBaudProbeCandidates = function getBaudProbeCandidatesFallback() {
+      const defaults = [460800, 230400, 115200, 57600, 921600];
+      const highExtra = [3000000, 2000000, 1500000];
+      const selected = getSelectedBaudRate();
+      const merged = [...defaults];
+      if (selected > 921600) merged.unshift(selected);
+      else if (selected === 921600) merged.push(selected);
+      else if (selected > 0 && !merged.includes(selected)) merged.unshift(selected);
+      for (const b of highExtra) {
+        if (b === selected && !merged.includes(b)) merged.unshift(b);
+      }
+      const seen = new Set();
+      const out = [];
+      for (const b of merged) {
+        const n = Number(b);
+        if (!Number.isFinite(n) || n <= 0 || seen.has(n)) continue;
+        seen.add(n);
+        out.push(n);
+      }
+      if (!seen.has(selected)) out.push(selected);
+      return out;
+    };
+  }
+
+  if (typeof window.isLikelyUsbFlightControllerPort !== "function") {
+    window.isLikelyUsbFlightControllerPort = function isLikelyUsbFlightControllerPortFallback(opts) {
+      const sp = opts?.systemPort || null;
+      const hint = [
+        opts?.portName,
+        opts?.portLabel,
+        sp?.deviceId,
+        sp?.name,
+        sp?.manufacturer,
+        sp?.friendlyName,
+        sp?.path,
+        sp?.description,
+      ]
+        .filter((v) => typeof v === "string" && v.trim())
+        .join(" | ")
+        .toLowerCase();
+      if (!hint) return false;
+      if (/radio|telemetry|telem|uart|ttl|ftdi|cp210|ch340|bridge|rf|sik|expresslrs|elrs|rx|tx/.test(hint)) {
+        return false;
+      }
+      if (/usbmodem|usbserial|ttyacm|ttyusb|cu\.usb|\/dev\/tty\.acm|\/dev\/cu\.usb/.test(hint)) {
+        return true;
+      }
+      if (/pixhawk|cuav|cube|holybro|ardupilot|px4|fmuv|mavlink/.test(hint)) {
+        return true;
+      }
+      return typeof sp?.usbVendorId === "number" && typeof sp?.usbProductId === "number";
+    };
+  }
+
+  if (typeof window.shouldAutoProbeBaud !== "function") {
+    window.shouldAutoProbeBaud = function shouldAutoProbeBaudFallback(opts) {
+      if (!window.isAutoBaudProbeEnabled()) return false;
+      if (!opts?.useBridge) return true;
+      return window.isLikelyUsbFlightControllerPort(opts);
+    };
+  }
+
+  if (typeof window.resolveConnectBaudRate !== "function") {
+    window.resolveConnectBaudRate = async function resolveConnectBaudRateFallback(opts) {
+      const options = opts || {};
+      if (!window.shouldAutoProbeBaud(options)) {
+        return getSelectedBaudRate();
+      }
+      if (window._baudProbeInFlight) {
+        return getSelectedBaudRate();
+      }
+      window._baudProbeInFlight = true;
+      try {
+        if (!options.useBridge || !options.portName) {
+          return getSelectedBaudRate();
+        }
+        const data = await bridgeFetch("/bridge-probe-baud", {
+          port: options.portName,
+          bauds: window.getBaudProbeCandidates(),
+        });
+        const detected = Number(data?.baud || 0);
+        if (Number.isFinite(detected) && detected > 0) {
+          const baudEl = document.getElementById("serialBaud");
+          if (baudEl) baudEl.value = String(detected);
+          try {
+            localStorage.setItem("gcs.lastBaud", String(detected));
+          } catch (_) { /* ignore */ }
+          if (typeof log === "function") log(`已自动匹配波特率 ${detected}`);
+          return detected;
+        }
+        return getSelectedBaudRate();
+      } catch (_) {
+        return getSelectedBaudRate();
+      } finally {
+        window._baudProbeInFlight = false;
+      }
+    };
+  }
+}
+ensureBridgeBaudPolicyHelpers();
+
+function describeBridgeBaudPolicy(optionMeta, portName, portLabel) {
+  const policy = {
+    kind: "manual",
+    label: "固定波特率",
+    reason: "非 USB 飞控口默认尊重手动波特率",
+  };
+  if (typeof window.shouldAutoProbeBaud === "function") {
+    const auto = window.shouldAutoProbeBaud({
+      useBridge: true,
+      portName,
+      portLabel,
+      systemPort: optionMeta?.systemPort || null,
+    });
+    if (auto) {
+      policy.kind = "auto";
+      policy.label = "自适应波特率";
+      policy.reason = "检测为 USB 飞控直连口";
+      return policy;
+    }
+  }
+  if (typeof window.isAutoBaudProbeEnabled === "function" && !window.isAutoBaudProbeEnabled()) {
+    policy.reason = "用户已关闭自动波特率探测";
+  }
+  return policy;
+}
+
 function scheduleRefreshPorts(opts = {}) {
   if (typeof window.refreshPorts !== "function") return;
   window.refreshPorts(opts).catch(() => {});
@@ -477,6 +633,14 @@ async function disconnectSerial() {
     try { log(`⚠️ 断开清理异常: ${e?.message || e}`); } catch (_) { /* ignore */ }
   } finally {
     setConnectionUI("disconnected");
+    // 通知后端释放串口所有权
+    try {
+      await fetch('http://127.0.0.1:8765/disconnect-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabId: GCS_TAB_ID })
+      });
+    } catch (_) { /* ignore */ }
   }
   if (typeof window.markGcsSessionDisconnected === "function") {
     window.markGcsSessionDisconnected();
@@ -614,6 +778,7 @@ async function connectImpl() {
         if (!portName) {
           throw new Error("未识别到 COM 口名称，请在下拉中点击「↻ 刷新 COM 列表」并选择带 [桥接] 的端口");
         }
+        const portLabel = comSelect.options[comSelect.selectedIndex]?.text || selectedValue;
         const portRole =
           typeof window.getPortProbeRole === "function"
             ? window.getPortProbeRole(optionMeta?.systemPort)
@@ -635,11 +800,17 @@ async function connectImpl() {
           portName = mavlinkPort;
         }
         let baudRate = getSelectedBaudRate();
-        if (typeof window.resolveConnectBaudRate === "function") {
+        const baudPolicy = describeBridgeBaudPolicy(optionMeta, portName, portLabel);
+        if (baudPolicy.kind === "auto" && typeof window.resolveConnectBaudRate === "function") {
+          log(`ℹ️ ${baudPolicy.reason}，连接前先执行自适应波特率探测`);
           baudRate = await window.resolveConnectBaudRate({
             portName,
             useBridge: true,
+            portLabel,
+            systemPort: optionMeta?.systemPort || null,
           });
+        } else {
+          log(`ℹ️ ${baudPolicy.reason}，本次按手动波特率 ${baudRate} 连接`);
         }
         if (!portRole && !mavlinkPort && !window._gcsAutoConnectActive) {
           const siblings = getDuplicateVidPidSiblingPorts(portName);
@@ -647,7 +818,42 @@ async function connectImpl() {
             portName = await pickActiveBridgePort(portName, baudRate, { excludeDeviceIds: [slcanPort] });
           }
         }
-        const opened = await bridgeFetch("/bridge-open", { port: portName, baudrate: baudRate });
+        // 调用 /bridge-open，处理 409 串口冲突
+        const openResp = await fetch('http://127.0.0.1:8765/bridge-open', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain;charset=utf-8',
+                'X-GCS-Tab-Id': GCS_TAB_ID
+            },
+            body: JSON.stringify({ port: portName, baudrate: baudRate })
+        });
+        const openData = await openResp.json();
+        if (openResp.status === 409 && openData.conflict) {
+            const takeOver = confirm(
+                '串口 ' + openData.port + ' 已被另一个页面占用。\n\n是否接管？对方将被断开连接。'
+            );
+            if (takeOver) {
+                const forceResp = await fetch('http://127.0.0.1:8765/bridge-force-connect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8',
+                        'X-GCS-Tab-Id': GCS_TAB_ID
+                    },
+                    body: JSON.stringify({ port: portName, baudrate: baudRate })
+                });
+                const forceData = await forceResp.json();
+                if (!forceResp.ok || forceData?.ok === false) {
+                    throw new Error(forceData?.error || '接管串口失败');
+                }
+                var opened = forceData;
+            } else {
+                throw new Error('用户取消了串口连接');
+            }
+        } else if (!openResp.ok || openData?.ok === false) {
+            throw new Error(openData?.error || ('bridge-open failed (' + openResp.status + ')'));
+        } else {
+            var opened = openData;
+        }
         const bridgeSessionId = Number(opened?.sessionId || 0);
         bumpConnectionSession();
         window._bridgeConnActive = true;
@@ -942,24 +1148,62 @@ async function requestParamByName(name) {
 }
 window.requestParamByName = requestParamByName;
 
+function markParamReRequestSent(indices) {
+  const now = Date.now();
+  if (!window._paramMissingRetryAt) window._paramMissingRetryAt = new Map();
+  for (const idx of indices) {
+    window._paramMissingRetryAt.set(idx, now);
+  }
+}
+
+function resetParamRetryTracking() {
+  window._paramMissingCursor = 0;
+  window._paramMissingRetryAt = new Map();
+  window._paramMissingBatchInFlight = false;
+}
+window.resetParamRetryTracking = resetParamRetryTracking;
+
 async function requestMissingParamBatch() {
   const count = Number(window._paramCount);
   const seen = window._paramRxIndices;
   if (!window._paramLoadActive || !count || !seen || !(window.writer || writer)) return;
+  if (window._paramMissingBatchInFlight) return;
   const profile = getParamLoadProfile();
+  const retryAt = window._paramMissingRetryAt instanceof Map ? window._paramMissingRetryAt : new Map();
+  window._paramMissingRetryAt = retryAt;
+  const retryCooldownMs = Math.max(1200, profile.batchDelayMs * Math.max(12, profile.batchSize / 2));
   const missing = [];
-  for (let i = 0; i < count && missing.length < profile.batchSize; i += 1) {
-    if (!seen.has(i)) missing.push(i);
+  const start = Number.isFinite(window._paramMissingCursor) ? window._paramMissingCursor : 0;
+  for (let step = 0; step < count && missing.length < profile.batchSize; step += 1) {
+    const idx = (start + step) % count;
+    if (seen.has(idx)) continue;
+    const lastRetryAt = Number(retryAt.get(idx) || 0);
+    if (lastRetryAt > 0 && Date.now() - lastRetryAt < retryCooldownMs) continue;
+    missing.push(idx);
+  }
+  if (!missing.length) {
+    for (let step = 0; step < count && missing.length < profile.batchSize; step += 1) {
+      const idx = (start + step) % count;
+      if (!seen.has(idx)) missing.push(idx);
+    }
   }
   if (!missing.length) return;
+  window._paramMissingBatchInFlight = true;
+  markParamReRequestSent(missing);
+  window._paramMissingCursor = (missing[missing.length - 1] + 1) % count;
   if (typeof log === "function") {
-    log(`↻ 补拉缺失参数 ${missing.length} 项（已收 ${seen.size}/${count}，策略=${profile.name}）`, "param-load");
+    const span = missing.length > 1 ? `${missing[0]}-${missing[missing.length - 1]}` : `${missing[0]}`;
+    log(`↻ 补拉缺失参数 ${missing.length} 项（已收 ${seen.size}/${count}，策略=${profile.name}，索引=${span}）`, "param-load");
   }
-  for (const idx of missing) {
-    try {
-      await requestParamReadByIndex(idx);
-    } catch (_) { /* ignore */ }
-    await new Promise((r) => setTimeout(r, profile.batchDelayMs));
+  try {
+    for (const idx of missing) {
+      try {
+        await requestParamReadByIndex(idx);
+      } catch (_) { /* ignore */ }
+      await new Promise((r) => setTimeout(r, profile.batchDelayMs));
+    }
+  } finally {
+    window._paramMissingBatchInFlight = false;
   }
 }
 window.requestMissingParamBatch = requestMissingParamBatch;
@@ -989,6 +1233,7 @@ async function loadParams(opts) {
     log("⚠️ 参数表正在加载中，请稍候或点击「取消」结束", "param-load");
     return;
   }
+  resetParamRetryTracking();
   window._pendingParamRequest = false;
   const profile = getParamLoadProfile();
   const requestParamList = () => {
@@ -1108,5 +1353,17 @@ function installSerialUnloadHandlers() {
 }
 
 installSerialUnloadHandlers();
+
+// 页面关闭/刷新时通知后端释放串口所有权
+window.addEventListener('beforeunload', function() {
+    navigator.sendBeacon('http://127.0.0.1:8765/disconnect-all',
+        JSON.stringify({ tabId: GCS_TAB_ID })
+    );
+});
+window.addEventListener('pagehide', function() {
+    navigator.sendBeacon('http://127.0.0.1:8765/disconnect-all',
+        JSON.stringify({ tabId: GCS_TAB_ID })
+    );
+});
 
 console.log("✅ serial.js 已加载（精简版）+ 刷新释放保护已安装（pagehide fast）");

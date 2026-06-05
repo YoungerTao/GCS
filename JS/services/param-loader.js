@@ -7,6 +7,66 @@ const PARAM_LOAD_WATCHDOG_MS = 120000;
 const PARAM_LOAD_STALL_MS = 1800;
 const PARAM_LOAD_SOFT_COMPLETE_MS = 45000;
 const PARAM_LOAD_SOFT_COMPLETE_COVERAGE = 0.985;
+const PARAM_LOAD_DISPLAY_MIN_RATE = 0.18;
+const PARAM_LOAD_DISPLAY_MAX_RATE = 0.9;
+const PARAM_LOAD_DISPLAY_CATCHUP_GAIN = 1.8;
+
+function stopParamLoadDisplayAnimation() {
+  if (window._paramLoadDisplayRaf) {
+    cancelAnimationFrame(window._paramLoadDisplayRaf);
+    window._paramLoadDisplayRaf = null;
+  }
+  window._paramLoadDisplayLastTs = 0;
+}
+
+function renderParamLoadBarPct(pct) {
+  const bar = document.getElementById("param-load-bar");
+  if (!bar) return;
+  bar.classList.remove("param-load-bar--indeterminate");
+  bar.style.left = "0";
+  bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+function tickParamLoadDisplay(ts) {
+  if (!window._paramLoadDisplayAnimating) {
+    stopParamLoadDisplayAnimation();
+    return;
+  }
+  const target = Number(window._paramLoadDisplayTargetPct);
+  let current = Number(window._paramLoadDisplayPct);
+  if (!Number.isFinite(target) || !Number.isFinite(current)) {
+    stopParamLoadDisplayAnimation();
+    return;
+  }
+  if (!window._paramLoadDisplayLastTs) {
+    window._paramLoadDisplayLastTs = ts;
+  }
+  const dt = Math.max(0.001, (ts - window._paramLoadDisplayLastTs) / 1000);
+  window._paramLoadDisplayLastTs = ts;
+  const gap = Math.max(0, target - current);
+  if (gap <= 0.001) {
+    window._paramLoadDisplayPct = target;
+    renderParamLoadBarPct(target);
+    window._paramLoadDisplayAnimating = false;
+    stopParamLoadDisplayAnimation();
+    return;
+  }
+  const rate = Math.min(
+    PARAM_LOAD_DISPLAY_MAX_RATE,
+    PARAM_LOAD_DISPLAY_MIN_RATE + gap * PARAM_LOAD_DISPLAY_CATCHUP_GAIN
+  );
+  current = Math.min(target, current + rate * dt * 100);
+  window._paramLoadDisplayPct = current;
+  renderParamLoadBarPct(current);
+  window._paramLoadDisplayRaf = requestAnimationFrame(tickParamLoadDisplay);
+}
+
+function ensureParamLoadDisplayAnimation() {
+  if (window._paramLoadDisplayAnimating) return;
+  window._paramLoadDisplayAnimating = true;
+  window._paramLoadDisplayLastTs = 0;
+  window._paramLoadDisplayRaf = requestAnimationFrame(tickParamLoadDisplay);
+}
 
 function stopParamLoadStallWatcher() {
   if (window._paramStallInterval) {
@@ -80,11 +140,22 @@ window.updateParamLoadProgress = function updateParamLoadProgress(received, tota
   }
   if (!bar) return;
   if (Number.isFinite(total) && total > 0) {
-    bar.classList.remove("param-load-bar--indeterminate");
-    bar.style.left = "0";
-    const pct = Math.min(100, Math.round((received / total) * 100));
-    bar.style.width = `${pct}%`;
+    const pct = Math.min(100, (received / total) * 100);
+    if (!Number.isFinite(window._paramLoadDisplayPct) || window._paramLoadDisplayPct < 0) {
+      window._paramLoadDisplayPct = 0;
+    }
+    window._paramLoadDisplayTargetPct = pct;
+    if (pct <= window._paramLoadDisplayPct + 0.15) {
+      window._paramLoadDisplayPct = pct;
+      window._paramLoadDisplayAnimating = false;
+      stopParamLoadDisplayAnimation();
+      renderParamLoadBarPct(pct);
+    } else {
+      ensureParamLoadDisplayAnimation();
+    }
   } else {
+    window._paramLoadDisplayAnimating = false;
+    stopParamLoadDisplayAnimation();
     bar.classList.add("param-load-bar--indeterminate");
     bar.style.width = "";
     bar.style.left = "";
@@ -105,6 +176,10 @@ window.beginParamLoadingUI = function beginParamLoadingUI() {
   try { window.params.clear(); } catch (_) { /* ignore */ }
   window._paramCount = undefined;
   window._paramRxIndices = new Set();
+  window._paramLoadDisplayPct = 0;
+  window._paramLoadDisplayTargetPct = 0;
+  window._paramLoadDisplayAnimating = false;
+  stopParamLoadDisplayAnimation();
   startParamLoadStallWatcher();
 
   const paramsEl = document.getElementById("params");
@@ -175,9 +250,17 @@ window.endParamLoadingUI = function endParamLoadingUI(ok, reason) {
 
   const bar = document.getElementById("param-load-bar");
   if (bar) {
+    window._paramLoadDisplayAnimating = false;
+    stopParamLoadDisplayAnimation();
     bar.classList.remove("param-load-bar--indeterminate");
     bar.style.left = "0";
-    bar.style.width = "0%";
+    if (ok && reason === "complete") {
+      window._paramLoadDisplayPct = 100;
+      window._paramLoadDisplayTargetPct = 100;
+      bar.style.width = "100%";
+    } else {
+      bar.style.width = "0%";
+    }
   }
 
   if (typeof window.renderSortedParams === "function") window.renderSortedParams();
