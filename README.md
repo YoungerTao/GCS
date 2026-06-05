@@ -205,6 +205,13 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 - 先手动安装官方 Python + Add to PATH，然后删除 .venv 目录再双击 bat。
 - 查看弹出的错误信息（通常会直接告诉你缺什么或 Store 问题）。
 
+### 代码更新 (git pull) 后启动报错（如 8765 bridge CORS / x-gcs-tab-id）
+- 后台长期运行的 pythonw（8765/8766/8767/8768）仍持有着安装时的旧代码内存副本。
+- 现在系统包含自愈：`ensure_bridge_process`（和 tile 等）会在启动/ensure 时对比磁盘 scriptMtime vs 活进程报告的 mtime，不匹配则 force-reap + 用最新代码重启。
+- 推荐恢复：双击 `windows/GCS-智能安装.bat` （它现在在最开始用纯 PS1 + gcs-stop.py --force 清理所有 GCS 端口上的 python 监听器，保证干净 slate）。
+- 正常点击桌面图标的“快速复用健康实例”路径保持不变（不杀进程）；刷新发生在 JS 调用 ensure-bridge 时。
+- 也见 `windows/INSTALL.md` 中的对应 FAQ。
+
 ### 启动后 DroneCAN 节点工具仍无法使用
 - 确认已用安装 bat 成功创建过 .venv 并看到 “核心依赖就绪” 提示。
 - 检查 `tools/com-bridge/server.stderr.log`（里面通常有详细 Python 错误）。

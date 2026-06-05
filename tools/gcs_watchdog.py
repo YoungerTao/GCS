@@ -77,6 +77,8 @@ def launch_runtime(wait_s: float = 4.0) -> bool:
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if runtime_healthy():
+            # mtime-based stale detection (for post-git-pull bridge refresh) happens inside
+            # ensure_bridge_process even when force_restart=False (see gcs_supervisor).
             ensure_bridge_process(wait_s=10.0, force_restart=not bridge_healthy())
             threading.Thread(
                 target=ensure_tile_server,
@@ -126,6 +128,7 @@ class LauncherHandler(BaseHTTPRequestHandler):
                 "runtimeUp": runtime_healthy(),
                 "bridgeUp": bridge_healthy(),
                 "tileServerUp": tile_server_healthy(),
+                # bridgeScriptMtime etc available via direct /health on 8765/8768 (mtime logic auto-refreshes)
             })
             return
         self.send_response(404)

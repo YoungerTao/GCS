@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stop orphaned GCS local services when runtime (:8766) is not up."""
+"""Stop orphaned GCS local services (use --force to always reap even if runtime healthy)."""
 from __future__ import annotations
 
 import sys
@@ -22,7 +22,7 @@ def runtime_healthy(timeout_s: float = 1.5) -> bool:
 
 
 def main() -> int:
-    if runtime_healthy():
+    if "--force" not in sys.argv and "-f" not in sys.argv and runtime_healthy():
         return 0
     for port in GCS_PORTS:
         reap_stale_python_listener(port)

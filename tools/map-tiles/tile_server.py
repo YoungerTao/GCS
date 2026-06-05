@@ -304,6 +304,8 @@ class TileHandler(BaseHTTPRequestHandler):
                 200,
                 {
                     "ok": True,
+                    "scriptMtime": int(os.path.getmtime(__file__)),
+                    "scriptPath": __file__,
                     "cachedTiles": count_cached_tiles(),
                     "cachedTerrainTiles": cached_terrain,
                     "terrainReady": cached_terrain > 0,
