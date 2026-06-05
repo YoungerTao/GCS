@@ -645,9 +645,147 @@ function buildGuidanceLineSvg(angleDeg, color, width, lengthPx, innerLengthPx = 
   );
 }
 
+function missionBearingDegrees(from, to) {
+  if (!from || !to) return null;
+  const lat1 = Number(from.lat);
+  const lon1 = Number(from.lng != null ? from.lng : from.lon);
+  const lat2 = Number(to.lat);
+  const lon2 = Number(to.lng != null ? to.lng : to.lon);
+  if (
+    !Number.isFinite(lat1) ||
+    !Number.isFinite(lon1) ||
+    !Number.isFinite(lat2) ||
+    !Number.isFinite(lon2)
+  ) {
+    return null;
+  }
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const dLambda = ((lon2 - lon1) * Math.PI) / 180;
+  const y = Math.sin(dLambda) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
+  return normalizeHeadingDegrees((Math.atan2(y, x) * 180) / Math.PI);
+}
+
+function projectMissionPointMeters(origin, point) {
+  if (!origin || !point) return null;
+  const lat0 = Number(origin.lat);
+  const lon0 = Number(origin.lng != null ? origin.lng : origin.lon);
+  const lat = Number(point.lat);
+  const lon = Number(point.lng != null ? point.lng : point.lon);
+  if (
+    !Number.isFinite(lat0) ||
+    !Number.isFinite(lon0) ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lon)
+  ) {
+    return null;
+  }
+  const metersPerDegLat = 111320;
+  const metersPerDegLon = metersPerDegLat * Math.cos((lat0 * Math.PI) / 180);
+  return {
+    x: (lon - lon0) * metersPerDegLon,
+    y: (lat - lat0) * metersPerDegLat
+  };
+}
+
+function missionCrossTrackErrorMeters(point, legStart, legEnd) {
+  const start = projectMissionPointMeters(legStart, legStart);
+  const end = projectMissionPointMeters(legStart, legEnd);
+  const cur = projectMissionPointMeters(legStart, point);
+  if (!start || !end || !cur) return null;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const legLen = Math.sqrt(dx * dx + dy * dy);
+  if (legLen < 1e-3) return null;
+  // Positive means the aircraft is right of the commanded leg.
+  return ((dy * cur.x) - (dx * cur.y)) / legLen;
+}
+
+function resolveMissionGuidanceFallback(snap) {
+  if (!latestMissionOverlayPayload || !latestMissionOverlayPayload.home) return null;
+  if (!Number.isFinite(snap.lat) || !Number.isFinite(snap.lon)) return null;
+  const MM = window.MissionModel;
+  if (!MM || typeof MM.isRenderableNavCommand !== "function" || typeof MM.isValidMissionGeo !== "function") {
+    return null;
+  }
+  const waypoints = Array.isArray(latestMissionOverlayPayload.waypoints)
+    ? latestMissionOverlayPayload.waypoints
+    : [];
+  if (!waypoints.length) return null;
+  const currentSeq = Number(window.wp_current);
+  if (!Number.isFinite(currentSeq)) return null;
+
+  const renderable = waypoints.filter(function (wp) {
+    return wp &&
+      MM.isRenderableNavCommand(wp.command) &&
+      MM.isValidMissionGeo(wp.lat, wp.lng) &&
+      Number.isFinite(Number(wp.seq));
+  });
+  if (!renderable.length) return null;
+
+  let target = renderable.find(function (wp) {
+    return Number(wp.seq) >= currentSeq;
+  }) || null;
+  if (!target) {
+    target = renderable[renderable.length - 1] || null;
+  }
+  if (!target) return null;
+
+  let previous = null;
+  for (let i = renderable.length - 1; i >= 0; i -= 1) {
+    if (Number(renderable[i].seq) < Number(target.seq)) {
+      previous = renderable[i];
+      break;
+    }
+  }
+  if (!previous) {
+    previous = latestMissionOverlayPayload.home;
+  }
+
+  const aircraftPoint = { lat: snap.lat, lng: snap.lon };
+  const waypointBearingDeg = missionBearingDegrees(aircraftPoint, target);
+  const desiredHeadingDeg = missionBearingDegrees(previous, target);
+  const xtrackErrorM = missionCrossTrackErrorMeters(aircraftPoint, previous, target);
+
+  if (
+    !Number.isFinite(waypointBearingDeg) &&
+    !Number.isFinite(desiredHeadingDeg) &&
+    !Number.isFinite(xtrackErrorM)
+  ) {
+    return null;
+  }
+
+  return {
+    desiredHeadingDeg: Number.isFinite(desiredHeadingDeg) ? desiredHeadingDeg : null,
+    waypointBearingDeg: Number.isFinite(waypointBearingDeg) ? waypointBearingDeg : null,
+    xtrackErrorM: Number.isFinite(xtrackErrorM) ? xtrackErrorM : null
+  };
+}
+
+function resolveMainMapGuidance(snap, nav) {
+  const resolved = Object.assign({}, nav || {});
+  const fallback = resolveMissionGuidanceFallback(snap);
+  if (!fallback) {
+    return resolved;
+  }
+  if (!Number.isFinite(resolved.desiredHeadingDeg) && Number.isFinite(fallback.desiredHeadingDeg)) {
+    resolved.desiredHeadingDeg = fallback.desiredHeadingDeg;
+  }
+  if (!Number.isFinite(resolved.waypointBearingDeg) && Number.isFinite(fallback.waypointBearingDeg)) {
+    resolved.waypointBearingDeg = fallback.waypointBearingDeg;
+  }
+  if (!Number.isFinite(resolved.xtrackErrorM) && Number.isFinite(fallback.xtrackErrorM)) {
+    resolved.xtrackErrorM = fallback.xtrackErrorM;
+  }
+  return resolved;
+}
+
 function buildMainMapGuidanceOverlay() {
   const snap = getGuidanceSnapshot();
-  const nav = snap.navGuidance || {};
+  const nav = resolveMainMapGuidance(snap, snap.navGuidance || {});
   const gpsValid = nav.gpsValid === true;
   const headingDeg = normalizeHeadingDegrees(toDegrees(getSafe(snap.yawRad)));
 
@@ -892,7 +1030,7 @@ function refreshMainMapMarkerIcon() {
   if (!mapMarker || typeof L === "undefined") return;
   const kind = detectMainMapVehicleKind();
   const snap = getGuidanceSnapshot();
-  const nav = snap.navGuidance || {};
+  const nav = resolveMainMapGuidance(snap, snap.navGuidance || {});
   const heading =
     kind === "disconnected"
       ? 0
@@ -1112,6 +1250,8 @@ function bootstrapHudMapTabs() {
   });
   document.addEventListener("gcs-mission-sync-success", function (event) {
     renderFlightDataMissionOverlay(event.detail || null);
+    mapMarkerIconSignature = "";
+    refreshMainMapMarkerIcon();
   });
   setTimeout(() => {
     if (document.getElementById("view-flight-data")?.classList.contains("active")) {

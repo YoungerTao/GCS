@@ -8,12 +8,12 @@
    - 安装时勾选 ✓ "Add python.exe to PATH" 和 ✓ "py launcher"
 
 2. **运行安装脚本**
-   - 双击仓库根目录的 `GCS-安装桌面快捷方式.bat`
+   - 双击 `windows/GCS-智能安装.bat`
    - 等待安装完成（第一次需要 1-3 分钟，取决于网络）
 
 3. **启动 GCS**
    - 双击桌面上的 **GCS** 图标
-   - 或双击仓库根目录的 `GCS.cmd`
+   - 或双击 `windows/GCS.cmd`
 
 ---
 
@@ -22,7 +22,7 @@
 如果不确定环境是否满足要求，可以先运行诊断脚本：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\check-windows-env.ps1
+powershell -ExecutionPolicy Bypass -File windows\tools\check-windows-env.ps1
 ```
 
 **检查项：**
@@ -78,7 +78,7 @@ python --version
 ### 第 2 步：运行 GCS 安装脚本
 
 1. 打开 Windows 资源管理器，导航到 GCS 仓库根目录
-2. 双击 **GCS-安装桌面快捷方式.bat**
+2. 双击 **windows/GCS-智能安装.bat**
 3. 脚本会自动：
    - 检查 Python 环境
    - 创建虚拟环境 `.venv/`
@@ -111,7 +111,7 @@ Desktop and Start Menu shortcut created: GCS -> C:\...\GCS.cmd
 启动方式（任选其一）：
 
 1. **推荐：** 双击桌面上的 **GCS** 图标
-2. 或双击仓库根目录的 `GCS.cmd`
+2. 或双击 `windows/GCS.cmd`
 3. 或在 Start Menu 搜索 "GCS" 后点击
 
 **首次启动** 会自动：
@@ -142,7 +142,7 @@ Desktop and Start Menu shortcut created: GCS -> C:\...\GCS.cmd
 1. 从 https://www.python.org/downloads/ 安装官方 Python
 2. 卸载 Microsoft Store Python：设置 → 应用 → 搜索 "Python" → 卸载
 3. 删除 GCS 根目录下的 `.venv` 文件夹
-4. 重新运行 `GCS-安装桌面快捷方式.bat`
+4. 重新运行 `windows/GCS-智能安装.bat`
 
 ### ❌ "pip install failed" / 编译错误
 
@@ -152,7 +152,7 @@ Desktop and Start Menu shortcut created: GCS -> C:\...\GCS.cmd
 1. 下载 Visual C++ Build Tools: https://visualstudio.microsoft.com/downloads/
 2. 选择 "Desktop development with C++"
 3. 安装完成后，删除 `.venv` 文件夹
-4. 重新运行 `GCS-安装桌面快捷方式.bat`
+4. 重新运行 `windows/GCS-智能安装.bat`
 
 ### ❌ "slcan is not open"
 
@@ -183,7 +183,7 @@ rmdir /s /q .venv
 del /q tools\com-bridge\*.log
 ```
 
-然后重新运行 `GCS-安装桌面快捷方式.bat` 重新安装
+然后重新运行 `windows/GCS-智能安装.bat` 重新安装
 
 ### 完全卸载
 
@@ -271,7 +271,7 @@ type tools\watchdog.stderr.log
 
 1. 运行诊断脚本获取环境信息:
    ```powershell
-   powershell -ExecutionPolicy Bypass -File tools\check-windows-env.ps1 > env-report.txt
+powershell -ExecutionPolicy Bypass -File windows\tools\check-windows-env.ps1 > env-report.txt
    ```
 
 2. 检查日志:

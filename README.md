@@ -6,7 +6,7 @@
 
 ## ⚡ 快速开始
 
-👉 **新用户？** 查看 [`INSTALL.md`](INSTALL.md)（3 步启动）  |  [`macOS 指南`](macos/README.md)
+👉 **新用户？** 查看 [`Windows 安装`](windows/INSTALL.md)（3 步启动）  |  [`macOS 指南`](macos/README.md)
 
 ---
 
@@ -15,7 +15,7 @@
 | 平台 | 首次安装 | 日常启动 | 关闭服务 |
 |------|---------|---------|---------|
 | **macOS** | `macos/install.command` | 桌面 `GCS.app`（狗图标） | `macos/stop.command` |
-| **Windows** | `GCS-智能安装.bat` | 桌面 `GCS` 图标 | 任务管理器 |
+| **Windows** | `windows/GCS-智能安装.bat` | 桌面 `GCS` 图标 | 任务管理器 |
 
 ---
 
@@ -106,7 +106,7 @@ Store 版即使能启动，也无法访问串口和 clone 后的项目目录。
 1. `git clone <你的仓库地址> GCS`  
    `cd GCS`
 
-2. **双击仓库根目录的 `GCS-安装桌面快捷方式.bat`**  
+2. **双击 `windows/GCS-智能安装.bat`**  
    - 它会自动完成：检查 Python → 创建 `.venv` 虚拟环境 → `pip install -r requirements.txt`（自动包含 `dronecan`、`pyserial`、`pymavlink` 等核心依赖）→ 创建桌面 + 开始菜单 “GCS” 快捷方式。
    - 全程有清晰的中文进度提示（[1/4]、[2/4]...）和成功/失败反馈。
    - **注意**：脚本会自动拒绝 Microsoft Store 版 Python（会给出详细错误 + python.org 官方安装指引）。
@@ -167,20 +167,20 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 
 首次给别人使用时，可让对方在项目根目录直接双击：
 
-- `GCS-安装桌面快捷方式.bat`
+- `windows/GCS-智能安装.bat`
 
 它会自动完成上面「首次使用」第 2 步的所有工作（创建 .venv + pip install -r requirements.txt（含 dronecan） + 创建桌面/开始菜单快捷方式）。之后日常只需要双击桌面的 `GCS` 图标即可启动。
 
 （setup 脚本已内置 Microsoft Store Python 检测 + 中文错误提示，会在检测到时中止并指导用户安装官方版。）
 
-**常见的一键流程总结**：git clone → 双击 `GCS-安装桌面快捷方式.bat` → 双击桌面 GCS 图标。
+**常见的一键流程总结**：git clone → 双击 `windows/GCS-智能安装.bat` → 双击桌面 GCS 图标。
 
 ## 常见问题排查
 
 ### 依赖缺失 / DroneCAN 相关错误
 - `ModuleNotFoundError: No module named 'dronecan'`  
   或 DroneCAN Node Tool 里 “Load failed: WriteFile failed (PermissionError(13, '设备不识别此命令。'))” / “Refresh failed”  
-  **解决**：双击根目录 `GCS-安装桌面快捷方式.bat` 重新运行一次（会自动补全 requirements.txt 中的 dronecan 等依赖，并确保使用正确的 .venv）。
+  **解决**：双击 `windows/GCS-智能安装.bat` 重新运行一次（会自动补全 requirements.txt 中的 dronecan 等依赖，并确保使用正确的 .venv）。
 
 - “未加载 apm-param-db.json”  
   通常是同一根源（Store Python 或 .venv 未正确安装）。重新运行安装 bat 即可。
@@ -220,8 +220,8 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 
 | 文件 | 用途 |
 |------|------|
-| `GCS.cmd` | Windows 桌面快捷方式入口 |
-| `Start-GCS.bat` | Windows 调试，同 `GCS.cmd` |
+| `windows/GCS.cmd` | Windows 桌面快捷方式入口 |
+| `windows/GCS-Prewarm.cmd` | Windows 预热启动入口 |
 | `assets/gcs-dog.ico` | 桌面「GCS」快捷方式图标（狗） |
 | `tools/install-gcs-desktop.ps1` | 安装桌面「GCS」快捷方式（带狗图标） |
 | `tools/build-gcs-icon.py` | 从根目录 `dog1.png` 重新生成 `.ico`（去白边/棋盘格） |

@@ -62,6 +62,14 @@
     return v.major > 4 || (v.major === 4 && v.minor >= 0);
   }
 
+  function shouldUseMessageIntervals(profile, version) {
+    if (profile === "mav1") return true;
+    if (version && versionAtLeast40(version)) return true;
+    // If AUTOPILOT_VERSION is unavailable, still try per-message interval
+    // requests so guidance-only messages (e.g. NAV_CONTROLLER_OUTPUT) are not lost.
+    return !version;
+  }
+
   /**
    * @returns {'mav1'|'sr0'|'legacy'|'unknown'}
    */
@@ -199,7 +207,7 @@
       log(`✅ 已写入流速率参数（${paramKind}）`);
     }
 
-    if (profile === "mav1" || (version && versionAtLeast40(version))) {
+    if (shouldUseMessageIntervals(profile, version)) {
       await sleep(300);
       await applyMessageIntervals();
       if (typeof log === "function") log("✅ 已发送 SET_MESSAGE_INTERVAL（单消息流控）");
@@ -223,11 +231,10 @@
     window._telemetryReqTimer = setInterval(async () => {
       if (window._gcsConnState !== "connected") return;
       try {
-        if (profile === "mav1" || (window._telemetryProfile === "mav1")) {
+        if (shouldUseMessageIntervals(window._telemetryProfile || profile, window._telemetryFirmwareVersion || null)) {
           await applyMessageIntervals();
-        } else {
-          await requestDataStreamsOnce();
         }
+        await requestDataStreamsOnce();
       } catch (e) {
         if (typeof log === "function") log(`⚠️ 周期遥测维护失败: ${e?.message || e}`);
       }
