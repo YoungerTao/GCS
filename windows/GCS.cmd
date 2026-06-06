@@ -5,7 +5,7 @@ cd /d "%~dp0\.."
 set "BOOT_URL=%CD%\boot.html"
 set "PY=%CD%\.venv\Scripts\pythonw.exe"
 if not exist "%PY%" set "PY=%CD%\.venv\Scripts\python.exe"
-if not exist "%PY%" set "PY=pythonw"
+if not exist "%PY%" goto :no_python
 
 rem Surgical mtime-based stale detection (in ensure_bridge_process) handles post-git-pull
 rem bridge refresh on-demand via JS ensure-bridge calls. We do NOT call stop-gcs-services.ps1
@@ -22,13 +22,7 @@ if not errorlevel 1 (
 echo.>"%TEMP%\gcs-launch.lock"
 start "" "%BOOT_URL%"
 
-if /I "%PY%"=="pythonw" (
-  where pythonw >nul 2>&1 || set "PY=python"
-)
-if /I "%PY%"=="python" (
-  where python >nul 2>&1 || goto :no_python
-)
-if /I not "%PY%"=="python" if /I not "%PY%"=="pythonw" if not exist "%PY%" goto :no_python
+if not exist "%PY%" goto :no_python
 
 curl -s -m 1 http://127.0.0.1:8767/ping >nul 2>&1
 if errorlevel 1 (

@@ -11,6 +11,11 @@ import webbrowser
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+TOOLS_DIR = REPO_ROOT / "tools"
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from gcs_supervisor import gcs_python  # noqa: E402
 
 
 def _is_microsoft_store_python(exe: str) -> bool:
@@ -26,7 +31,6 @@ if _is_microsoft_store_python(sys.executable):
             f.write(f"警告：gcs-launch.py 由 Microsoft Store Python 启动：{sys.executable}\n")
     except Exception:
         pass
-TOOLS_DIR = REPO_ROOT / "tools"
 WATCHDOG_SCRIPT = TOOLS_DIR / "gcs_watchdog.py"
 RUNTIME_PING = "http://127.0.0.1:8766/__gcs/ping"
 WATCHDOG_ERR_LOG = REPO_ROOT / "tools" / "watchdog.stderr.log"
@@ -53,11 +57,7 @@ def _url_ok(url: str, timeout_s: float = 2.0) -> bool:
 def _spawn_watchdog() -> None:
     if _url_ok(LAUNCHER_PING, 1.0):
         return
-    exe = sys.executable
-    if sys.platform == "win32" and exe.lower().endswith("python.exe"):
-        pyw = Path(exe).with_name("pythonw.exe")
-        if pyw.is_file():
-            exe = str(pyw)
+    exe = gcs_python()
     WATCHDOG_ERR_LOG.parent.mkdir(parents=True, exist_ok=True)
     try:
         werr = WATCHDOG_ERR_LOG.open("ab")
