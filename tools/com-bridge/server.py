@@ -1285,13 +1285,14 @@ class SlcanMavlinkMonitor:
             "deviceHint": "Unknown",
         }
 
-    def status(self):
+    def status(self, source_prefix=None):
         now = time.time()
         with self.lock:
             self._trim_frames(now)
             # Do not immediately drop nodes on brief parser / polling gaps.
             if now - self.last_frame_at > 15.0:
                 self._prune_nodes(now)
+            prefix = str(source_prefix or "").strip()
             return {
                 "forwardEnabled": self.forward_enabled,
                 "targetSystem": self.target_system,
@@ -1319,6 +1320,7 @@ class SlcanMavlinkMonitor:
                             "frameIdCounts": dict(sorted(self.node_frame_counts.get(node["nodeId"], {}).items(), key=lambda kv: kv[1], reverse=True)[:12]),
                         }
                         for node in self.nodes.values()
+                        if not prefix or str(node.get("source", "")).startswith(prefix)
                     ],
                     key=lambda item: item["nodeId"],
                 ),
@@ -1448,7 +1450,7 @@ class Handler(BaseHTTPRequestHandler):
             send_json(self, 200, {"adapterPort": port, **st})
             return
         if self.path == "/slcan-nodes":
-            send_json(self, 200, SLCAN_MONITOR.status())
+            send_json(self, 200, SLCAN_MONITOR.status(source_prefix="SLCAN"))
             return
         if self.path == "/slcan-read":
             data = SLCAN_HUB.read_buffer()
