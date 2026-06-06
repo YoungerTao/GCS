@@ -41,6 +41,8 @@
     paramSearch: "",
     paramLoadedFromLocal: false,
     serviceTransferIds: new Map(),
+    paramDocs: new Map(),
+    paramDocRequestKey: "",
   };
 
   const slcanRuntime = {
@@ -166,10 +168,8 @@
     const z = String(zh ?? "").trim();
     if (!e) return z || "—";
     if (!z || z === e) return e;
-    if (typeof window.DRONECAN_LABELS_ZH?.bilingual === "function") {
-      return window.DRONECAN_LABELS_ZH.bilingual(e, z);
-    }
-    return `${e} / ${z}`;
+    // 只返回中文,不显示英文
+    return z;
   }
 
   function setLiveText(id, value, className = "sc-dc-live-flash") {
@@ -1242,6 +1242,10 @@
       .sc-dc-modal-field { display:grid; gap:6px; }
       .sc-dc-modal-field span { color:#94a9ce; font-size:12px; }
       .sc-dc-modal-field input, .sc-dc-modal-field select { width:100%; min-width:0; box-sizing:border-box; background:#0f1625; color:#edf3ff; border:1px solid #44536f; border-radius:10px; padding:9px 10px; font-size:13px; }
+      .sc-dc-param-docs { margin:12px 0 10px; padding:12px; border:1px solid rgba(120,147,189,.28); border-radius:12px; background:rgba(19,28,45,.72); }
+      .sc-dc-param-docs h5 { margin:0 0 8px; font-size:13px; color:#dce7ff; }
+      .sc-dc-doc-list { margin:6px 0 0 18px; padding:0; }
+      .sc-dc-doc-list li { margin:4px 0; }
       .sc-dc-modal-actions { display:flex; gap:10px; flex-wrap:wrap; }
       .sc-dc-modal-note, .sc-dc-modal-status { margin:0; color:#90a4c9; font-size:12px; line-height:1.6; }
       .sc-dc-modal-status.ok { color:#9fe0a9; }
@@ -1603,6 +1607,11 @@
     return "empty";
   }
 
+  function paramRequiresReboot(param) {
+    const name = String(param?.name || "").toUpperCase();
+    return name === "CAN_NODE" || name === "CAN_BAUDRATE";
+  }
+
   function parseDraftByType(type, raw) {
     const text = String(raw ?? "");
     if (type === "boolean") return text === "true" || text === "1";
@@ -1859,9 +1868,42 @@
     if (slcanBoundPort === "webserial" && typeof window.sendSlcanWebSerialLine === "function") {
       return window.sendSlcanWebSerialLine(text.endsWith("\r") ? text : `${text}\r`);
     }
-    const payload = btoa(text.endsWith("\r") ? text : `${text}\r`);
-    await bridgeJson("/slcan-write", { data: payload });
-    return true;
+
+    const wantsMavlinkForward = currentMode === "can1" || currentMode === "can2";
+
+    // DroneCAN 面板当前处于 SLCAN 直连模式时，优先把 ASCII 帧写到 SLCAN 通道。
+    // 这样即便 slcanBoundPort 遗留成 "mavlink"，也不会把参数请求误发到 MAVLink 转发分支。
+    if (!wantsMavlinkForward) {
+      const payload = btoa(text.endsWith("\r") ? text : `${text}\r`);
+      await bridgeJson("/slcan-write", { data: payload });
+      return true;
+    }
+
+    // MAVLink CAN转发模式下,不应通过普通 SLCAN 口发送
+    if (slcanBoundPort === "mavlink" || wantsMavlinkForward) {
+      // 检查COM桥是否在线
+      if (!window._comBridgeOnline) {
+        throw new Error(dcText(
+          "COM bridge offline. MAVLink CAN forwarding requires GCS.cmd bridge service. Please start GCS.cmd or switch to Web Serial mode.",
+          "COM桥未连接。MAVLink CAN转发需要GCS.cmd桥接服务。请启动GCS.cmd或切换到Web Serial模式。"
+        ));
+      }
+      // 如果COM桥在线,尝试通过它发送(可能需要重新配置端口)
+      try {
+        const payload = btoa(text.endsWith("\r") ? text : `${text}\r`);
+        await bridgeJson("/slcan-write", { data: payload });
+        return true;
+      } catch (err) {
+        const errMsg = String(err?.message || err || "");
+        if (/PermissionError|WriteFile failed|设备不识别|Access denied|EACCES/i.test(errMsg)) {
+          throw new Error(dcText(
+            "MAVLink CAN forwarding failed: COM port access denied. The bridge may be trying to write to a blocked serial port. Try restarting GCS.cmd as administrator, or use Web Serial direct connection.",
+            "MAVLink CAN转发失败: COM端口访问被拒绝。桥接服务可能正在尝试写入被阻止的串口。请以管理员身份重启GCS.cmd,或使用Web Serial直连。"
+          ));
+        }
+        throw err;
+      }
+    }
   }
 
   async function sendDronecanServiceRequest(nodeId, serviceId, payloadBytes, signature) {
@@ -1920,6 +1962,23 @@
     }
   }
 
+  async function ensureHealthySlcanBridge() {
+    if (slcanBoundPort === "webserial" || shouldPollBrowserCan()) return;
+    if (!slcanBoundPort || slcanBoundPort === "mavlink") return;
+    try {
+      const status = await bridgeJson("/slcan-status", null, { skipEnsure: true });
+      const errText = String(status?.error || "");
+      const unhealthy = status?.open && (!status?.readerAlive || /PermissionError|ClearCommError failed/i.test(errText));
+      if (!unhealthy) return;
+      await bridgeJson("/slcan-close", null, { skipEnsure: true });
+      await bridgeJson("/slcan-open", { port: slcanBoundPort, baudrate: 115200, bitrate_kbps: 1000 });
+      slcanInitDone = true;
+      slcanSessionReady = true;
+    } catch (_) {
+      // Let the real request surface the error if recovery fails.
+    }
+  }
+
   async function waitForServiceResponse(responderNodeId, responseCanId, transferId, requestStartedAt, timeoutMs = 1600) {
     const expected = `0x${Number(responseCanId).toString(16).toUpperCase()}`;
     const startedAt = Date.now();
@@ -1944,6 +2003,7 @@
   }
 
   async function dronecanGetSet(nodeId, index, valueUnion = null, name = "") {
+    await ensureHealthySlcanBridge();
     const req = buildGetSetRequest(index, valueUnion, name);
     const tx = await sendDronecanServiceRequest(nodeId, DRONECAN_GETSET_SERVICE_ID, req, DRONECAN_GETSET_SIGNATURE);
     const payload = await waitForServiceResponse(tx.responderNodeId, tx.responseCanId, tx.transferId, tx.requestStartedAt, valueUnion ? 2200 : 1400);
@@ -1973,11 +2033,23 @@
         try {
           response = await dronecanGetSet(nodeId, index, null, "");
         } catch (err) {
-          const timedOut = /Parameter service response timeout/i.test(String(err?.message || err || ""));
+          const errMsg = String(err?.message || err || "");
+          
+          // 检测权限相关错误并给出清晰提示
+          if (/PermissionError|WriteFile failed|设备不识别|Access denied|EACCES/i.test(errMsg)) {
+            throw new Error(dcText(
+              "Serial port access denied. Close other GCS software (Mission Planner/QGC) or switch to MAVLink CAN1 mode.",
+              "串口访问被拒绝。请关闭其他地面站软件(Mission Planner/QGC),或切换到「MAVLink CAN1」模式。"
+            ));
+          }
+          
+          // 首个参数读取超时：说明本次 GetSet 没有拿到响应。
+          // 这里只能确认“这次请求失败”，不能再武断推断为“节点不支持参数服务”。
+          const timedOut = /Parameter service response timeout/i.test(errMsg);
           if (timedOut && index === 0) {
             throw new Error(dcText(
-              "This node did not respond to DroneCAN GetSet. The selected device may not expose parameters over DroneCAN.",
-              "该节点未响应 DroneCAN GetSet，当前所选设备可能未通过 DroneCAN 暴露参数服务。"
+              "DroneCAN GetSet timed out on the first parameter request. The node may be busy, the link may be unstable, or the parameter service may not be responding right now.",
+              "首个参数请求的 DroneCAN GetSet 已超时。可能是节点当前忙、链路不稳定，或参数服务此刻没有响应。"
             ));
           }
           throw err;
@@ -2026,6 +2098,133 @@
     return (entry.params || []).find((param) => param.index === dcMenuState.paramSelectedIndex) || null;
   }
 
+  function vehicleForParamDocs(node) {
+    const name = String(node?.name || "").toLowerCase();
+    if (/dronecan|gnss|periph|pmu|rangefinder|gps/.test(name)) return "AP_Periph";
+    return "AP_Periph";
+  }
+
+  function paramDocCacheKey(vehicle, name) {
+    return `${String(vehicle || "").trim()}::${String(name || "").trim().toUpperCase()}`;
+  }
+
+  function formatDocRange(range) {
+    if (!range || typeof range !== "object") return "";
+    const low = range.low ?? "";
+    const high = range.high ?? "";
+    if (low === "" && high === "") return "";
+    return `${low} ~ ${high}`;
+  }
+
+  function formatDocEnumMap(map, labelZh) {
+    if (!map || typeof map !== "object") return "";
+    const rows = Object.entries(map);
+    if (!rows.length) return "";
+    return rows
+      .map(([k, v]) => `<li><code>${escapeHtml(k)}</code> · ${escapeHtml(String(v || ""))}</li>`)
+      .join("");
+  }
+
+  async function ensureParamDocLoaded(node, param) {
+    const vehicle = vehicleForParamDocs(node);
+    const name = String(param?.name || "").trim().toUpperCase();
+    if (!name) return null;
+    const key = paramDocCacheKey(vehicle, name);
+    if (dcMenuState.paramDocs.has(key)) return dcMenuState.paramDocs.get(key);
+    const reqKey = `${node?.nodeId || 0}:${key}`;
+    dcMenuState.paramDocRequestKey = reqKey;
+    try {
+      const resp = await fetch(`http://127.0.0.1:8765/param-meta?vehicle=${encodeURIComponent(vehicle)}&name=${encodeURIComponent(name)}`, {
+        cache: "no-store",
+      });
+      const raw = await resp.text();
+      let json = null;
+      try {
+        json = raw ? JSON.parse(raw) : null;
+      } catch (_) {
+        json = null;
+      }
+      if (!resp.ok) {
+        throw new Error(json?.error || `HTTP ${resp.status}${raw ? `: ${raw.slice(0, 160)}` : ""}`);
+      }
+      if (!json || typeof json !== "object") {
+        throw new Error(dcText("Parameter metadata endpoint returned invalid JSON.", "参数资料接口返回了无效 JSON。"));
+      }
+      const doc = {
+        ok: !!json?.ok,
+        entry: json?.entry || null,
+        sourceUrl: json?.sourceUrl || "",
+        vehicle,
+        name,
+        error: json?.ok ? "" : String(json?.error || ""),
+      };
+      dcMenuState.paramDocs.set(key, doc);
+      if (dcMenuState.paramDocRequestKey === reqKey) {
+        renderParametersModal(getSelectedNode());
+      }
+      return doc;
+    } catch (err) {
+      const doc = {
+        ok: false,
+        entry: null,
+        sourceUrl: "",
+        vehicle,
+        name,
+        error: String(err?.message || err || ""),
+      };
+      dcMenuState.paramDocs.set(key, doc);
+      if (dcMenuState.paramDocRequestKey === reqKey) {
+        renderParametersModal(getSelectedNode());
+      }
+      return doc;
+    }
+  }
+
+  function renderParamDocSection(node, param) {
+    if (!param) return "";
+    const vehicle = vehicleForParamDocs(node);
+    const key = paramDocCacheKey(vehicle, param.name);
+    const cached = dcMenuState.paramDocs.get(key);
+    if (!cached) {
+      ensureParamDocLoaded(node, param).catch(() => {});
+      return `
+        <section class="sc-dc-param-docs">
+          <h5>${dcText("Online reference", "在线资料")}</h5>
+          <p class="sc-dc-modal-note">${dcText("Loading official parameter reference…", "正在加载官方参数资料…")}</p>
+        </section>
+      `;
+    }
+    if (!cached.ok || !cached.entry) {
+      return `
+        <section class="sc-dc-param-docs">
+          <h5>${dcText("Online reference", "在线资料")}</h5>
+          <p class="sc-dc-modal-note warn">${dcText("Official parameter reference is temporarily unavailable.", "官方参数资料暂时不可用。")}</p>
+          ${cached.error ? `<p class="sc-dc-modal-note">${escapeHtml(cached.error)}</p>` : ""}
+        </section>
+      `;
+    }
+    const entry = cached.entry;
+    const rangeText = formatDocRange(entry.Range);
+    const valuesHtml = formatDocEnumMap(entry.Values, "取值");
+    const bitmaskHtml = formatDocEnumMap(entry.Bitmask, "位定义");
+    return `
+      <section class="sc-dc-param-docs">
+        <h5>${dcText("Online reference", "在线资料")}</h5>
+        ${entry.DisplayName ? `<p class="sc-dc-modal-note"><strong>${escapeHtml(String(entry.DisplayName))}</strong></p>` : ""}
+        ${entry.Description ? `<p class="sc-dc-modal-note">${escapeHtml(String(entry.Description))}</p>` : ""}
+        <dl class="sc-dc-inline-kv">
+          <dt>${dcText("Official default", "官方默认")}</dt><dd>${escapeHtml(String(entry.Default ?? "—"))}</dd>
+          <dt>${dcText("Official range", "官方范围")}</dt><dd>${escapeHtml(rangeText || "—")}</dd>
+          <dt>${dcText("Reboot required", "是否需重启")}</dt><dd>${String(entry.RebootRequired || "").toLowerCase() === "true" ? dcText("Yes", "是") : dcText("Unknown / No", "未知 / 否")}</dd>
+          <dt>${dcText("Audience", "用户级别")}</dt><dd>${escapeHtml(String(entry.User || "—"))}</dd>
+        </dl>
+        ${valuesHtml ? `<div class="sc-dc-modal-note"><strong>${dcText("Enumerated values", "枚举取值")}</strong><ul class="sc-dc-doc-list">${valuesHtml}</ul></div>` : ""}
+        ${bitmaskHtml ? `<div class="sc-dc-modal-note"><strong>${dcText("Bit definitions", "位定义")}</strong><ul class="sc-dc-doc-list">${bitmaskHtml}</ul></div>` : ""}
+        ${cached.sourceUrl ? `<p class="sc-dc-modal-note"><a href="${escapeHtml(cached.sourceUrl)}" target="_blank" rel="noopener noreferrer">${dcText("Open official source", "打开官方来源")}</a></p>` : ""}
+      </section>
+    `;
+  }
+
   function renderParamEditor(node, param) {
     if (!param) {
       return `<p class="sc-dc-modal-note">${dcText("Select a parameter from the list to inspect or edit it.", "请先在左侧列表中选择一个参数后再查看或编辑。")}</p>`;
@@ -2050,6 +2249,7 @@
         <input id="sc-dc-param-edit-value" value="${escapeHtml(draft !== undefined ? draft : formatParamValue(param.value, param.type))}">
       </label>
       <p class="sc-dc-modal-note">${changed ? dcText("Draft differs from current value.", "草稿值与当前设备值不同。") : dcText("Draft matches the current value.", "草稿值与当前设备值一致。")}</p>
+      ${paramRequiresReboot(param) ? `<p class="sc-dc-modal-note warn">${dcText("This parameter requires node save + reboot before the new value becomes active.", "该参数改动后通常需要先“保存到节点”，再重启节点，新的值才会生效。")}</p>` : ""}
     `;
   }
 
@@ -2103,6 +2303,7 @@
             <dt>${dcText("Default", "默认值")}</dt><dd>${selected ? escapeHtml(formatParamValue(selected.defaultValue, selected.defaultType)) : "—"}</dd>
             <dt>${dcText("Range", "范围")}</dt><dd>${selected ? `${escapeHtml(formatParamValue(selected.minValue, selected.minType))} ~ ${escapeHtml(formatParamValue(selected.maxValue, selected.maxType))}` : "—"}</dd>
           </dl>
+          ${renderParamDocSection(node, selected)}
           ${renderParamEditor(node, selected)}
           <div class="sc-dc-modal-actions">
             <button type="button" id="sc-dc-param-write" class="sc-btn sc-btn-primary"${selected ? "" : " disabled"}>${dcText("Write + verify", "写入并回读校验")}</button>
@@ -2269,16 +2470,26 @@
     setModalStatus(dcText(`Upgrade complete. CRC ${imageCrc}`, `升级完成，CRC ${imageCrc}`), "ok");
   }
 
+  async function checkNodeParameterSupport(nodeId) {
+    try {
+      await dronecanGetSet(nodeId, 0, null, "");
+      return true;
+    } catch (err) {
+      const errMsg = String(err?.message || err || "");
+      if (/Parameter service response timeout/i.test(errMsg)) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
   async function handleNodeMenuAction(action) {
     const node = canNodes.find((n) => n.nodeId === menuNodeId) || null;
     if (!node) {
       hideNodeMenu();
       return;
     }
-    if (action === "parameters" && !nodeSupportsDronecanParameters(node)) {
-      hideNodeMenu();
-      return;
-    }
+
     if (action === "parameters" || action === "restart" || action === "update") {
       selectCanNode(node.nodeId);
       openDcModal(action, node);
@@ -3186,7 +3397,14 @@
           const draftValue = parseDraftByType(selected.type, rawValue);
           setParamDraft(node.nodeId, selected.index, draftValue);
           setModalStatus(dcText("Writing parameter to node…", "正在向节点写入参数…"), "warn");
-          const response = await dronecanGetSet(node.nodeId, selected.index, toValueUnion(selected.type, draftValue), "");
+          // DroneCAN GetSet 规范里 name 优先于 index；index 更适合枚举参数列表。
+          // 某些节点（例如部分 GNSS 外设）按 index 读可以，但按 index 写不会真正生效。
+          const response = await dronecanGetSet(
+            node.nodeId,
+            selected.index,
+            toValueUnion(selected.type, draftValue),
+            selected.name || ""
+          );
           if (!response?.name) throw new Error("Parameter write was rejected");
           const entry = cacheEntryForNode(node.nodeId);
           const row = (entry.params || []).find((param) => param.index === selected.index);
@@ -3201,9 +3419,28 @@
             row.maxType = response.maxValue?.type || row.maxType;
           }
           const ok = valuesEqual(response.value.value, draftValue);
-          if (ok) clearParamDraft(node.nodeId, selected.index);
+          if (ok) {
+            clearParamDraft(node.nodeId, selected.index);
+          } else {
+            // 设备回读值仍未变化时，撤销草稿，避免 UI 继续显示一个“看似待生效”的假状态。
+            clearParamDraft(node.nodeId, selected.index);
+          }
           renderParametersModal(node);
-          setModalStatus(ok ? dcText("Parameter written and verified.", "参数写入并回读校验成功。") : dcText(`Verify mismatch: device returned ${formatParamValue(response.value.value, response.value.type)}`, `回读不一致：设备返回 ${formatParamValue(response.value.value, response.value.type)}`), ok ? "ok" : "err");
+          const rebootHint = paramRequiresReboot(selected);
+          setModalStatus(
+            ok
+              ? dcText("Parameter written and verified.", "参数写入并回读校验成功。")
+              : rebootHint
+                ? dcText(
+                    `Device still reports ${formatParamValue(response.value.value, response.value.type)}. This parameter may require Save to node + Restart before the new value becomes active.`,
+                    `设备当前仍返回 ${formatParamValue(response.value.value, response.value.type)}。该参数可能需要先“保存到节点”，再“重启节点”后新值才会生效。`
+                  )
+                : dcText(
+                    `Write rejected or not applied: device still reports ${formatParamValue(response.value.value, response.value.type)}`,
+                    `设备未接受写入或尚未生效：当前设备值仍为 ${formatParamValue(response.value.value, response.value.type)}`
+                  ),
+            ok ? "ok" : "err"
+          );
         } catch (err) {
           setModalStatus(dcText(`Write failed: ${err?.message || err}`, `写入失败：${err?.message || err}`), "err");
         }

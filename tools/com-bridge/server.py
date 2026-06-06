@@ -7,6 +7,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -46,6 +48,47 @@ except Exception:
 
 
 OTA_SESSIONS = {}
+PARAM_META_CACHE = {}
+PARAM_META_CACHE_TTL_SEC = 1800
+PARAM_META_SOURCES = {
+    "AP_Periph": "https://autotest.ardupilot.org/Parameters/AP_Periph/apm.pdef.json",
+    "ArduCopter": "https://autotest.ardupilot.org/Parameters/ArduCopter/apm.pdef.json",
+    "ArduPlane": "https://autotest.ardupilot.org/Parameters/ArduPlane/apm.pdef.json",
+    "Rover": "https://autotest.ardupilot.org/Parameters/Rover/apm.pdef.json",
+    "ArduSub": "https://autotest.ardupilot.org/Parameters/ArduSub/apm.pdef.json",
+}
+
+
+def _fetch_param_meta_source(vehicle: str):
+    vehicle = str(vehicle or "").strip() or "AP_Periph"
+    now = time.time()
+    cached = PARAM_META_CACHE.get(vehicle)
+    if cached and now - float(cached.get("at", 0)) < PARAM_META_CACHE_TTL_SEC:
+        return cached.get("data") or {}
+    url = PARAM_META_SOURCES.get(vehicle)
+    if not url:
+        raise RuntimeError(f"unsupported vehicle source: {vehicle}")
+    req = urllib.request.Request(url, headers={"User-Agent": "GCS-param-meta/1.0"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    PARAM_META_CACHE[vehicle] = {"at": now, "data": data}
+    return data
+
+
+def _lookup_param_meta(vehicle: str, name: str):
+    data = _fetch_param_meta_source(vehicle)
+    pname = str(name or "").strip().upper()
+    if not pname:
+        return None
+    if vehicle == "AP_Periph":
+        group = data.get("AP_Periph")
+        if isinstance(group, dict):
+            return group.get(pname)
+        return None
+    for key, val in data.items():
+        if isinstance(val, dict) and pname in val and isinstance(val.get(pname), dict):
+            return val.get(pname)
+    return None
 
 
 def _classify_port_item(item):
@@ -978,6 +1021,30 @@ def init_slcan_adapter(hub, bitrate_kbps=1000):
         time.sleep(0.08)
 
 
+def recover_slcan_hub_if_needed(bitrate_kbps=1000):
+    """Recover from zombie COM states where pyserial still reports open but the reader has already died."""
+    st = SLCAN_HUB.status()
+    needs_reopen = (
+        st.get("open")
+        and (
+            not st.get("readerAlive")
+            or "PermissionError" in str(st.get("error") or "")
+            or "ClearCommError failed" in str(st.get("error") or "")
+        )
+    )
+    if not needs_reopen:
+        return st
+    port = str(st.get("lastOpenPort") or st.get("port") or "").strip()
+    baudrate = int(st.get("lastOpenBaud") or st.get("baudrate") or 115200)
+    if not port:
+        raise RuntimeError("slcan recover failed: no remembered port")
+    SLCAN_HUB.close()
+    reopened = SLCAN_HUB.open(port, baudrate)
+    init_slcan_adapter(SLCAN_HUB, bitrate_kbps=bitrate_kbps)
+    SLCAN_HUB._last_slcan_init_at = time.time()
+    return reopened
+
+
 def _parse_can_id(frame_id):
     raw = int(frame_id) & 0x1FFFFFFF
     return {
@@ -1387,6 +1454,26 @@ class Handler(BaseHTTPRequestHandler):
             data = SLCAN_HUB.read_buffer()
             send_json(self, 200, {"data": base64.b64encode(data).decode("ascii")})
             return
+        if self.path.startswith("/param-meta"):
+            try:
+                parsed = urllib.parse.urlparse(self.path)
+                qs = urllib.parse.parse_qs(parsed.query or "")
+                name = str((qs.get("name") or [""])[0]).strip().upper()
+                vehicle = str((qs.get("vehicle") or ["AP_Periph"])[0]).strip() or "AP_Periph"
+                if not name:
+                    send_json(self, 400, {"ok": False, "error": "name is required"})
+                    return
+                entry = _lookup_param_meta(vehicle, name)
+                send_json(self, 200, {
+                    "ok": True,
+                    "name": name,
+                    "vehicle": vehicle,
+                    "entry": entry,
+                    "sourceUrl": PARAM_META_SOURCES.get(vehicle),
+                })
+            except Exception as exc:
+                send_json(self, 500, {"ok": False, "error": str(exc)})
+            return
         self.send_response(404)
         self.end_headers()
 
@@ -1533,6 +1620,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/slcan-write":
                 b64 = payload.get("data") or ""
                 data = base64.b64decode(b64.encode("ascii"))
+                recover_slcan_hub_if_needed()
                 written = SLCAN_HUB.write(data)
                 send_json(self, 200, {"ok": True, "written": written})
                 return

@@ -179,6 +179,34 @@ Web Serial（仅外部 Chrome 等完整 Chromium）需要安全上下文（`loca
 
 ### 依赖缺失 / DroneCAN 相关错误
 - `ModuleNotFoundError: No module named 'dronecan'`  
+
+### DroneCAN SLCAN 参数读取故障复盘
+
+如果再次遇到以下现象：
+
+- `设置菜单 -> Parameters` 点击像“没反应”
+- 或提示“串口访问被拒绝”，但实际上没有其他软件占用串口
+
+请优先查看这份事故记录：
+
+- [docs/dronecan-slcan-param-incident-20260606.md](G:\soft\GCS\docs\dronecan-slcan-param-incident-20260606.md)
+
+这次问题的真实根因不是外部串口占用，而是：
+
+1. 前端参数请求偶发走错发送通道
+2. `SLCAN` COM 桥进入 `open=true` 但 `readerAlive=false` 的 zombie 状态
+
+记录里已经写清了现象、根因、识别方法、修复点和验证结果。
+
+### GitHub Issues 草稿
+
+如果需要把当天排查结果整理成 GitHub Issues，可直接参考：
+
+- [docs/github-issues-20260606.md](G:\soft\GCS\docs\github-issues-20260606.md)
+
+仓库内也已加入统一模板：
+
+- [.github/ISSUE_TEMPLATE/bug_report.md](G:\soft\GCS\.github\ISSUE_TEMPLATE\bug_report.md)
   或 DroneCAN Node Tool 里 “Load failed: WriteFile failed (PermissionError(13, '设备不识别此命令。'))” / “Refresh failed”  
   **解决**：双击 `windows/GCS-智能安装.bat` 重新运行一次（会自动补全 requirements.txt 中的 dronecan 等依赖，并确保使用正确的 .venv）。
 
