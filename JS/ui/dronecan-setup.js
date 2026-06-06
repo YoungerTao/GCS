@@ -223,7 +223,7 @@
     if (slcanBoundPort === "webserial" && typeof window.isSlcanWebSerialActive === "function" && window.isSlcanWebSerialActive()) {
       return true;
     }
-    return slcanBoundPort === "mavlink" && isGcsSerialConnected() && !isSerialViaBridge();
+    return false;
   }
 
   function inferBrowserNodeMeta(nodeId) {
@@ -937,10 +937,6 @@
   async function pollSlcanTraffic() {
     if (isInspectorDemoMode()) return;
     if (!slcanSessionReady && !isSlcanAutotestMode()) return;
-    if (slcanBoundPort === "mavlink" && !isGcsSerialConnected()) {
-      slcanSessionReady = false;
-      return;
-    }
     if (shouldPollBrowserCan()) {
       applySlcanNodeSnapshot(getBrowserCanStatus());
       return;
@@ -949,7 +945,7 @@
       const status = await bridgeJson("/slcan-nodes", null, { skipEnsure: true });
       applySlcanNodeSnapshot(status);
     } catch (e) {
-      if (shouldPollBrowserCan() || (slcanBoundPort === "mavlink" && isGcsSerialConnected())) {
+      if (shouldPollBrowserCan()) {
         applySlcanNodeSnapshot(getBrowserCanStatus());
         return;
       }
@@ -1025,8 +1021,6 @@
           <div class="sc-dc-toolbar-eyebrow">${dcText("Transport mode", "传输模式")}</div>
           <div class="sc-dc-mode-tabs" role="tablist" aria-label="${dcText("DroneCAN modes", "DroneCAN 模式")}">
             <button type="button" class="sc-dc-mode-tab active" data-dc-mode="slcan">SLCAN 直连</button>
-            <button type="button" class="sc-dc-mode-tab" data-dc-mode="can1">${dcText("MAVLink CAN1", "MAVLink CAN1")}</button>
-            <button type="button" class="sc-dc-mode-tab" data-dc-mode="can2">${dcText("MAVLink CAN2", "MAVLink CAN2")}</button>
             <button type="button" class="sc-dc-mode-tab" data-dc-mode="filter">${dcText("Filter", "筛选")}</button>
             <button type="button" class="sc-dc-mode-tab" data-dc-mode="inspector">解析器</button>
             <button type="button" class="sc-dc-mode-tab" data-dc-mode="stats">统计</button>
@@ -1135,8 +1129,6 @@
         </div>
       </div>
 
-      <div class="sc-dc-panel" data-dc-panel="can1"><div class="sc-dc-mini-grid"><div class="sc-subcard"><h4>${dcText("MAVLink CAN1", "MAVLink CAN1")}</h4><dl id="sc-dc-can1-meta" class="sc-dl"></dl></div><div class="sc-subcard"><h4>${dcText("Topology", "拓扑")}</h4><div class="sc-topology-host"><svg id="sc-dc-svg" viewBox="0 0 420 420" class="sc-dc-svg" aria-label="${dcText("DroneCAN topology", "DroneCAN 拓扑")}"></svg></div></div></div></div>
-      <div class="sc-dc-panel" data-dc-panel="can2"><div class="sc-dc-mini-grid"><div class="sc-subcard"><h4>${dcText("MAVLink CAN2", "MAVLink CAN2")}</h4><dl id="sc-dc-can2-meta" class="sc-dl"></dl></div><div class="sc-subcard"><h4>${dcText("Status", "状态")}</h4><p class="sc-prose sc-prose--sm" id="sc-dc-can2-note">${dcText("CAN2 info is still MAVLink-routed metadata only.", "CAN2 仍仅显示 MAVLink 路由的元数据。")}</p></div></div></div>
       <div class="sc-dc-panel" data-dc-panel="filter"><div class="sc-dc-filter-grid"><div class="sc-subcard"><h4>${dcText("Filter", "筛选")}</h4><label class="sc-field"><span>${dcText("Filter by name / node ID", "按名称或节点 ID 筛选")}</span><input id="sc-dc-filter-input" type="search" placeholder="${dcText("e.g. 10 / ardupilot", "例如 10 / ardupilot")}"></label><label class="sc-field"><span>${dcText("Health", "健康")}</span><select id="sc-dc-health-filter"><option value="all">${dcText("All", "全部")}</option><option value="online">${dcText("Online only", "仅在线")}</option><option value="offline">${dcText("Offline only", "仅离线")}</option></select></label></div><div class="sc-subcard"><h4>${dcText("Filtered results", "筛选结果")}</h4><div class="sc-table-wrap sc-dc-node-table-wrap"><table class="sc-dsdl-table sc-dc-node-table"><thead><tr><th>${dcText("ID", "编号")}</th><th>${dcText("Name", "名称")}</th><th>${dcText("Mode", "模式")}</th><th>${dcText("Health", "健康")}</th><th>${dcText("Source", "来源")}</th></tr></thead><tbody id="sc-dc-filter-body"></tbody></table></div></div></div></div>
       <div class="sc-dc-panel" data-dc-panel="inspector">
         <div class="sc-dc-inspector-grid">
@@ -1158,9 +1150,12 @@
   }
 
   function ensureExtraStyles() {
-    if ($("sc-dc-workbench-style")) return;
-    const style = document.createElement("style");
-    style.id = "sc-dc-workbench-style";
+    let style = $("sc-dc-workbench-style");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "sc-dc-workbench-style";
+      document.head.appendChild(style);
+    }
     style.textContent = `
       .sc-dc-workbench { margin-top:14px; position:relative; overflow:hidden; padding:18px; border-radius:18px; background:linear-gradient(180deg, rgba(18, 24, 38, 0.96), rgba(14, 19, 31, 0.98)); border:1px solid rgba(84, 99, 130, 0.34); box-shadow:0 22px 50px rgba(0,0,0,0.24); }
       .sc-dc-workbench::before {
@@ -1228,15 +1223,19 @@
       .sc-dc-menu-item:hover { background:#22314b; border-color:#4a5c7d; }
       .sc-dc-menu-item:hover, .sc-dc-row:hover, .sc-dc-tree-row:hover { transform:translateY(-1px); }
       .sc-dc-menu-item[disabled] { opacity:0.45; cursor:not-allowed; transform:none; }
-      .sc-dc-modal-backdrop { position:fixed; inset:0; z-index:2300; display:grid; place-items:center; padding:24px; background:rgba(5, 10, 18, 0.66); backdrop-filter:blur(8px); }
+      .sc-dc-modal-backdrop { position:fixed; inset:0; z-index:2300; display:flex; align-items:flex-start; justify-content:center; overflow:auto; padding:24px; background:rgba(5, 10, 18, 0.66); backdrop-filter:blur(8px); }
       .sc-dc-modal-backdrop[hidden] { display:none; }
-      .sc-dc-modal { width:min(760px, calc(100vw - 28px)); max-height:min(88vh, 900px); overflow:auto; border-radius:18px; border:1px solid rgba(91, 108, 140, 0.46); background:linear-gradient(180deg, rgba(17, 23, 36, 0.99), rgba(11, 16, 27, 0.99)); box-shadow:0 28px 80px rgba(0,0,0,0.46); }
+      .sc-dc-modal { width:min(760px, calc(100vw - 28px)); max-height:min(88vh, 900px); margin:0 auto; overflow:auto; border-radius:18px; border:1px solid rgba(91, 108, 140, 0.46); background:linear-gradient(180deg, rgba(17, 23, 36, 0.99), rgba(11, 16, 27, 0.99)); box-shadow:0 28px 80px rgba(0,0,0,0.46); }
       .sc-dc-modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:18px 20px 14px; border-bottom:1px solid rgba(60, 75, 103, 0.42); }
       .sc-dc-modal-kicker { color:#90a6cc; font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:4px; }
       .sc-dc-modal-title { margin:0; font-size:20px; color:#eef4ff; }
       .sc-dc-modal-body { padding:18px 20px 20px; display:grid; gap:16px; color:#dce5f5; }
-      .sc-dc-modal-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
-      .sc-dc-modal-card { border:1px solid rgba(67, 84, 114, 0.4); border-radius:14px; background:rgba(18, 24, 38, 0.8); padding:14px; display:grid; gap:12px; min-width:0; }
+      .sc-dc-modal-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; align-items:start; }
+      .sc-dc-modal-card { border:1px solid rgba(67, 84, 114, 0.4); border-radius:14px; background:rgba(18, 24, 38, 0.8); padding:14px; display:flex; flex-direction:column; align-items:stretch; gap:12px; min-width:0; }
+      .sc-dc-param-list-card { min-height:0; }
+      .sc-dc-param-list-head { display:grid; gap:12px; }
+      .sc-dc-param-list-body { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; gap:12px; }
+      .sc-dc-param-list-foot { display:flex; flex-wrap:wrap; gap:10px; align-content:flex-start; }
       .sc-dc-modal-card h4 { margin:0; color:#eef4ff; font-size:15px; }
       .sc-dc-modal-form { display:grid; gap:12px; }
       .sc-dc-modal-field { display:grid; gap:6px; }
@@ -1272,7 +1271,8 @@
       .sc-dc-panel { display:none; }
       .sc-dc-panel.active { display:block; }
       .sc-dc-main, .sc-dc-side { min-width:0; }
-      .sc-dc-node-table-wrap { max-height:360px; overflow:auto; scrollbar-gutter:stable; border:1px solid rgba(63, 76, 102, 0.48); border-radius:14px; background:rgba(12, 17, 29, 0.72); }
+      .sc-dc-node-table-wrap { min-height:128px; max-height:360px; overflow:auto; scrollbar-gutter:stable; border:1px solid rgba(63, 76, 102, 0.48); border-radius:14px; background:rgba(12, 17, 29, 0.72); }
+      .sc-dc-param-list-body .sc-dc-node-table-wrap { flex:0 0 auto; min-height:180px; max-height:420px; }
       .sc-dc-node-table thead th { position:sticky; top:0; z-index:1; background:#182033; }
       .sc-dc-row { cursor:pointer; transition:background .16s ease, transform .16s ease; }
       .sc-dc-row-marker { width:18px; text-align:center; color:#a8bbdf; font-size:12px; }
@@ -1367,7 +1367,6 @@
         .sc-dc-toolbar-card, .sc-dc-toolbar-block { min-width:100%; }
       }
     `;
-    document.head.appendChild(style);
   }
 
   function refreshDroneCanModel() {
@@ -1476,6 +1475,38 @@
     if (name.includes("ground station") || title.includes("ground station") || hint.includes("ground station")) return false;
     if (name === "org.ardupilot" || name.includes("flight controller") || title.includes("flight controller") || hint.includes("autopilot")) return false;
     return true;
+  }
+
+  function nodePreferredTransportMode(node) {
+    const source = String(node?.source || "").trim();
+    if (source === "MAVLink CAN2") return "can2";
+    if (source === "MAVLink CAN1" || source === "MAVLink CAN_FRAME") return "can1";
+    if (source === "SLCAN Direct") return "slcan";
+    return "";
+  }
+
+  function nodeParameterAccessHint(node) {
+    const preferredMode = nodePreferredTransportMode(node);
+    if (!preferredMode || preferredMode === currentMode) return "";
+    if (preferredMode === "can2") {
+      return dcText(
+        "This node is currently visible via MAVLink CAN2 metadata. Switch to the MAVLink CAN2 tab before opening Parameters.",
+        "该节点当前是通过 MAVLink CAN2 元数据看到的。请先切换到「MAVLink CAN2」标签，再打开 Parameters。"
+      );
+    }
+    if (preferredMode === "can1") {
+      return dcText(
+        "This node is currently visible via MAVLink CAN1 metadata. Switch to the MAVLink CAN1 tab before opening Parameters.",
+        "该节点当前是通过 MAVLink CAN1 元数据看到的。请先切换到「MAVLink CAN1」标签，再打开 Parameters。"
+      );
+    }
+    if (preferredMode === "slcan") {
+      return dcText(
+        "This node is currently visible via SLCAN Direct. Switch back to the SLCAN Direct tab before opening Parameters.",
+        "该节点当前是通过 SLCAN 直连看到的。请先切回「SLCAN 直连」标签，再打开 Parameters。"
+      );
+    }
+    return "";
   }
 
   function escapeHtml(text) {
@@ -2006,7 +2037,7 @@
     await ensureHealthySlcanBridge();
     const req = buildGetSetRequest(index, valueUnion, name);
     const tx = await sendDronecanServiceRequest(nodeId, DRONECAN_GETSET_SERVICE_ID, req, DRONECAN_GETSET_SIGNATURE);
-    const payload = await waitForServiceResponse(tx.responderNodeId, tx.responseCanId, tx.transferId, tx.requestStartedAt, valueUnion ? 2200 : 1400);
+    const payload = await waitForServiceResponse(tx.responderNodeId, tx.responseCanId, tx.transferId, tx.requestStartedAt, valueUnion ? 2600 : 2600);
     return decodeGetSetResponse(payload);
   }
 
@@ -2021,6 +2052,8 @@
     const nodeId = Number(node?.nodeId || 0);
     if (!nodeId) return [];
     const entry = cacheEntryForNode(nodeId);
+    const previousParams = Array.isArray(entry.params) ? entry.params.slice() : [];
+    const previousSelectedIndex = dcMenuState.paramSelectedIndex;
     if (entry.loading) return entry.params || [];
     if (!opts.force && Array.isArray(entry.params) && entry.params.length) return entry.params;
     entry.loading = true;
@@ -2076,7 +2109,15 @@
       renderParametersModal(node);
       return params;
     } catch (err) {
-      entry.error = err?.message || String(err);
+      if (previousParams.length) {
+        entry.params = previousParams;
+        if (previousParams.some((param) => param.index === previousSelectedIndex)) {
+          dcMenuState.paramSelectedIndex = previousSelectedIndex;
+        } else if (previousParams[0]) {
+          dcMenuState.paramSelectedIndex = previousParams[0].index;
+        }
+      }
+      entry.error = previousParams.length ? "" : (err?.message || String(err));
       renderParametersModal(node);
       throw err;
     } finally {
@@ -2257,35 +2298,53 @@
     const body = $("sc-dc-modal-body");
     const title = $("sc-dc-modal-title");
     if (!body || !title) return;
+    const modal = body.closest(".sc-dc-modal");
+    const activeEl = document.activeElement;
+    const activeSearch = activeEl?.id === "sc-dc-param-search" ? activeEl : null;
+    const searchSelectionStart = activeSearch?.selectionStart ?? null;
+    const searchSelectionEnd = activeSearch?.selectionEnd ?? null;
+    const prevScrollTop = modal?.scrollTop ?? 0;
     const nodeId = Number(node?.nodeId || 0);
     const entry = cacheEntryForNode(nodeId);
     const rows = filteredNodeParams(nodeId);
-    const selected = selectedNodeParam(nodeId) || rows[0] || null;
-    if (selected && dcMenuState.paramSelectedIndex < 0) dcMenuState.paramSelectedIndex = selected.index;
+    const hasSearch = !!String(dcMenuState.paramSearch || "").trim();
+    const emptyListMessage = entry.error
+      ? dcText(`Load failed: ${entry.error}`, `读取失败：${entry.error}`)
+      : hasSearch
+        ? dcText("No matching parameters.", "没有匹配的参数。")
+        : dcText("No parameters loaded yet.", "尚未读取到参数。");
+    const selectedFromRows = rows.find((param) => param.index === dcMenuState.paramSelectedIndex) || null;
+    const selected = selectedFromRows || rows[0] || null;
+    if (selected) dcMenuState.paramSelectedIndex = selected.index;
+    else dcMenuState.paramSelectedIndex = -1;
     title.textContent = `Parameters · Node ${node?.nodeId ?? "-"}`;
     body.innerHTML = `
       <div class="sc-dc-modal-grid">
-        <section class="sc-dc-modal-card">
-          <h4>${dcText("Node parameter list", "节点参数列表")}</h4>
-          <label class="sc-dc-modal-field"><span>${dcText("Search", "搜索")}</span><input id="sc-dc-param-search" value="${escapeHtml(dcMenuState.paramSearch)}" placeholder="index / name"></label>
-          <div class="sc-dc-node-table-wrap" style="max-height:420px;">
-            <table class="sc-table sc-dc-node-table">
-              <thead><tr><th>#</th><th>${dcText("Name", "名称")}</th><th>${dcText("Current", "当前值")}</th><th>${dcText("Type", "类型")}</th></tr></thead>
-              <tbody id="sc-dc-param-list">
-                ${entry.loading ? `<tr><td colspan="4" class="muted">${dcText("Loading parameters from node…", "正在从节点读取参数…")}</td></tr>` : ""}
-                ${!entry.loading && !rows.length ? `<tr><td colspan="4" class="muted">${escapeHtml(entry.error ? dcText(`Load failed: ${entry.error}`, `读取失败：${entry.error}`) : dcText("No parameters loaded yet.", "尚未读取到参数。"))}</td></tr>` : ""}
-                ${rows.map((param) => {
-                  const isSelected = selected?.index === param.index;
-                  const draft = getParamDraft(nodeId, param.index);
-                  const currentLabel = draft !== undefined && !valuesEqual(draft, param.value)
-                    ? `${escapeHtml(formatParamValue(param.value, param.type))} -> ${escapeHtml(formatParamValue(draft, param.type))}`
-                    : escapeHtml(formatParamValue(param.value, param.type));
-                  return `<tr class="sc-dc-row${isSelected ? " active" : ""}" data-dc-param-index="${param.index}"><td>${param.index}</td><td>${escapeHtml(param.name)}</td><td>${currentLabel}</td><td>${paramKindLabel(param.type)}</td></tr>`;
-                }).join("")}
-              </tbody>
-            </table>
+        <section class="sc-dc-modal-card sc-dc-param-list-card">
+          <div class="sc-dc-param-list-head">
+            <h4>${dcText("Node parameter list", "节点参数列表")}</h4>
+            <label class="sc-dc-modal-field"><span>${dcText("Search", "搜索")}</span><input id="sc-dc-param-search" value="${escapeHtml(dcMenuState.paramSearch)}" placeholder="index / name"></label>
           </div>
-          <div class="sc-dc-modal-actions">
+          <div class="sc-dc-param-list-body">
+            <div class="sc-dc-node-table-wrap">
+              <table class="sc-table sc-dc-node-table">
+                <thead><tr><th>#</th><th>${dcText("Name", "名称")}</th><th>${dcText("Current", "当前值")}</th><th>${dcText("Type", "类型")}</th></tr></thead>
+                <tbody id="sc-dc-param-list">
+                  ${entry.loading ? `<tr><td colspan="4" class="muted">${dcText("Loading parameters from node…", "正在从节点读取参数…")}</td></tr>` : ""}
+                  ${!entry.loading && !rows.length ? `<tr><td colspan="4" class="muted">${escapeHtml(emptyListMessage)}</td></tr>` : ""}
+                  ${rows.map((param) => {
+                    const isSelected = selected?.index === param.index;
+                    const draft = getParamDraft(nodeId, param.index);
+                    const currentLabel = draft !== undefined && !valuesEqual(draft, param.value)
+                      ? `${escapeHtml(formatParamValue(param.value, param.type))} -> ${escapeHtml(formatParamValue(draft, param.type))}`
+                      : escapeHtml(formatParamValue(param.value, param.type));
+                    return `<tr class="sc-dc-row${isSelected ? " active" : ""}" data-dc-param-index="${param.index}"><td>${param.index}</td><td>${escapeHtml(param.name)}</td><td>${currentLabel}</td><td>${paramKindLabel(param.type)}</td></tr>`;
+                  }).join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="sc-dc-param-list-foot">
             <button type="button" id="sc-dc-param-refresh" class="sc-btn sc-btn-primary">${dcText("Refresh from node", "重新读取节点参数")}</button>
             <button type="button" id="sc-dc-param-save" class="sc-btn sc-btn-ghost">${dcText("Save local", "本地保存")}</button>
             <button type="button" id="sc-dc-param-load" class="sc-btn sc-btn-ghost">${dcText("Load local", "本地加载")}</button>
@@ -2314,6 +2373,16 @@
         </section>
       </div>
     `;
+    if (modal) modal.scrollTop = prevScrollTop;
+    if (activeSearch) {
+      const nextSearch = $("sc-dc-param-search");
+      if (nextSearch) {
+        nextSearch.focus({ preventScroll: true });
+        if (typeof searchSelectionStart === "number" && typeof searchSelectionEnd === "number") {
+          nextSearch.setSelectionRange(searchSelectionStart, searchSelectionEnd);
+        }
+      }
+    }
   }
 
   function renderRestartModal(node) {
