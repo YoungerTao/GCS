@@ -214,6 +214,73 @@ def test_status_source_isolation() -> None:
     print("  [ok] status source_prefix + bus_filter isolation")
 
 
+def test_default_mavlink_can_filter_whitelist() -> None:
+    from server import DEFAULT_MAVLINK_CAN_FILTER_IDS
+
+    assert DEFAULT_MAVLINK_CAN_FILTER_IDS[0] == 0
+    assert 341 in DEFAULT_MAVLINK_CAN_FILTER_IDS
+    assert 1 in DEFAULT_MAVLINK_CAN_FILTER_IDS
+    assert 16383 in DEFAULT_MAVLINK_CAN_FILTER_IDS
+    assert len(DEFAULT_MAVLINK_CAN_FILTER_IDS) == 11
+    print("  [ok] DEFAULT_MAVLINK_CAN_FILTER_IDS (MP whitelist)")
+
+
+def test_can_filter_modify_writes() -> None:
+    if not _pymavlink_available():
+        print("  [skip] CAN_FILTER_MODIFY encode (pymavlink not installed)")
+        return
+
+    from server import SLCAN_MONITOR, send_mavlink_can_filter_modify
+
+    class FakeHub:
+        def __init__(self):
+            self.writes: list[bytes] = []
+
+        def status(self):
+            return {"open": True}
+
+        def write(self, data: bytes):
+            self.writes.append(data)
+            return len(data)
+
+    hub = FakeHub()
+    prev_system = SLCAN_MONITOR.target_system
+    prev_component = SLCAN_MONITOR.target_component
+    try:
+        SLCAN_MONITOR.target_system = 1
+        SLCAN_MONITOR.target_component = 1
+        result = send_mavlink_can_filter_modify(hub, bus_ui=1)
+        assert hub.writes, "expected CAN_FILTER_MODIFY bytes"
+        assert result["bus"] == 1
+        assert result["ids"][0] == 0
+        assert result["ids"][1] == 341
+    finally:
+        SLCAN_MONITOR.target_system = prev_system
+        SLCAN_MONITOR.target_component = prev_component
+    print("  [ok] send_mavlink_can_filter_modify encodes CAN_FILTER_MODIFY")
+
+
+def test_command_long_encode_param7() -> None:
+    if not _pymavlink_available():
+        print("  [skip] command_long param7 (pymavlink not installed)")
+        return
+
+    from pymavlink.dialects.v20 import ardupilotmega as mavlink2
+
+    writer_buffer = bytearray()
+
+    class Writer:
+        def write(self, b):
+            writer_buffer.extend(b)
+            return len(b)
+
+    mav = mavlink2.MAVLink(Writer(), srcSystem=245, srcComponent=190)
+    cmd = mav.command_long_encode(1, 1, 32000, 0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    mav.send(cmd)
+    assert writer_buffer, "expected COMMAND_LONG bytes"
+    print("  [ok] COMMAND_LONG encode includes param7")
+
+
 def test_init_bitrate_codes() -> None:
     from server import SLCAN_BITRATE_CODE, init_slcan_adapter
 
@@ -243,6 +310,9 @@ def main() -> int:
         test_can1_can2_isolation()
         test_forward_bus_prune()
         test_status_source_isolation()
+        test_default_mavlink_can_filter_whitelist()
+        test_can_filter_modify_writes()
+        test_command_long_encode_param7()
         test_init_bitrate_codes()
         test_battery_can_id_layout()
 

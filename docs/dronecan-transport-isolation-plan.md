@@ -109,7 +109,9 @@ SLCAN 只看 `CAN_SLCAN_CPORT` 选定的一条 CAN；双总线同时监控需切
 | 函数 | 职责 |
 |------|------|
 | `ensureSlcanSession()` | 仅 SLCAN 开串口/WebSerial；失败报错，不 fallback |
-| `ensureMavlinkCanSession(bus)` | 仅 `CAN_FORWARD` |
+| `ensureMavlinkCanSession(bus)` | `CAN_FORWARD` (cmd **32000**) + 1s keepalive + `CAN_FILTER_MODIFY` 白名单 |
+| `teardownMavlinkCanSession()` | 切离 MAVLink 标签时 `CAN_FORWARD param1=0` 并停 keepalive |
+| `deactivateSlcanPoll()` | 切到 MAVLink 标签时停止 SLCAN poll（**不关** COM12） |
 | `pollTransportTraffic()` | 按 active transport poll 对应 API |
 | `ensureInspectorSession()` | `resolveInspectorTransport()` 后选路 |
 | `resolveInspectorTransport()` | SLCAN 可用 → `slcan`；否则已连 MAVLink → `can1`；否则 `none` |
@@ -133,6 +135,10 @@ SLCAN 只看 `CAN_SLCAN_CPORT` 选定的一条 CAN；双总线同时监控需切
 | `GET /slcan-nodes` | `source_prefix=SLCAN` |
 | `GET /mavlink-can-nodes?bus=1\|2` | `source_prefix=MAVLink` + 严格 bus/source 过滤 |
 | `POST /mavlink-can-write` | `{ bus, id, data, len }` 经 `MAVLINK_HUB` 发 CAN_FRAME |
+| `POST /slcan-forward-enable` | 兼容别名 → 同 `/mavlink-can-forward-enable` |
+| `POST /mavlink-can-forward-enable` | `{ bus: 1\|2 }` → `MAV_CMD_CAN_FORWARD` (32000) |
+| `POST /mavlink-can-forward-disable` | `CAN_FORWARD param1=0` |
+| `POST /mavlink-can-filter` | `{ bus, ids?, operation? }` → `CAN_FILTER_MODIFY`（MP 默认白名单） |
 | `POST /slcan-monitor-reset` | `{ scope: all\|mavlink\|slcan }` 切换标签时清池 |
 | `POST /slcan-open` | 可选 `slcan_cport` / `cport`（1\|2）标注 SLCAN 物理总线 |
 

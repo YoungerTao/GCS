@@ -11,6 +11,9 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Bump when POST/GET routes change so stale bridge processes can be detected (mtime alone is not enough).
+BRIDGE_API_VERSION = 4
+
 try:
     import serial
 except Exception:
@@ -1382,39 +1385,127 @@ class SlcanMavlinkMonitor:
     def enable_forward(self, hub, bus=1):
         if mavlink2 is None:
             raise RuntimeError("pymavlink is not installed")
+        bus = int(bus)
+        if bus not in (1, 2):
+            raise RuntimeError("bus must be 1 or 2")
         with self.lock:
             target_system = self.target_system
             target_component = self.target_component
-        writer_buffer = bytearray()
-
-        class Writer:
-            def write(self, b):
-                writer_buffer.extend(b)
-                return len(b)
-
-        mav = mavlink2.MAVLink(Writer(), srcSystem=245, srcComponent=190)
-        cmd = mav.command_long_encode(
-            target_system,
-            target_component,
-            mavlink2.MAV_CMD_CAN_FORWARD,
-            0,
-            float(bus),
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-        mav.send(cmd)
-        hub.write(bytes(writer_buffer))
+        _send_mavlink_command_long(hub, mavlink2.MAV_CMD_CAN_FORWARD, float(bus))
         with self.lock:
             prev_bus = int(getattr(self, "forward_bus", 0) or 0)
-            if prev_bus and prev_bus != int(bus):
+            if prev_bus and prev_bus != bus:
                 self._prune_mavlink_bus(bus)
             self.forward_enabled = True
-            self.forward_bus = int(bus)
+            self.forward_bus = bus
         return {"bus": bus, "targetSystem": target_system, "targetComponent": target_component}
+
+    def disable_forward(self, hub):
+        if mavlink2 is None:
+            raise RuntimeError("pymavlink is not installed")
+        with self.lock:
+            target_system = self.target_system
+            target_component = self.target_component
+        _send_mavlink_command_long(hub, mavlink2.MAV_CMD_CAN_FORWARD, 0.0)
+        with self.lock:
+            self.forward_enabled = False
+            self.forward_bus = 0
+        return {"bus": 0, "targetSystem": target_system, "targetComponent": target_component}
+
+
+# Mission Planner default DroneCAN filter whitelist (DataTypeId subjects).
+DEFAULT_MAVLINK_CAN_FILTER_IDS = (
+    0,
+    341,   # uavcan.protocol.NodeStatus
+    1,     # uavcan.protocol.GetNodeInfo
+    5,     # uavcan.protocol.RestartNode
+    11,    # uavcan.protocol.param.GetSet
+    10,    # uavcan.protocol.param.ExecuteOpcode
+    40,    # uavcan.protocol.file.BeginFirmwareUpdate
+    48,    # uavcan.protocol.file.Read
+    45,    # uavcan.protocol.file.GetInfo
+    390,   # uavcan.protocol.dynamic_node_id.Allocation
+    16383, # uavcan.protocol.debug.LogMessage
+)
+
+
+def _send_mavlink_command_long(hub, command, param1=0.0, param2=0.0):
+    if mavlink2 is None:
+        raise RuntimeError("pymavlink is not installed")
+    st = hub.status()
+    if not st.get("open"):
+        raise RuntimeError("mavlink hub not open")
+    with SLCAN_MONITOR.lock:
+        target_system = int(SLCAN_MONITOR.target_system or 1)
+        target_component = int(SLCAN_MONITOR.target_component or 1)
+    writer_buffer = bytearray()
+
+    class Writer:
+        def write(self, b):
+            writer_buffer.extend(b)
+            return len(b)
+
+    mav = mavlink2.MAVLink(Writer(), srcSystem=245, srcComponent=190)
+    cmd = mav.command_long_encode(
+        target_system,
+        target_component,
+        int(command),
+        0,
+        float(param1),
+        float(param2),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+    mav.send(cmd)
+    return hub.write(bytes(writer_buffer))
+
+
+def send_mavlink_can_filter_modify(hub, bus_ui=1, ids=None, operation=None):
+    """Send CAN_FILTER_MODIFY (#388). bus_ui is 1-indexed (CAN1/CAN2)."""
+    if mavlink2 is None:
+        raise RuntimeError("pymavlink is not installed")
+    bus_ui = int(bus_ui)
+    if bus_ui not in (1, 2):
+        raise RuntimeError("bus must be 1 or 2")
+    id_list = [int(x) & 0xFFFF for x in (ids if ids is not None else DEFAULT_MAVLINK_CAN_FILTER_IDS)]
+    num_ids = min(len(id_list), 16)
+    id_list = id_list[:16]
+    while len(id_list) < 16:
+        id_list.append(0)
+    op = int(operation if operation is not None else mavlink2.CAN_FILTER_REPLACE)
+    with SLCAN_MONITOR.lock:
+        target_system = int(SLCAN_MONITOR.target_system or 1)
+        target_component = int(SLCAN_MONITOR.target_component or 1)
+    writer_buffer = bytearray()
+
+    class Writer:
+        def write(self, b):
+            writer_buffer.extend(b)
+            return len(b)
+
+    mav = mavlink2.MAVLink(Writer(), srcSystem=245, srcComponent=190)
+    msg = mav.can_filter_modify_encode(
+        target_system,
+        target_component,
+        bus_ui - 1,
+        op,
+        len([x for x in id_list if x != 0]) or num_ids,
+        id_list,
+    )
+    mav.send(msg)
+    written = hub.write(bytes(writer_buffer))
+    return {"written": written, "bus": bus_ui, "operation": op, "ids": id_list}
+
+
+def _require_mavlink_hub_open():
+    mav_open = MAVLINK_HUB.status().get("open")
+    if not mav_open:
+        raise RuntimeError(
+            "open GCS MAVLink serial first (connect flight controller at top of GCS)"
+        )
 
 
 SLCAN_MONITOR = SlcanMavlinkMonitor()
@@ -1492,6 +1583,7 @@ class Handler(BaseHTTPRequestHandler):
             send_json(self, 200, {
                 "ok": True,
                 "service": "com-bridge",
+                "apiVersion": BRIDGE_API_VERSION,
                 "scriptMtime": int(os.path.getmtime(__file__)),
                 "scriptPath": __file__,
                 "mavlinkBridge": {
@@ -1514,7 +1606,7 @@ class Handler(BaseHTTPRequestHandler):
                     if m:
                         baud = int(m.group(1))
                 ports = read_ports_with_roles(force=probe, baudrate=baud)
-                send_json(self, 200, {"ports": ports, "probed": True})
+                send_json(self, 200, {"ports": ports, "probed": probe})
             except Exception as exc:
                 send_json(self, 500, {"ports": [], "ok": False, "error": str(exc)})
             return
@@ -1527,6 +1619,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/bridge-status":
             send_json(self, 200, {
                 **MAVLINK_HUB.status(),
+                "apiVersion": BRIDGE_API_VERSION,
                 "scriptMtime": int(os.path.getmtime(__file__)),
                 "scriptPath": __file__,
                 "subscribers": _bridge_subscriber_count(),
@@ -1712,19 +1805,37 @@ class Handler(BaseHTTPRequestHandler):
                 SLCAN_MONITOR.reset()
                 send_json(self, 200, {"ok": True})
                 return
-            if self.path == "/slcan-forward-enable":
+            if self.path in ("/slcan-forward-enable", "/mavlink-can-forward-enable"):
                 bus = int(payload.get("bus") or 1)
                 if bus not in (1, 2):
                     raise RuntimeError("bus must be 1 or 2")
-                mav_open = MAVLINK_HUB.status().get("open")
-                if not mav_open:
-                    raise RuntimeError(
-                        "open GCS MAVLink serial first (connect flight controller at top of GCS)"
-                    )
-                hub = MAVLINK_HUB
-                transport = "mavlink-bridge"
-                result = SLCAN_MONITOR.enable_forward(hub, bus=bus)
-                send_json(self, 200, {"ok": True, "transport": transport, **result})
+                _require_mavlink_hub_open()
+                result = SLCAN_MONITOR.enable_forward(MAVLINK_HUB, bus=bus)
+                send_json(self, 200, {"ok": True, "transport": "mavlink-bridge", **result})
+                return
+            if self.path == "/mavlink-can-forward-disable":
+                _require_mavlink_hub_open()
+                result = SLCAN_MONITOR.disable_forward(MAVLINK_HUB)
+                send_json(self, 200, {"ok": True, **result})
+                return
+            if self.path == "/mavlink-can-filter":
+                bus = int(payload.get("bus") or 1)
+                if bus not in (1, 2):
+                    raise RuntimeError("bus must be 1 or 2")
+                _require_mavlink_hub_open()
+                raw_ids = payload.get("ids")
+                ids = None
+                if isinstance(raw_ids, list) and raw_ids:
+                    ids = [int(x) for x in raw_ids]
+                op = payload.get("operation")
+                operation = int(op) if op is not None else None
+                result = send_mavlink_can_filter_modify(
+                    MAVLINK_HUB,
+                    bus_ui=bus,
+                    ids=ids,
+                    operation=operation,
+                )
+                send_json(self, 200, {"ok": True, **result})
                 return
             if self.path == "/slcan-write":
                 b64 = payload.get("data") or ""
