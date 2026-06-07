@@ -19,6 +19,7 @@
   let slcanInitDone = false;
   let slcanInitRetryAt = 0;
   let slcanPortLostAt = 0;
+  let slcanBridgeRecoverAt = 0;
   let menuNodeId = 0;
   let selectedInspectorMessage = null;
   let lastCanForwardAt = 0;
@@ -1380,6 +1381,7 @@
         applyNodeSnapshot(slcanRuntime, runtimeToNodeStatus(slcanRuntime), () => slcanSessionReady);
         return;
       }
+      await ensureHealthySlcanBridge();
       try {
         const status = await bridgeJson("/slcan-nodes", null, { skipEnsure: true });
         applyNodeSnapshot(slcanRuntime, status, () => slcanSessionReady);
@@ -2623,20 +2625,37 @@
     }
   }
 
-  async function ensureHealthySlcanBridge() {
-    if (slcanBoundPort === "webserial" || shouldPollBrowserSlcan()) return;
-    if (!slcanBoundPort) return;
+  function isSlcanBridgeUnhealthy(status) {
+    if (!status?.open) return false;
+    const errText = String(status.error || "");
+    if (!status.readerAlive) return true;
+    if (/PermissionError|ClearCommError failed|设备不识别/i.test(errText)) return true;
+    const rxAge = Number(status.lastRxAgeSec);
+    return Number.isFinite(rxAge) && rxAge > 45;
+  }
+
+  async function ensureHealthySlcanBridge(force = false) {
+    if (slcanBoundPort === "webserial" || shouldPollBrowserSlcan()) return false;
+    const port = slcanBoundPort || detectSlcanAdapterPort();
+    if (!port || port.startsWith("auth:")) return false;
+    if (!force && slcanBridgeRecoverAt && Date.now() < slcanBridgeRecoverAt) return false;
     try {
       const status = await bridgeJson("/slcan-status", null, { skipEnsure: true });
-      const errText = String(status?.error || "");
-      const unhealthy = status?.open && (!status?.readerAlive || /PermissionError|ClearCommError failed/i.test(errText));
-      if (!unhealthy) return;
+      if (!isSlcanBridgeUnhealthy(status)) return false;
+      slcanBridgeRecoverAt = Date.now() + 8000;
       await bridgeJson("/slcan-close", null, { skipEnsure: true });
-      await bridgeJson("/slcan-open", slcanOpenPayload(slcanBoundPort));
+      await bridgeJson("/slcan-open", slcanOpenPayload(port));
+      slcanBoundPort = port;
       slcanInitDone = true;
+      slcanInitRetryAt = 0;
       slcanSessionReady = true;
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent = `SLCAN 串口已自动恢复（${port}）。${slcanCportHintText()}`;
+      }
+      return true;
     } catch (_) {
-      // Let the real request surface the error if recovery fails.
+      slcanBridgeRecoverAt = Date.now() + 8000;
+      return false;
     }
   }
 
@@ -3767,6 +3786,8 @@
         await bridgeJson("/slcan-open", slcanOpenPayload(adapterPort));
         slcanBoundPort = adapterPort;
         slcanInitDone = true;
+      } else if (isSlcanBridgeUnhealthy(status)) {
+        await ensureHealthySlcanBridge(true);
       } else if (!slcanInitDone) {
         await bridgeJson("/slcan-init", { bitrate_kbps: 1000 });
         slcanInitDone = true;
@@ -3880,9 +3901,10 @@
       }
       slcanSessionReady = false;
       slcanInitDone = false;
-      slcanBoundPort = "";
-      slcanRuntime.nodes.clear();
-      slcanRuntime.framesPerSecond = 0;
+      if (!slcanBoundPort) {
+        slcanRuntime.nodes.clear();
+        slcanRuntime.framesPerSecond = 0;
+      }
       if ($("sc-dc-hint")) {
         $("sc-dc-hint").textContent =
           "未找到 SLCAN 口：请在上方下拉指定 SLCAN 虚拟口，或先在顶部用 [MAVLink] 口连接（会自动配对另一路为 SLCAN）。";
@@ -3897,6 +3919,9 @@
         await bridgeJson("/slcan-open", slcanOpenPayload(adapterPort));
         slcanBoundPort = adapterPort;
         slcanInitDone = true;
+      } else if (isSlcanBridgeUnhealthy(status)) {
+        slcanBoundPort = adapterPort;
+        await ensureHealthySlcanBridge(true);
       } else if (!slcanInitDone) {
         await bridgeJson("/slcan-init", { bitrate_kbps: 1000 });
         slcanInitDone = true;
@@ -3912,8 +3937,7 @@
       slcanSessionReady = false;
       slcanInitDone = false;
       slcanInitRetryAt = Date.now() + 30000;
-      if (!slcanBoundPort) {
-        slcanRuntime.nodes.clear();
+      if (!slcanBoundPort && slcanRuntime.nodes.size === 0) {
         slcanRuntime.framesPerSecond = 0;
       }
       if ($("sc-dc-hint")) {

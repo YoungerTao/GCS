@@ -3,6 +3,7 @@
   const MAX_ATTEMPTS = 6;
   const RETRY_MS = 1200;
   const FETCH_TIMEOUT_MS = 1600;
+  const TILE_FETCH_TIMEOUT_MS = 3500;
 
   function hasFetch() {
     return typeof global.fetch === "function";
@@ -25,13 +26,13 @@
     });
   }
 
-  async function fetchJson(url) {
+  async function fetchJson(url, timeoutMs) {
     if (!hasFetch()) {
       throw new Error("fetch unavailable");
     }
     const resp = await withTimeout(
       fetch(url, { cache: "no-store", mode: "cors" }),
-      FETCH_TIMEOUT_MS
+      timeoutMs || FETCH_TIMEOUT_MS
     );
     if (!resp.ok) {
       throw new Error("http " + resp.status);
@@ -93,7 +94,8 @@
         continue;
       }
       try {
-        const data = await fetchJson(check.url);
+        const timeoutMs = check.id === "tiles" ? TILE_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS;
+        const data = await fetchJson(check.url, timeoutMs);
         result.push({
           id: check.id,
           label: check.label,
@@ -233,6 +235,12 @@
               .join(", ")
         );
         return;
+      }
+      if (coreOk && attempt < MAX_ATTEMPTS) {
+        await new Promise(function (resolve) {
+          global.setTimeout(resolve, RETRY_MS);
+        });
+        continue;
       }
       if (coreOk) {
         logSummary(

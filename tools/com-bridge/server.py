@@ -1047,18 +1047,49 @@ def init_slcan_adapter(hub, bitrate_kbps=1000):
         time.sleep(0.08)
 
 
+def slcan_hub_needs_recover(st=None):
+    """True when the SLCAN serial reader died but pyserial still reports the port open (Windows zombie COM)."""
+    st = st or SLCAN_HUB.status()
+    err = str(st.get("error") or "")
+    if not st.get("open"):
+        return False
+    if not st.get("readerAlive"):
+        return True
+    if "PermissionError" in err or "ClearCommError failed" in err:
+        return True
+    last_rx = st.get("lastRxAgeSec")
+    try:
+        if last_rx is not None and float(last_rx) > 45.0 and st.get("readerAlive"):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
+
+
+_slcan_recover_last_at = 0.0
+_SLCAN_RECOVER_COOLDOWN_S = 8.0
+
+
+def maybe_recover_slcan_hub(bitrate_kbps=1000):
+    """Re-open SLCAN after zombie COM failures; rate-limited for poll endpoints."""
+    global _slcan_recover_last_at
+    st = SLCAN_HUB.status()
+    if not slcan_hub_needs_recover(st):
+        return st
+    now = time.time()
+    if now - _slcan_recover_last_at < _SLCAN_RECOVER_COOLDOWN_S:
+        return st
+    _slcan_recover_last_at = now
+    try:
+        return recover_slcan_hub_if_needed(bitrate_kbps=bitrate_kbps)
+    except Exception:
+        return SLCAN_HUB.status()
+
+
 def recover_slcan_hub_if_needed(bitrate_kbps=1000):
     """Recover from zombie COM states where pyserial still reports open but the reader has already died."""
     st = SLCAN_HUB.status()
-    needs_reopen = (
-        st.get("open")
-        and (
-            not st.get("readerAlive")
-            or "PermissionError" in str(st.get("error") or "")
-            or "ClearCommError failed" in str(st.get("error") or "")
-        )
-    )
-    if not needs_reopen:
+    if not slcan_hub_needs_recover(st):
         return st
     port = str(st.get("lastOpenPort") or st.get("port") or "").strip()
     baudrate = int(st.get("lastOpenBaud") or st.get("baudrate") or 115200)
@@ -1653,11 +1684,12 @@ class Handler(BaseHTTPRequestHandler):
             send_json(self, 200, {"data": base64.b64encode(data).decode("ascii")})
             return
         if self.path == "/slcan-status":
-            st = SLCAN_HUB.status()
+            st = maybe_recover_slcan_hub()
             port = st.get("port") if st.get("open") else detect_slcan_port()
             send_json(self, 200, {"adapterPort": port, **st})
             return
         if self.path == "/slcan-nodes":
+            maybe_recover_slcan_hub()
             send_json(self, 200, SLCAN_MONITOR.status(source_prefix="SLCAN"))
             return
         if self.path.startswith("/mavlink-can-nodes"):

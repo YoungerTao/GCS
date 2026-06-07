@@ -179,5 +179,6 @@ SLCAN 只看 `CAN_SLCAN_CPORT` 选定的一条 CAN；双总线同时监控需切
 
 ## 相关背景
 
+- **2026-06-07 实机会话：问题、回归与修复记录**：[dronecan-mavlink-can-session-20260607.md](./dronecan-mavlink-can-session-20260607.md)
 - 问题现象与根因：[dronecan-slcan-mavlink-source-mixing-20260606.md](./dronecan-slcan-mavlink-source-mixing-20260606.md)
 - 参数超时个案：[dronecan-slcan-param-incident-20260606.md](./dronecan-slcan-param-incident-20260606.md)

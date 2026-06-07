@@ -134,7 +134,7 @@ def main() -> int:
     threading.Thread(target=bridge_warmup_loop, daemon=True).start()
     threading.Thread(
         target=ensure_tile_server_process,
-        kwargs={"wait_s": 3.0},
+        kwargs={"wait_s": 10.0},
         daemon=True,
     ).start()
     threading.Thread(target=watchdog_loop, daemon=True).start()
