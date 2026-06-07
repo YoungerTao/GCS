@@ -723,10 +723,32 @@ def _apply_port_role_probes(ports, baudrate=115200):
     return out
 
 
-def read_ports_with_roles(force=False, baudrate=115200):
+def read_ports_fast():
+    """Instant COM list with name-based roles (no serial open)."""
+    out = []
+    for raw in read_ports():
+        item = dict(raw)
+        role = _classify_port_item(item)
+        item["probeRole"] = role if role in ("mavlink", "slcan") else "unknown"
+        item["probeConfidence"] = "heuristic"
+        item["probeDetail"] = "fast-list"
+        _sync_port_role_fields(item)
+        out.append(item)
+    return out
+
+
+def read_ports_with_roles(force=False, baudrate=115200, probe_roles=True):
     global _PORT_PROBE_CACHE
     with _PORT_PROBE_LOCK:
         now = time.time()
+        if not probe_roles:
+            if (
+                not force
+                and _PORT_PROBE_CACHE.get("ports")
+                and (now - float(_PORT_PROBE_CACHE.get("at") or 0)) < 12.0
+            ):
+                return list(_PORT_PROBE_CACHE["ports"])
+            return read_ports_fast()
         if (
             not force
             and _PORT_PROBE_CACHE.get("ports")
@@ -1605,7 +1627,7 @@ class Handler(BaseHTTPRequestHandler):
                     m = re.search(r"baud=(\d+)", self.path)
                     if m:
                         baud = int(m.group(1))
-                ports = read_ports_with_roles(force=probe, baudrate=baud)
+                ports = read_ports_with_roles(force=probe, baudrate=baud, probe_roles=probe)
                 send_json(self, 200, {"ports": ports, "probed": probe})
             except Exception as exc:
                 send_json(self, 500, {"ports": [], "ok": False, "error": str(exc)})

@@ -841,8 +841,11 @@ function initComPortAutoRefresh() {
   window._gcsJustReloaded = true;
   setTimeout(() => { window._gcsJustReloaded = false; }, 8000);
 
-  window.addEventListener("load", () => {
+  if (document.getElementById("comPort")) {
     refreshPorts({ probeBridge: true, forceBridgeProbe: false }).catch(() => {});
+  }
+
+  window.addEventListener("load", () => {
     const startRefresh = async () => {
       if (window.__gcsRuntimeNative && typeof ensureComBridgeRunning === "function") {
         try {

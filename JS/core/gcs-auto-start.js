@@ -131,8 +131,8 @@
       const runtimeOk = await ensureRuntimeStarted();
       if (runtimeOk) {
         await ensureBridgeFromRuntime();
-        await ensureTileServerFromRuntime();
-        const bridgeWait = global.__gcsLiveServerDev ? 2500 : 15000;
+        ensureTileServerFromRuntime().catch(() => {});
+        const bridgeWait = global.__gcsLiveServerDev ? 2500 : 8000;
         const bridgeOk = await waitForBridge(bridgeWait);
         if (!bridgeOk && !global.__gcsRuntimeNative) {
           global._comBridgeBackoffUntil = Date.now() + 45000;

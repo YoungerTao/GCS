@@ -1,12 +1,8 @@
 (function initGcsStartupSelfCheck(global) {
-  const CHECKS = [
-    { id: "ui", label: "UI 8766", url: "http://127.0.0.1:8766/__gcs/ping" },
-    { id: "launcher", label: "Launcher 8767", url: "http://127.0.0.1:8767/ping" },
-    { id: "tiles", label: "Tiles 8768", url: "http://127.0.0.1:8768/health" }
-  ];
-  const MAX_ATTEMPTS = 10;
-  const RETRY_MS = 1500;
-  const FETCH_TIMEOUT_MS = 1800;
+  const BRIDGE_HEALTH = "http://127.0.0.1:8765/health";
+  const MAX_ATTEMPTS = 6;
+  const RETRY_MS = 1200;
+  const FETCH_TIMEOUT_MS = 1600;
 
   function hasFetch() {
     return typeof global.fetch === "function";
@@ -45,23 +41,73 @@
     });
   }
 
+  function buildChecks() {
+    const checks = [
+      { id: "bridge", label: "COM bridge 8765", url: BRIDGE_HEALTH, required: true },
+    ];
+    if (global.__gcsRuntimeNative) {
+      checks.push({
+        id: "ui",
+        label: "UI 8766",
+        required: false,
+        syntheticOk: true,
+        detail: "OK (current page)",
+      });
+    } else {
+      checks.push({
+        id: "ui",
+        label: "UI 8766",
+        url: "http://127.0.0.1:8766/__gcs/ping",
+        required: !global.__gcsLiveServerDev,
+      });
+    }
+    if (!global.__gcsRuntimeNative) {
+      checks.push({
+        id: "launcher",
+        label: "Launcher 8767",
+        url: "http://127.0.0.1:8767/ping",
+        required: false,
+      });
+    }
+    checks.push({
+      id: "tiles",
+      label: "Tiles 8768",
+      url: "http://127.0.0.1:8768/health",
+      required: false,
+    });
+    return checks;
+  }
+
   async function runChecks() {
+    const checks = buildChecks();
     const result = [];
-    for (const check of CHECKS) {
+    for (const check of checks) {
+      if (check.syntheticOk) {
+        result.push({
+          id: check.id,
+          label: check.label,
+          ok: true,
+          required: !!check.required,
+          detail: check.detail || "OK",
+        });
+        continue;
+      }
       try {
         const data = await fetchJson(check.url);
         result.push({
           id: check.id,
           label: check.label,
           ok: !!(data && data.ok),
-          data: data || null
+          required: !!check.required,
+          data: data || null,
         });
       } catch (err) {
         result.push({
           id: check.id,
           label: check.label,
           ok: false,
-          error: err && err.message ? err.message : "unreachable"
+          required: !!check.required,
+          error: err && err.message ? err.message : "unreachable",
         });
       }
     }
@@ -83,12 +129,14 @@
 
   function lineHtml(item) {
     const cls = item.ok ? "gcs-startup-check__ok" : "gcs-startup-check__bad";
-    const detail = item.ok ? "OK" : (item.error || "Not ready");
+    const detail = item.ok ? (item.detail || "OK") : (item.error || "Not ready");
+    const opt = item.required ? "" : " (可选)";
     return (
       '<span class="gcs-startup-check__item ' +
       cls +
       '">' +
       item.label +
+      opt +
       ": " +
       detail +
       "</span>"
@@ -101,31 +149,41 @@
     }
   }
 
+  function requiredOk(items) {
+    return items.every(function (item) {
+      return !item.required || item.ok;
+    });
+  }
+
   function renderBanner(items, attempt, finalState) {
     const el = ensureBanner();
+    const coreOk = requiredOk(items);
     const allOk = items.every(function (item) {
       return item.ok;
     });
-    const title = allOk ? "启动自检正常" : "启动自检异常";
-    const hint = allOk
-      ? "服务已就绪，可以直接使用。"
-      : "请稍候几秒；如果仍然失败，请检查桌面快捷方式、venv 和 8768 瓦片服务。";
+    const title = coreOk
+      ? allOk
+        ? "启动自检正常"
+        : "核心服务已就绪"
+      : "启动自检异常";
+    const hint = coreOk
+      ? allOk
+        ? "服务已就绪，可以直接使用。"
+        : "COM 桥与飞控通信可用。8768 地图瓦片未启动时不影响 DroneCAN / MAVLink。"
+      : "请稍候几秒；若 COM bridge 8765 仍失败，请从桌面 GCS 图标重新打开。";
 
     el.className =
       "gcs-startup-check " +
-      (allOk ? "gcs-startup-check--ok" : "gcs-startup-check--bad");
-    if (!finalState && !allOk) {
+      (coreOk ? "gcs-startup-check--ok" : "gcs-startup-check--bad");
+    if (!finalState && !coreOk) {
       el.className += " gcs-startup-check--pending";
     }
 
     el.innerHTML =
       '<div class="gcs-startup-check__title">' +
       title +
-      " · 第 " +
-      attempt +
-      "/" +
-      MAX_ATTEMPTS +
-      " 次检查</div>" +
+      (coreOk && allOk ? "" : " · 第 " + attempt + "/" + MAX_ATTEMPTS + " 次检查") +
+      "</div>" +
       '<div class="gcs-startup-check__grid">' +
       items.map(lineHtml).join("") +
       "</div>" +
@@ -134,10 +192,10 @@
       "</div>";
     el.hidden = false;
 
-    if (allOk && finalState) {
+    if (coreOk && (allOk || finalState)) {
       global.setTimeout(function () {
         el.hidden = true;
-      }, 7000);
+      }, allOk ? 5000 : 9000);
     }
   }
 
@@ -157,22 +215,31 @@
     let lastItems = [];
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       lastItems = await runChecks();
-      const finalState =
-        attempt === MAX_ATTEMPTS ||
-        lastItems.every(function (item) {
-          return item.ok;
-        });
-      renderBanner(lastItems, attempt, finalState);
-      if (
-        lastItems.every(function (item) {
-          return item.ok;
-        })
-      ) {
+      const coreOk = requiredOk(lastItems);
+      const allOk = lastItems.every(function (item) {
+        return item.ok;
+      });
+      const finalState = attempt === MAX_ATTEMPTS || allOk;
+      if (coreOk || attempt >= 2 || finalState) {
+        renderBanner(lastItems, attempt, finalState);
+      }
+      if (allOk) {
         logSummary(
           "启动自检通过: " +
             lastItems
               .map(function (item) {
-                return item.label + "=OK";
+                return item.label + "=" + (item.ok ? "OK" : "SKIP");
+              })
+              .join(", ")
+        );
+        return;
+      }
+      if (coreOk) {
+        logSummary(
+          "启动自检核心通过 (COM bridge OK): " +
+            lastItems
+              .map(function (item) {
+                return item.label + "=" + (item.ok ? "OK" : (item.error || "SKIP"));
               })
               .join(", ")
         );
@@ -197,7 +264,7 @@
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bootstrapChecks, {
-      once: true
+      once: true,
     });
   } else {
     bootstrapChecks();
