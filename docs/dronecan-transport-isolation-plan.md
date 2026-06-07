@@ -177,8 +177,29 @@ SLCAN 只看 `CAN_SLCAN_CPORT` 选定的一条 CAN；双总线同时监控需切
 
 ---
 
+## Mac 双 USB 验证清单（2026-06-07）
+
+适用：飞控双口（例如 `usbmodem1301` = MAVLink、`usbmodem1303` = SLCAN）。
+
+1. 双击 `macos/start.command`（或 GCS.app），浏览器打开 `http://127.0.0.1:8766/index.html`（勿用 Live Server）。
+2. 顶部连接 **MAVLink** 口；DroneCAN 页选 **MAVLink CAN1**。
+3. 打开浏览器 DevTools → **Network**，过滤 `8765`：
+   - 应看到 `mavlink-can-forward-enable`、`mavlink-can-nodes?bus=1`、`mavlink-can-write`（GetNodeInfo 时）。
+   - **不应**出现 `slcan-write` / `slcan-open`。
+4. 切换到 **SLCAN** 标签（第二 USB 已接 SLCAN 适配器时）：
+   - 应看到 `slcan-open`、`slcan-write`、`slcan-nodes`。
+   - **不应**出现 `mavlink-can-write`（除非仍停留在 MAVLink 标签）。
+5. 节点 5 在线后约 10s 内名称应变为 `ArduPilot Flight Controller`（非永久 `Node 5`）。
+6. 若两路误选同一串口，COM 桥 `bridge-open` / `slcan-open` 返回 **409**，JSON 含 `conflict: true`。
+7. 离开 DroneCAN 面板：MAVLink 转发应 `CAN_FORWARD param1=0`；勾选「退出时关闭 SLCAN」则 `slcan-close` 仅清 SLCAN 节点池，不影响 MAVLink CAN 池。
+
+自动化：`python3 tools/com-bridge/test_slcan_auto.py`（含 `clear_scope` 与端口冲突单元测试）。
+
+---
+
 ## 相关背景
 
 - **2026-06-07 实机会话：问题、回归与修复记录**：[dronecan-mavlink-can-session-20260607.md](./dronecan-mavlink-can-session-20260607.md)
+- **2026-06-07 F4 飞控 MAVLink CAN 0 帧结案（平台限制）**：[dronecan-mavlink-can-f4-zero-frames-20260607.md](./dronecan-mavlink-can-f4-zero-frames-20260607.md)
 - 问题现象与根因：[dronecan-slcan-mavlink-source-mixing-20260606.md](./dronecan-slcan-mavlink-source-mixing-20260606.md)
 - 参数超时个案：[dronecan-slcan-param-incident-20260606.md](./dronecan-slcan-param-incident-20260606.md)

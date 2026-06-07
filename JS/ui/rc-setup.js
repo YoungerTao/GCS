@@ -291,7 +291,6 @@ window.rcChannels = window.rcChannels || Array.from({ length: 16 }, () => 1500);
     btns.forEach((btn) => {
       btn.addEventListener("click", () => {
         const panel = btn.getAttribute("data-setup-panel");
-        btns.forEach((b) => b.classList.toggle("active", b === btn));
         const panelEl = document.getElementById(`setup-panel-${panel}`);
         if (panelEl) openSetupPanel(panel);
         else openSetupPanel("overview");

@@ -27,7 +27,12 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from gcs_http import local_http_ok  # noqa: E402
-from gcs_supervisor import ensure_bridge_process, bridge_healthy, gcs_python  # noqa: E402
+from gcs_supervisor import (  # noqa: E402
+    bridge_healthy,
+    ensure_bridge_process,
+    gcs_python,
+    refresh_bridge_if_stale,
+)
 from map_tiles_supervisor import ensure_tile_server, tile_server_healthy  # noqa: E402
 
 REPO_ROOT = TOOLS_DIR.parent
@@ -95,6 +100,7 @@ def prewarm_runtime_after(delay_s: float = 2.0, wait_s: float = 15.0) -> None:
         time.sleep(delay_s)
     try:
         launch_runtime(wait_s=wait_s)
+        refresh_bridge_if_stale(wait_s=wait_s)
     except Exception:
         pass
 

@@ -9,12 +9,25 @@
       : null;
   }
 
+  function shortLayerName(baseLayer) {
+    if (!baseLayer) {
+      return "底图";
+    }
+    if (baseLayer.provider) {
+      return baseLayer.provider;
+    }
+    const label = baseLayer.label || "";
+    const parts = label.split(/\s+/);
+    return parts[0] || label || "底图";
+  }
+
   function setStatus(text, ok) {
     const el = $("mapTileStatus");
     if (!el) {
       return;
     }
     el.textContent = text || "";
+    el.title = text || "";
     el.classList.toggle("map-tile-status--ok", !!ok);
     el.classList.toggle("map-tile-status--err", ok === false);
   }
@@ -47,33 +60,38 @@
 
   function renderHealth(snapshot) {
     const baseLayer = currentBaseLayer();
+    const shortName = shortLayerName(baseLayer);
+    const cacheOnly =
+      typeof window.getGcsMapCacheOnly === "function" && window.getGcsMapCacheOnly();
+    const cacheTag = cacheOnly ? " · 仅缓存" : "";
+
     if (!baseLayer) {
       setStatus("底图未就绪", false);
       return;
     }
 
     if (!baseLayer.supportsLocalTileServer) {
-      setStatus(baseLayer.label + " · 在线", true);
+      setStatus(shortName + " · 在线" + cacheTag, true);
       return;
     }
 
     if (!snapshot) {
-      setStatus(baseLayer.label + " · 检测中...", null);
+      setStatus(shortName + " · 检测中…" + cacheTag, null);
       return;
     }
 
     if (snapshot.status === "offline") {
-      setStatus(baseLayer.label + " · 离线回退", false);
+      setStatus(shortName + " · 离线" + cacheTag, false);
       return;
     }
 
     const health = snapshot.health;
     if (!health || !health.ok) {
       if (snapshot.status === "checking" || snapshot.status === "idle") {
-        setStatus(baseLayer.label + " · 检测中...", null);
+        setStatus(shortName + " · 检测中…" + cacheTag, null);
         return;
       }
-      setStatus(baseLayer.label + " · 离线回退", false);
+      setStatus(shortName + " · 离线" + cacheTag, false);
       return;
     }
 
@@ -99,7 +117,37 @@
         ? " · 地形 " + terrainCached
         : "";
 
-    setStatus(baseLayer.label + " · 缓存 " + cached + " 张" + terrainNote + extra, true);
+    setStatus(shortName + " · 缓存 " + cached + terrainNote + extra + cacheTag, true);
+  }
+
+  function wireMapTileMenu() {
+    const menuBtn = $("mapTileMenuBtn");
+    const menuPanel = $("mapTileMenuPanel");
+    if (!menuBtn || !menuPanel) {
+      return;
+    }
+
+    function setMenuOpen(open) {
+      menuPanel.classList.toggle("hidden", !open);
+      menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    menuBtn.addEventListener("click", function (event) {
+      event.stopPropagation();
+      setMenuOpen(menuPanel.classList.contains("hidden"));
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!menuPanel.contains(event.target) && event.target !== menuBtn) {
+        setMenuOpen(false);
+      }
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    });
   }
 
   function wireUi() {
@@ -108,6 +156,7 @@
     const baseLayerSelect = $("mapBaseLayerSelect");
     let bindTimer = 0;
 
+    wireMapTileMenu();
     renderBaseLayerOptions();
 
     if (baseLayerSelect) {
@@ -127,13 +176,12 @@
         if (typeof window.refreshGcsMapBaseLayers === "function") {
           window.refreshGcsMapBaseLayers();
         }
-        const baseLayer = currentBaseLayer();
-        setStatus(
-          (baseLayer ? baseLayer.label : "底图") +
-            " · 仅缓存已" +
-            (cacheOnly.checked ? "开启" : "关闭"),
-          true
-        );
+        const terrainService = window.TerrainService;
+        if (terrainService && typeof terrainService.getHealthState === "function") {
+          renderHealth(terrainService.getHealthState());
+        } else {
+          renderHealth(null);
+        }
       });
     }
 
@@ -153,6 +201,14 @@
           typeof window.GcsMapPrefetch.openPrefetchDialog === "function"
         ) {
           window.GcsMapPrefetch.openPrefetchDialog(bounds);
+        }
+        const menuPanel = $("mapTileMenuPanel");
+        const menuBtn = $("mapTileMenuBtn");
+        if (menuPanel) {
+          menuPanel.classList.add("hidden");
+        }
+        if (menuBtn) {
+          menuBtn.setAttribute("aria-expanded", "false");
         }
       });
     }

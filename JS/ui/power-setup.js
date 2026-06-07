@@ -188,10 +188,7 @@
     const countEl = document.getElementById("power-instance-count");
     const emptyEl = document.getElementById("power-cards-empty");
     
-    console.log('[Power] renderCards called, instances:', instances.length, root, countEl);
-    
     if (!root || !countEl) {
-      console.error('[Power] root or countEl not found!');
       return;
     }
 
@@ -201,27 +198,22 @@
       : `${instances.length} 路电源`;
 
     const showEmpty = !instances.length;
-    console.log('[Power] showEmpty:', showEmpty, 'instances.length:', instances.length);
-    
+
     if (emptyEl) emptyEl.classList.toggle("hidden", !showEmpty);
     root.classList.toggle("hidden", showEmpty);
     root.classList.toggle("power-cards--three", instances.length > 1);
 
     const sig = getInstancesSignature(instances);
     if (sig === _lastInstancesSig && root.children.length === instances.length) {
-      console.log('[Power] Signature match, updating live values only');
       updateLiveCardValues(instances);
       return;
     }
     _lastInstancesSig = sig;
     root.innerHTML = "";
     if (showEmpty) {
-      console.log('[Power] No instances, returning early');
       return;
     }
 
-    console.log('[Power] Rendering', instances.length, 'cards');
-    
     instances.forEach((inst) => {
       const st = statusOf(inst);
       const card = document.createElement("article");

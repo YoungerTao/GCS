@@ -76,6 +76,7 @@ window.rankSerialPort = rankSerialPort;
 
 const BRIDGE_OFFLINE_BACKOFF_MS = 45000;
 const BRIDGE_HEALTH_PROBE_MS = 15000;
+const EXPECTED_BRIDGE_API_VERSION = 4;
 const _PAGE_LOAD_TS = Math.floor(Date.now() / 1000);
 
 function isBridgeBackoffActive() {
@@ -98,6 +99,17 @@ async function probeBridgeHealth() {
         const j = await resp.clone().json();
         window._lastBridgeScriptMtime = j && j.scriptMtime ? j.scriptMtime : null;
         window._lastBridgeScriptPath = j && j.scriptPath ? j.scriptPath : null;
+        window._lastBridgeApiVersion = j && j.apiVersion != null ? Number(j.apiVersion) : null;
+        const apiStale = window._lastBridgeApiVersion == null
+          || window._lastBridgeApiVersion < EXPECTED_BRIDGE_API_VERSION;
+        if (apiStale && !window._bridgeStaleRefreshInFlight) {
+          window._bridgeStaleRefreshInFlight = true;
+          requestBridgeStartup(true)
+            .catch(() => {})
+            .finally(() => {
+              window._bridgeStaleRefreshInFlight = false;
+            });
+        }
         if (!window._loggedBridgeMtimeDiag && window._lastBridgeScriptMtime && Math.abs(window._lastBridgeScriptMtime - _PAGE_LOAD_TS) > 600) {
           window._loggedBridgeMtimeDiag = true;
           console.log("[gcs] probeBridgeHealth: bridge scriptMtime differs sig from page load ts (possible stale-code case before self-heal):", window._lastBridgeScriptMtime, "path=", window._lastBridgeScriptPath);
@@ -389,21 +401,114 @@ function resolveRememberedPortValue(comSelect) {
 }
 
 function findCuavSiblingPort(mavlinkDeviceId) {
+  if (!mavlinkDeviceId) return "";
+  const slcanProbed = findPortByProbeRole("slcan");
+  if (slcanProbed?.deviceId && slcanProbed.deviceId !== mavlinkDeviceId) {
+    return slcanProbed.deviceId;
+  }
   const ports = systemComPorts();
   const current = ports.find((p) => p?.deviceId === mavlinkDeviceId);
-  if (!current || typeof current.usbVendorId !== "number" || typeof current.usbProductId !== "number") {
-    return "";
-  }
   const siblings = ports.filter(
-    (p) =>
-      p?.deviceId &&
-      p.deviceId !== mavlinkDeviceId &&
-      !isNoiseSerialPort(p) &&
-      p.usbVendorId === current.usbVendorId &&
-      p.usbProductId === current.usbProductId
+    (p) => p?.deviceId && p.deviceId !== mavlinkDeviceId && !isNoiseSerialPort(p)
   );
+  if (!siblings.length) return "";
+
+  const slcanSibling = siblings.find((p) => getPortProbeRole(p) === "slcan");
+  if (slcanSibling?.deviceId) return slcanSibling.deviceId;
+
+  if (current && typeof current.usbVendorId === "number" && typeof current.usbProductId === "number") {
+    const vidPidSiblings = siblings.filter(
+      (p) => p.usbVendorId === current.usbVendorId && p.usbProductId === current.usbProductId
+    );
+    if (vidPidSiblings.length === 1) return vidPidSiblings[0].deviceId;
+    const nonMavlink = vidPidSiblings.find((p) => getPortProbeRole(p) !== "mavlink");
+    if (nonMavlink?.deviceId) return nonMavlink.deviceId;
+  }
+
   if (siblings.length === 1) return siblings[0].deviceId;
   return "";
+}
+
+function detectFcPortTopology(opts = {}) {
+  const ports = systemComPorts().filter((p) => p?.deviceId && !isNoiseSerialPort(p));
+  const mavProbed = findPortByProbeRole("mavlink");
+  const slcanProbed = findPortByProbeRole("slcan");
+  const mavlinkDeviceId = String(
+    opts.mavlinkDeviceId || getMavlinkDeviceId() || mavProbed?.deviceId || ""
+  ).trim();
+  let slcanDeviceId = String(slcanProbed?.deviceId || "").trim();
+  if (!slcanDeviceId && mavlinkDeviceId) {
+    slcanDeviceId = String(findCuavSiblingPort(mavlinkDeviceId) || "").trim();
+  }
+  if (!slcanDeviceId) {
+    const named = ports.find((p) => p.isSlcanAdapter || /slcan/i.test(String(p.name || "")));
+    slcanDeviceId = String(named?.deviceId || "").trim();
+  }
+
+  const dualByProbe = !!(
+    mavProbed?.deviceId &&
+    slcanProbed?.deviceId &&
+    mavProbed.deviceId !== slcanProbed.deviceId
+  );
+  const dualByPair = !!(
+    mavlinkDeviceId &&
+    slcanDeviceId &&
+    slcanDeviceId !== mavlinkDeviceId
+  );
+  const dualByVidPid = (() => {
+    const groups = new Map();
+    ports.forEach((p) => {
+      if (typeof p.usbVendorId !== "number" || typeof p.usbProductId !== "number") return;
+      const key = `${p.usbVendorId}:${p.usbProductId}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    });
+    return Array.from(groups.values()).some((g) => g.length >= 2);
+  })();
+
+  const singleCom = ports.length <= 1 && !dualByProbe && !dualByPair;
+  let mode = "unknown";
+  if (singleCom) mode = "single-com";
+  else if (dualByProbe || dualByPair || dualByVidPid) mode = "dual-com";
+
+  const slcanPort = slcanDeviceId
+    ? ports.find((p) => p.deviceId === slcanDeviceId)
+    : null;
+  const slcanAvailable = !!(
+    slcanProbed?.deviceId ||
+    (slcanDeviceId &&
+      slcanDeviceId !== mavlinkDeviceId &&
+      (!slcanPort || getPortProbeRole(slcanPort) !== "mavlink"))
+  );
+
+  return {
+    mode,
+    portCount: ports.length,
+    mavlinkDeviceId,
+    slcanDeviceId,
+    slcanAvailable,
+    mavlinkProbed: !!mavProbed?.deviceId,
+    slcanProbed: !!slcanProbed?.deviceId,
+    dualByProbe,
+    dualByPair,
+    dualByVidPid,
+  };
+}
+
+function pruneStalePortStorage() {
+  const ports = systemComPorts();
+  const ids = new Set(ports.map((p) => String(p?.deviceId || "").trim()).filter(Boolean));
+  try {
+    const manual = localStorage.getItem("gcs.slcanDeviceIdManual") === "1";
+    const slcan = localStorage.getItem("gcs.slcanDeviceId") || "";
+    if (!manual && slcan && ids.size && !ids.has(slcan)) {
+      localStorage.removeItem("gcs.slcanDeviceId");
+    }
+    const mav = localStorage.getItem("gcs.mavlinkDeviceId") || "";
+    if (mav && ids.size && !ids.has(mav) && !ids.has(mav.toUpperCase())) {
+      localStorage.removeItem("gcs.mavlinkDeviceId");
+    }
+  } catch (_) { /* ignore */ }
 }
 
 function assignSlcanSiblingFromMavlink(mavlinkDeviceId) {
@@ -422,7 +527,12 @@ function getSlcanDeviceId() {
   try {
     const manual = localStorage.getItem("gcs.slcanDeviceIdManual") === "1";
     const saved = localStorage.getItem("gcs.slcanDeviceId") || "";
-    if (manual && saved && systemComPorts().some((p) => p?.deviceId === saved)) return saved;
+    if (saved) {
+      const hit = systemComPorts().find((p) => p?.deviceId === saved);
+      if (hit && getPortProbeRole(hit) !== "mavlink" && (manual || findCuavSiblingPort(getMavlinkDeviceId()) === saved)) {
+        return saved;
+      }
+    }
   } catch (_) { /* ignore */ }
   const mavDev = getMavlinkDeviceId();
   if (mavDev) {
@@ -456,6 +566,10 @@ function portRoleSuffix(sp) {
 window.getSlcanDeviceId = getSlcanDeviceId;
 window.getMavlinkDeviceId = getMavlinkDeviceId;
 window.findCuavSiblingPort = findCuavSiblingPort;
+window.findPortByProbeRole = findPortByProbeRole;
+window.detectFcPortTopology = detectFcPortTopology;
+window.pruneStalePortStorage = pruneStalePortStorage;
+window.assignSlcanSiblingFromMavlink = assignSlcanSiblingFromMavlink;
 
 function rememberSelectedPort(value, label) {
   try {
@@ -692,6 +806,7 @@ async function refreshPorts(opts = {}) {
   const currentValue = comSelect.value;
   window._knownPorts = ports;
   window._systemComPorts = systemPorts;
+  pruneStalePortStorage();
   window._comOptionMap = new Map();
   comSelect.innerHTML = "";
 

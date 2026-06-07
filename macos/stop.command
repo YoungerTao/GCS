@@ -14,8 +14,10 @@ echo "正在关闭 GCS 后台服务..."
 
 # 先通过 Python 脚本尝试优雅关闭
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [ -f "$ROOT/.venv/bin/python" ]; then
-  "$ROOT/.venv/bin/python" "$ROOT/tools/gcs-stop.py" 2>/dev/null || true
+# shellcheck disable=SC1091
+source "$ROOT/macos/gcs-env.sh"
+if [ -f "$VENV_PY" ]; then
+  "$VENV_PY" "$GCS_ROOT/tools/gcs-stop.py" --force 2>/dev/null || true
 fi
 
 # 按端口关闭（从瓦片服务器到核心服务）

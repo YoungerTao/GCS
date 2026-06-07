@@ -21,6 +21,7 @@ def _is_microsoft_store_python(exe: str | Path) -> bool:
     s = str(exe or "").lower().replace("\\", "/")
     return "windowsapps" in s or "pythonsoftwarefoundation" in s
 BRIDGE_PORT = 8765
+EXPECTED_BRIDGE_API_VERSION = 4
 SERVER_SCRIPT = REPO_ROOT / "tools" / "com-bridge" / "server.py"
 BRIDGE_API = "http://127.0.0.1:8765/health"
 BRIDGE_STDOUT_LOG = REPO_ROOT / "tools" / "com-bridge" / "server.stdout.log"
@@ -119,6 +120,34 @@ def _query_live_bridge_mtime(timeout_s: float = 1.0) -> int | None:
     return None
 
 
+def _bridge_code_is_stale(timeout_s: float = 1.0) -> bool:
+    """True when the live bridge predates MAVLink CAN APIs or disk server.py is newer."""
+    data = _query_live_bridge_health(timeout_s=timeout_s)
+    if not data:
+        return False
+    live_api = data.get("apiVersion")
+    if not isinstance(live_api, (int, float)) or int(live_api) < EXPECTED_BRIDGE_API_VERSION:
+        return True
+    live_m = data.get("scriptMtime")
+    if not isinstance(live_m, (int, float)):
+        return True
+    try:
+        disk_m = int(SERVER_SCRIPT.stat().st_mtime)
+    except Exception:
+        return False
+    return disk_m > int(live_m) + 3
+
+
+def refresh_bridge_if_stale(wait_s: float = 12.0, probe_only: bool = False) -> bool:
+    """Restart COM bridge when disk code is newer than the live listener (post-git-pull)."""
+    stale = _bridge_code_is_stale()
+    if probe_only:
+        return stale
+    if not stale and bridge_healthy():
+        return True
+    return ensure_bridge_process(force_restart=stale or not bridge_healthy(), wait_s=wait_s)
+
+
 def get_last_bridge_error() -> str:
     global _last_bridge_error
     return _last_bridge_error or ""
@@ -156,27 +185,21 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
     global _proc, _stdout_handle, _stderr_handle, _last_bridge_error
     with _lock:
         if not force_restart and bridge_healthy():
-            live_m = _query_live_bridge_mtime()
-            try:
-                disk_m = int(SERVER_SCRIPT.stat().st_mtime)
-            except Exception:
-                disk_m = 0
-            if live_m and disk_m > live_m + 3:  # tolerance for FS clock skew (per plan: 2-5s)
+            if _bridge_code_is_stale():
                 force_restart = True
                 try:
                     with BRIDGE_STDERR_LOG.open("ab") as f:
-                        f.write(f"[stale-bridge] disk mtime {disk_m} > live {live_m}, forcing restart\n".encode("utf-8", "ignore"))
+                        f.write(b"[stale-bridge] live bridge missing apiVersion or older than disk server.py\n")
                 except Exception:
                     pass
-                try:
-                    reap_stale_python_listener(BRIDGE_PORT)
-                except Exception:
-                    pass
-                # fall through (do not return) to stop+spawn below
             else:
                 return True
         if force_restart:
             _stop_locked()
+            try:
+                reap_stale_python_listener(BRIDGE_PORT)
+            except Exception:
+                pass
         elif _proc is not None and _proc.poll() is None and bridge_healthy():
             return True
         elif _proc is not None and _proc.poll() is not None:

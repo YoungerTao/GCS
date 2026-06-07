@@ -324,8 +324,12 @@
   function buildPortCard(n) {
     const disabled = !fcConnected();
     const card = document.createElement("article");
-    card.className = "serial-port-card card-dark";
+    card.className = `serial-port-card card-dark serial-port-card--n${n % 8}`;
     card.dataset.serialPort = String(n);
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-pressed", "false");
+    card.setAttribute("aria-label", `Serial ${n}`);
 
     const head = document.createElement("div");
     head.className = "serial-port-card-head";
@@ -356,7 +360,44 @@
     card._protoSelect = protoField.select;
     card._optSelect = optField ? optField.select : null;
 
+    card.addEventListener("click", onPortCardActivate);
+    card.addEventListener("keydown", onPortCardKeydown);
+
     return card;
+  }
+
+  let selectedSerialPort = null;
+
+  function setSelectedSerialPort(card) {
+    const grid = el("serial-port-grid");
+    grid?.querySelectorAll(".serial-port-card--selected").forEach((node) => {
+      node.classList.remove("serial-port-card--selected");
+      node.setAttribute("aria-pressed", "false");
+    });
+    if (card) {
+      card.classList.add("serial-port-card--selected");
+      card.setAttribute("aria-pressed", "true");
+      selectedSerialPort = Number(card.dataset.serialPort);
+    } else {
+      selectedSerialPort = null;
+    }
+  }
+
+  function onPortCardActivate(ev) {
+    if (ev.target.closest("select, button, input, label, option")) return;
+    const card = ev.currentTarget;
+    if (card.classList.contains("serial-port-card--selected")) {
+      setSelectedSerialPort(null);
+      return;
+    }
+    setSelectedSerialPort(card);
+  }
+
+  function onPortCardKeydown(ev) {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    if (ev.target.closest("select")) return;
+    ev.preventDefault();
+    onPortCardActivate(ev);
   }
 
   function hydrateCard(card, n) {
@@ -478,6 +519,7 @@
       const card = buildPortCard(n);
       hydrateCard(card, n);
       grid.appendChild(card);
+      if (selectedSerialPort === n) setSelectedSerialPort(card);
     });
 
     updateWriteUi();
