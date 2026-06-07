@@ -991,6 +991,26 @@ async function sendCommandLong(command, p1, p2, p3, p4, p5, p6, p7, confirmation
   await send_v2(76, payload, 152);
 }
 
+/** MAVLink CAN_FRAME (#386). busUi: 1=CAN1, 2=CAN2 (mavlink bus field is 0-indexed). */
+async function sendMavlinkCanFrame(frameId, dataBytes, busUi = 1, targetSystem, targetComponent) {
+  if (!(window.writer || writer)) throw new Error("未连接串口");
+  const ts = targetSystem != null && Number(targetSystem) > 0 ? Number(targetSystem) : (window.sysid || 1);
+  const tc = targetComponent != null ? Number(targetComponent) : (window.compid || 1);
+  const busMav = Math.max(0, (Number(busUi) || 1) - 1);
+  const data = dataBytes instanceof Uint8Array ? dataBytes : new Uint8Array(dataBytes || []);
+  const dlen = Math.min(64, data.length);
+  const raw = new Uint8Array(78);
+  const dv = new DataView(raw.buffer);
+  raw[0] = ts & 0xff;
+  raw[1] = tc & 0xff;
+  dv.setUint32(8, frameId >>> 0, true);
+  raw[12] = busMav & 0xff;
+  raw[13] = dlen & 0xff;
+  raw.set(data.subarray(0, dlen), 14);
+  const crcExtra = typeof window.getMavlinkCrcExtra === "function" ? window.getMavlinkCrcExtra(386) : 8;
+  await send_v2(386, Array.from(raw.slice(0, 14 + dlen)), crcExtra || 8);
+}
+
 const MAV_CMD_REQUEST_MESSAGE = 512;
 const MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES = 520;
 
@@ -1313,6 +1333,7 @@ async function readLoop() {
 window.send_v2 = send_v2;
 window.sendMavlinkV2 = send_v2;
 window.sendCommandLong = sendCommandLong;
+window.sendMavlinkCanFrame = sendMavlinkCanFrame;
 window.sendHeartbeat = sendHeartbeat;
 window.sendAccelcalVehiclePos = sendAccelcalVehiclePos;
 

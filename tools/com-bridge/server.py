@@ -1285,7 +1285,20 @@ class SlcanMavlinkMonitor:
             "deviceHint": "Unknown",
         }
 
-    def status(self, source_prefix=None):
+    def _node_matches_filters(self, node, source_prefix=None, bus_filter=None):
+        prefix = str(source_prefix or "").strip()
+        source = str(node.get("source", ""))
+        if prefix and not source.startswith(prefix):
+            return False
+        if bus_filter is not None:
+            bus_filter = int(bus_filter)
+            expected = f"MAVLink CAN{bus_filter}"
+            if source.startswith("MAVLink"):
+                if source != expected and not (bus_filter == 1 and source == "MAVLink CAN_FRAME"):
+                    return False
+        return True
+
+    def status(self, source_prefix=None, bus_filter=None):
         now = time.time()
         with self.lock:
             self._trim_frames(now)
@@ -1320,7 +1333,7 @@ class SlcanMavlinkMonitor:
                             "frameIdCounts": dict(sorted(self.node_frame_counts.get(node["nodeId"], {}).items(), key=lambda kv: kv[1], reverse=True)[:12]),
                         }
                         for node in self.nodes.values()
-                        if not prefix or str(node.get("source", "")).startswith(prefix)
+                        if self._node_matches_filters(node, source_prefix=prefix, bus_filter=bus_filter)
                     ],
                     key=lambda item: item["nodeId"],
                 ),
@@ -1361,6 +1374,42 @@ class SlcanMavlinkMonitor:
 
 
 SLCAN_MONITOR = SlcanMavlinkMonitor()
+
+
+def send_mavlink_can_frame(hub, frame_id, data_bytes, bus=0, target_system=None, target_component=None):
+    """Emit MAVLink CAN_FRAME (#386) on the MAVLink serial hub (bus is 0-indexed: 0=CAN1)."""
+    if mavlink2 is None:
+        raise RuntimeError("pymavlink is not installed")
+    st = hub.status()
+    if not st.get("open"):
+        raise RuntimeError("mavlink hub not open")
+    with SLCAN_MONITOR.lock:
+        target_system = int(target_system if target_system is not None else SLCAN_MONITOR.target_system)
+        target_component = int(
+            target_component if target_component is not None else SLCAN_MONITOR.target_component
+        )
+    raw = bytes(data_bytes or b"")[:64]
+    data_list = list(raw)
+    while len(data_list) < 64:
+        data_list.append(0)
+    writer_buffer = bytearray()
+
+    class Writer:
+        def write(self, b):
+            writer_buffer.extend(b)
+            return len(b)
+
+    mav = mavlink2.MAVLink(Writer(), srcSystem=245, srcComponent=190)
+    msg = mav.can_frame_encode(
+        target_system,
+        target_component,
+        int(frame_id) & 0xFFFFFFFF,
+        int(bus) & 0xFF,
+        len(raw),
+        data_list,
+    )
+    mav.send(msg)
+    return hub.write(bytes(writer_buffer))
 
 
 def send_json(handler, status, payload):
@@ -1451,6 +1500,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/slcan-nodes":
             send_json(self, 200, SLCAN_MONITOR.status(source_prefix="SLCAN"))
+            return
+        if self.path.startswith("/mavlink-can-nodes"):
+            try:
+                parsed = urllib.parse.urlparse(self.path)
+                qs = urllib.parse.parse_qs(parsed.query or "")
+                bus = int((qs.get("bus") or ["1"])[0])
+            except (TypeError, ValueError):
+                send_json(self, 400, {"ok": False, "error": "bus must be 1 or 2"})
+                return
+            if bus not in (1, 2):
+                send_json(self, 400, {"ok": False, "error": "bus must be 1 or 2"})
+                return
+            send_json(self, 200, SLCAN_MONITOR.status(source_prefix="MAVLink", bus_filter=bus))
             return
         if self.path == "/slcan-read":
             data = SLCAN_HUB.read_buffer()
@@ -1625,6 +1687,24 @@ class Handler(BaseHTTPRequestHandler):
                 recover_slcan_hub_if_needed()
                 written = SLCAN_HUB.write(data)
                 send_json(self, 200, {"ok": True, "written": written})
+                return
+            if self.path == "/mavlink-can-write":
+                bus_ui = int(payload.get("bus") or 1)
+                if bus_ui not in (1, 2):
+                    raise RuntimeError("bus must be 1 or 2")
+                frame_id = int(payload.get("id") or payload.get("frameId") or 0)
+                dlen = int(payload.get("len") or payload.get("dlc") or 0)
+                b64 = payload.get("data") or ""
+                data = base64.b64decode(b64.encode("ascii")) if b64 else b""
+                if dlen > 0:
+                    data = data[:dlen]
+                written = send_mavlink_can_frame(
+                    MAVLINK_HUB,
+                    frame_id,
+                    data,
+                    bus=bus_ui - 1,
+                )
+                send_json(self, 200, {"ok": True, "written": written, "bus": bus_ui})
                 return
             if self.path == "/slcan-inject":
                 line = str(payload.get("line") or "").strip()

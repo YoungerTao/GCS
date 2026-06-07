@@ -86,7 +86,68 @@ def test_inject_api() -> None:
     assert int(match.get("lastDlc") or 0) == 8, match.get("lastDlc")
     fps = int(status.get("framesPerSecond") or 0)
     assert fps >= 1, f"expected framesPerSecond >= 1, got {fps}"
-    print("  [ok] /slcan-inject + /slcan-nodes")
+    try:
+        mav_status = http_json("GET", "/mavlink-can-nodes?bus=1")
+    except urllib.error.HTTPError as err:
+        if err.code == 404:
+            print("  [skip] /mavlink-can-nodes not on running bridge (restart required)")
+            return
+        raise
+    mav_nodes = mav_status.get("nodes") or []
+    assert not any(n.get("nodeId") == 51 for n in mav_nodes), f"mavlink api leaked slcan node: {mav_nodes!r}"
+    print("  [ok] /slcan-inject + /slcan-nodes (isolated from /mavlink-can-nodes)")
+
+
+def _encode_mavlink_can_frame(frame_id: int, data: bytes, bus: int = 0) -> bytes:
+    try:
+        from pymavlink.dialects.v20 import ardupilotmega as mavlink2
+    except ImportError as exc:
+        raise ImportError("pymavlink required for mavlink isolation test") from exc
+
+    writer_buffer = bytearray()
+
+    class Writer:
+        def write(self, b):
+            writer_buffer.extend(b)
+            return len(b)
+
+    mav = mavlink2.MAVLink(Writer(), srcSystem=245, srcComponent=190)
+    payload = list(data[:64])
+    while len(payload) < 64:
+        payload.append(0)
+    msg = mav.can_frame_encode(1, 1, frame_id, bus, len(data), payload)
+    mav.send(msg)
+    return bytes(writer_buffer)
+
+
+def _pymavlink_available() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("pymavlink") is not None
+
+
+def test_status_source_isolation() -> None:
+    if not _pymavlink_available():
+        print("  [skip] status source isolation (pymavlink not installed)")
+        return
+
+    from server import SlcanMavlinkMonitor
+
+    mon = SlcanMavlinkMonitor()
+    mon.reset()
+    mon.feed(f"{BATTERY_CAN_LINE}\r".encode("ascii"))
+    slcan_nodes = mon.status(source_prefix="SLCAN")["nodes"]
+    mav_nodes = mon.status(source_prefix="MAVLink", bus_filter=1)["nodes"]
+    assert any(n.get("nodeId") == 51 for n in slcan_nodes), slcan_nodes
+    assert not any(n.get("nodeId") == 51 for n in mav_nodes), mav_nodes
+
+    frame_id = 0x18000019
+    data = bytes.fromhex("0102030405060708")
+    mon.feed(_encode_mavlink_can_frame(frame_id, data, bus=0))
+    mav_nodes = mon.status(source_prefix="MAVLink", bus_filter=1)["nodes"]
+    slcan_nodes = mon.status(source_prefix="SLCAN")["nodes"]
+    assert any(n.get("nodeId") == 25 for n in mav_nodes), mav_nodes
+    assert all(n.get("source", "").startswith("SLCAN") for n in slcan_nodes), slcan_nodes
+    print("  [ok] status source_prefix + bus_filter isolation")
 
 
 def test_init_bitrate_codes() -> None:
@@ -114,6 +175,7 @@ def main() -> int:
     child = None
     try:
         test_parser_unit()
+        test_status_source_isolation()
         test_init_bitrate_codes()
         test_battery_can_id_layout()
 
