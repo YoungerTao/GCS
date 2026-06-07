@@ -121,7 +121,10 @@
         data[i] = parseInt(dataHex.slice(i * 2, i * 2 + 2), 16);
       }
       if (typeof global.feedSlcanCanFrame === "function") {
-        global.feedSlcanCanFrame(canId, dlc, data, 0, "SLCAN Direct");
+        const cport = typeof global.getDronecanSlcanCport === "function"
+          ? global.getDronecanSlcanCport()
+          : 1;
+        global.feedSlcanCanFrame(canId, dlc, data, cport, `SLCAN Direct CAN${cport}`);
       }
     } catch (_) { /* ignore */ }
   }

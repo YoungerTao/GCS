@@ -74,11 +74,35 @@ let inspectorTransport = null;    // 解析器实际观测源
 
 | Store | 用途 | source 过滤 |
 |-------|------|-------------|
-| `slcanRuntime` | SLCAN 标签 + 解析器 SLCAN 路径 | `SLCAN Direct` |
-| `mavlinkCan1Runtime` | CAN1 标签 | `MAVLink CAN1` |
-| `mavlinkCan2Runtime` | CAN2 标签 | `MAVLink CAN2` |
+| `slcanRuntime` | SLCAN 标签 + 解析器 SLCAN 路径 | `SLCAN Direct CAN1` / `SLCAN Direct CAN2` |
+| `mavlinkCan1Runtime` | CAN1 标签 | `MAVLink CAN1`（`bus=1`） |
+| `mavlinkCan2Runtime` | CAN2 标签 | `MAVLink CAN2`（`bus=2`） |
 
 `getActiveRuntime()`：`currentView === 'inspector' ? inspectorTransport : currentTransport`。
+
+切换传输标签时调用 `clearTransportRuntime()` 清非当前 runtime，并 `POST /slcan-monitor-reset` 清 COM 桥对侧池。
+
+### 3.1 后端节点存储（CAN1/CAN2 隔离）
+
+COM 桥 `SlcanMavlinkMonitor` 使用复合键 `(transport, bus, nodeId)`：
+
+| transport | bus | 示例 source |
+|-----------|-----|-------------|
+| `slcan` | `CAN_SLCAN_CPORT`（1 或 2） | `SLCAN Direct CAN1` |
+| `mav` | 1 或 2（MAVLink `CAN_FRAME.bus+1`） | `MAVLink CAN1` / `MAVLink CAN2` |
+
+- `MAVLINK_HUB`（label=`bridge`）仅 `feed_mavlink()`，**不再**对二进制流做 SLCAN ASCII 解析。
+- `SLCAN_HUB`（label=`slcan`）仅 `feed_slcan()`。
+- `GET /mavlink-can-nodes?bus=1|2` 严格匹配 `source === MAVLink CAN{n}` 且 `bus === n`。
+- `CAN_FORWARD` 切换 bus 时 `_prune_mavlink_bus()` 清除旧 bus 节点。
+
+### 3.2 节点识别（GetNodeInfo）
+
+- 删除 `nodeId === 10` 硬编码飞控启发式。
+- 在线节点通过 `uavcan.protocol.GetNodeInfo`（Service ID 1）查询 `name` / 软硬件版本，60s 内缓存、限速单飞。
+- `DRONECAN_REGISTRY.matchDevice()` 优先按 `GetNodeInfo.name`（如 `org.ardupilot`）匹配；`CAN_D1_UC_NODE` / `CAN_D2_UC_NODE` 仅作「疑似飞控」辅助标注。
+
+SLCAN 只看 `CAN_SLCAN_CPORT` 选定的一条 CAN；双总线同时监控需切换 MAVLink CAN1 / CAN2 标签（非 Mission Planner 式双总线并行观测）。
 
 ### 4. 轮询与会话
 
@@ -107,8 +131,10 @@ let inspectorTransport = null;    // 解析器实际观测源
 | 端点 | 说明 |
 |------|------|
 | `GET /slcan-nodes` | `source_prefix=SLCAN` |
-| `GET /mavlink-can-nodes?bus=1\|2` | `source_prefix=MAVLink` + bus 过滤 |
+| `GET /mavlink-can-nodes?bus=1\|2` | `source_prefix=MAVLink` + 严格 bus/source 过滤 |
 | `POST /mavlink-can-write` | `{ bus, id, data, len }` 经 `MAVLINK_HUB` 发 CAN_FRAME |
+| `POST /slcan-monitor-reset` | `{ scope: all\|mavlink\|slcan }` 切换标签时清池 |
+| `POST /slcan-open` | 可选 `slcan_cport` / `cport`（1\|2）标注 SLCAN 物理总线 |
 
 ### 8. UI 文案
 
@@ -140,6 +166,8 @@ let inspectorTransport = null;    // 解析器实际观测源
 - [x] `mavlink.js` 门控 feed + CAN_FRAME 发送
 - [x] 解析器 `resolveInspectorTransport` + summary 数据源展示
 - [x] 参数读写 transport 校验 + 测试与文档
+- [x] 后端：复合键 `(transport,bus,nodeId)` + feed 路径拆分 + bus 严格过滤
+- [x] 前端：切换标签清 runtime + source 校验 + 总线列 + GetNodeInfo 识别
 
 ---
 
