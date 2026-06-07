@@ -145,4 +145,5 @@ let inspectorTransport = null;    // 解析器实际观测源
 
 ## 相关背景
 
-原混源问题记录见 [dronecan-slcan-mavlink-source-mixing-20260606.md](./dronecan-slcan-mavlink-source-mixing-20260606.md)。
+- 问题现象与根因：[dronecan-slcan-mavlink-source-mixing-20260606.md](./dronecan-slcan-mavlink-source-mixing-20260606.md)
+- 参数超时个案：[dronecan-slcan-param-incident-20260606.md](./dronecan-slcan-param-incident-20260606.md)
