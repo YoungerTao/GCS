@@ -96,30 +96,26 @@ def bridge_healthy(timeout_s: float = 1.5) -> bool:
     return local_http_ok(BRIDGE_API, timeout_s=timeout_s)
 
 
-def _query_live_bridge_mtime(timeout_s: float = 1.0) -> int | None:
-    """Fetch /health from live bridge and return its reported scriptMtime (or None on any failure)."""
+def _query_live_bridge_health(timeout_s: float = 1.0) -> dict | None:
+    """Fetch /health JSON from the live bridge listener."""
     try:
         with urllib.request.urlopen(BRIDGE_API, timeout=timeout_s) as resp:
             if resp.status != 200:
                 return None
             data = json.loads(resp.read().decode("utf-8", "ignore"))
-            m = data.get("scriptMtime")
-            if isinstance(m, (int, float)):
-                return int(m)
+            return data if isinstance(data, dict) else None
     except Exception:
-        pass
-    # socket fallback (mirrors gcs_http)
-    try:
-        req = urllib.request.Request(BRIDGE_API, method="GET")
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            if resp.status != 200:
-                return None
-            data = json.loads(resp.read().decode("utf-8", "ignore"))
-            m = data.get("scriptMtime")
-            if isinstance(m, (int, float)):
-                return int(m)
-    except Exception:
-        pass
+        return None
+
+
+def _query_live_bridge_mtime(timeout_s: float = 1.0) -> int | None:
+    """Fetch /health from live bridge and return its reported scriptMtime (or None on any failure)."""
+    data = _query_live_bridge_health(timeout_s=timeout_s)
+    if not data:
+        return None
+    m = data.get("scriptMtime")
+    if isinstance(m, (int, float)):
+        return int(m)
     return None
 
 
@@ -166,7 +162,6 @@ def ensure_bridge_process(force_restart: bool = False, wait_s: float = 12.0) -> 
             except Exception:
                 disk_m = 0
             if live_m and disk_m > live_m + 3:  # tolerance for FS clock skew (per plan: 2-5s)
-                # stale in-memory code (e.g. after git pull); force refresh of listener
                 force_restart = True
                 try:
                     with BRIDGE_STDERR_LOG.open("ab") as f:

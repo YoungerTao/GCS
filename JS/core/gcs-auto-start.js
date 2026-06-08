@@ -111,6 +111,15 @@
     return fetchOk(`${RUNTIME_ORIGIN}/__gcs/ensure-tile-server`, { method: "POST" });
   }
 
+  async function waitForTileServer(maxMs) {
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      if (await fetchOk(TILE_HEALTH)) return true;
+      await sleep(400);
+    }
+    return fetchOk(TILE_HEALTH);
+  }
+
   async function waitForBridge(maxMs) {
     const deadline = Date.now() + maxMs;
     const interval = global.__gcsLiveServerDev ? 1200 : 600;
@@ -132,8 +141,9 @@
       if (runtimeOk) {
         await ensureBridgeFromRuntime();
         await ensureTileServerFromRuntime();
-        const bridgeWait = global.__gcsLiveServerDev ? 2500 : 15000;
+        const bridgeWait = global.__gcsLiveServerDev ? 2500 : 8000;
         const bridgeOk = await waitForBridge(bridgeWait);
+        await waitForTileServer(global.__gcsLiveServerDev ? 4000 : 12000);
         if (!bridgeOk && !global.__gcsRuntimeNative) {
           global._comBridgeBackoffUntil = Date.now() + 45000;
         } else if (!bridgeOk) {

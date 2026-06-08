@@ -120,8 +120,11 @@
       for (let i = 0; i < dlc; i += 1) {
         data[i] = parseInt(dataHex.slice(i * 2, i * 2 + 2), 16);
       }
-      if (typeof global.feedMavlinkCanFrame === "function") {
-        global.feedMavlinkCanFrame(canId, dlc, data, 1, "SLCAN Direct");
+      if (typeof global.feedSlcanCanFrame === "function") {
+        const cport = typeof global.getDronecanSlcanCport === "function"
+          ? global.getDronecanSlcanCport()
+          : 1;
+        global.feedSlcanCanFrame(canId, dlc, data, cport, `SLCAN Direct CAN${cport}`);
       }
     } catch (_) { /* ignore */ }
   }

@@ -61,6 +61,20 @@ def count_cached_tiles() -> int:
     return total
 
 
+_tile_count_cache: tuple[float, int] | None = None
+
+
+def cached_tile_count_fast() -> int:
+    """Return cached tile count; refresh at most every 30s to keep /health responsive."""
+    global _tile_count_cache
+    now = time.time()
+    if _tile_count_cache and now - _tile_count_cache[0] < 30.0:
+        return _tile_count_cache[1]
+    total = count_cached_tiles()
+    _tile_count_cache = (now, total)
+    return total
+
+
 def lat_lon_to_tile_xy(lat: float, lon: float, zoom: int) -> tuple[int, int]:
     lat = max(min(lat, 85.05112878), -85.05112878)
     n = 2**zoom
@@ -306,7 +320,7 @@ class TileHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "scriptMtime": int(os.path.getmtime(__file__)),
                     "scriptPath": __file__,
-                    "cachedTiles": count_cached_tiles(),
+                    "cachedTiles": cached_tile_count_fast(),
                     "cachedTerrainTiles": cached_terrain,
                     "terrainReady": cached_terrain > 0,
                     "prefetch": PREFETCH.health_prefetch(),

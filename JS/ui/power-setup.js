@@ -166,7 +166,6 @@
         }));
         svg.appendChild(b);
         svg.appendChild(nameText);
-        svg.appendChild(idText);
       });
       lines.forEach((line) => svg.appendChild(line));
     }

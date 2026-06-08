@@ -8,16 +8,28 @@
   let dronecanPanelWasActive = false;
   /** DroneCAN 面板已确认 COM 桥就绪后，轮询不再反复 ensure（避免闪 cmd/PowerShell） */
   let dcBridgeEnsured = false;
-  let currentMode = "slcan";
+  let currentTransport = "slcan";
+  let currentView = "nodes";
+  let inspectorTransport = null;
   let uiBound = false;
   let slcanSessionReady = false;
+  let mavlinkCan1SessionReady = false;
+  let mavlinkCan2SessionReady = false;
   let slcanBoundPort = "";
   let slcanInitDone = false;
   let slcanInitRetryAt = 0;
   let slcanPortLostAt = 0;
+  let slcanBridgeRecoverAt = 0;
   let menuNodeId = 0;
   let selectedInspectorMessage = null;
   let lastCanForwardAt = 0;
+  let activeMavlinkForwardBus = 0;
+  let canForwardKeepaliveTimer = 0;
+  let mavlinkFilterAppliedForBus = 0;
+  let slcanPollActive = true;
+  let mavlinkCanSessionRetryAt = 0;
+  let canForwardFailureUntil = 0;
+  const MAV_CMD_CAN_FORWARD = 32000;
   let reconnectCountdownTimer = 0;
   const inspectorOpenState = {
     nodes: new Set(),
@@ -28,8 +40,15 @@
   const REBOOT_COMMAND = 246;
   const DRONECAN_GETSET_SERVICE_ID = 11;
   const DRONECAN_EXECUTE_OPCODE_SERVICE_ID = 10;
+  const DRONECAN_GET_NODE_INFO_SERVICE_ID = 1;
   const DRONECAN_GETSET_SIGNATURE = 0xA7B622F939D1A4D5n;
   const DRONECAN_EXECUTE_OPCODE_SIGNATURE = 0x3B131AC5EB69D2CDn;
+  const DRONECAN_GET_NODE_INFO_SIGNATURE = 0x0EE71A91725372A87n;
+  const nodeInfoState = {
+    cache: new Map(),
+    inflight: new Set(),
+    lastSweepAt: 0,
+  };
   const dcMenuState = {
     activeModal: "",
     updateAbortController: null,
@@ -45,52 +64,177 @@
     paramDocRequestKey: "",
   };
 
-  const slcanRuntime = {
-    framesPerSecond: 0,
-    errorFrames: 0,
-    nodes: new Map(),
-  };
-  /** 浏览器 Web Serial 路径下的 CAN 节点表（不依赖 8765 COM 桥） */
-  /** 后台帧缓存（Inspector 不展示原始帧列表） */
   const FRAME_RING_PER_NODE = 256;
   const FRAME_RING_PER_CAN_ID = 48;
 
-  const browserCanMonitor = {
-    frameTimes: [],
-    errorCount: 0,
-    nodes: new Map(),
-    nodeRecentFrames: new Map(),
-    nodeCanIdFrames: new Map(),
-    nodeFrameCounts: new Map(),
-    lastFrameAt: 0,
-  };
+  function createTransportRuntime() {
+    return {
+      framesPerSecond: 0,
+      errorFrames: 0,
+      nodes: new Map(),
+      nodeRecentFrames: new Map(),
+      nodeCanIdFrames: new Map(),
+      nodeFrameCounts: new Map(),
+      frameTimes: [],
+      lastFrameAt: 0,
+    };
+  }
+
+  const slcanRuntime = createTransportRuntime();
+  const mavlinkCan1Runtime = createTransportRuntime();
+  const mavlinkCan2Runtime = createTransportRuntime();
+
+  function clearTransportRuntime(runtime) {
+    if (!runtime) return;
+    runtime.nodes.clear();
+    runtime.nodeRecentFrames.clear();
+    runtime.nodeCanIdFrames.clear();
+    runtime.nodeFrameCounts.clear();
+    runtime.frameTimes = [];
+    runtime.framesPerSecond = 0;
+    runtime.errorFrames = 0;
+    runtime.lastFrameAt = 0;
+  }
+
+  function runtimeTransportForStore(runtime) {
+    if (runtime === mavlinkCan2Runtime) return "can2";
+    if (runtime === mavlinkCan1Runtime) return "can1";
+    return "slcan";
+  }
+
+  function getSlcanCport() {
+    const n = Math.round(num(getParam("CAN_SLCAN_CPORT"), 1));
+    return n === 2 ? 2 : 1;
+  }
+
+  function slcanOpenPayload(port) {
+    return {
+      port,
+      baudrate: 115200,
+      bitrate_kbps: 1000,
+      slcan_cport: getSlcanCport(),
+    };
+  }
+
+  function slcanCportHintText() {
+    const cport = getSlcanCport();
+    return dcText(
+      `SLCAN maps to physical CAN${cport} (CAN_SLCAN_CPORT=${cport}).`,
+      `SLCAN 映射物理 CAN${cport}（CAN_SLCAN_CPORT=${cport}）。`,
+    );
+  }
+
+  function normalizeBusUi(bus, transportFilter) {
+    const n = Number(bus);
+    if (Number.isFinite(n) && n >= 1 && n <= 2) return n;
+    if (Number.isFinite(n) && n >= 0 && n <= 1) return n + 1;
+    if (transportFilter === "can2") return 2;
+    if (transportFilter === "can1") return 1;
+    return getSlcanCport();
+  }
+
+  function nodeBusLabel(node) {
+    const transport = getActiveTransport();
+    const bus = normalizeBusUi(node?.bus, transport);
+    if (Number.isFinite(bus) && bus >= 1 && bus <= 2) {
+      return `CAN${bus}`;
+    }
+    const src = String(node?.source || "");
+    if (src.startsWith("SLCAN")) {
+      const cport = getSlcanCport();
+      return `SLCAN→CAN${cport}`;
+    }
+    if (src.includes("CAN2")) return "CAN2";
+    if (src.includes("CAN1")) return "CAN1";
+    if (transport === "can2") return "CAN2";
+    if (transport === "can1") return "CAN1";
+    return "—";
+  }
+
+  function rawNodeMatchesTransport(rawNode, transport) {
+    const source = String(rawNode?.source || "").trim();
+    const bus = Number(rawNode?.bus);
+    if (transport === "slcan") {
+      return source.startsWith("SLCAN");
+    }
+    if (transport === "can1") {
+      return source.startsWith("MAVLink") && (bus === 1 || source === "MAVLink CAN1");
+    }
+    if (transport === "can2") {
+      return source.startsWith("MAVLink") && (bus === 2 || source === "MAVLink CAN2");
+    }
+    return true;
+  }
+
+  async function resetBridgeMonitorForTransport(transport) {
+    if (!window._comBridgeOnline && !isSerialViaBridge()) return;
+    try {
+      const scope = transport === "slcan" ? "slcan" : "mavlink";
+      await bridgeJson("/slcan-monitor-reset", { scope }, { skipEnsure: true });
+    } catch (_) {
+      // Bridge may be offline during browser-only preview.
+    }
+  }
+
+  function getRuntimeForTransport(transport) {
+    if (transport === "can2") return mavlinkCan2Runtime;
+    if (transport === "can1") return mavlinkCan1Runtime;
+    return slcanRuntime;
+  }
+
+  function getActiveTransport() {
+    if (currentView === "inspector") {
+      return inspectorTransport || resolveInspectorTransport();
+    }
+    return currentTransport;
+  }
+
+  function getActiveRuntime() {
+    return getRuntimeForTransport(getActiveTransport());
+  }
+
+  function transportBusNumber(transport) {
+    return transport === "can2" ? 2 : 1;
+  }
+
+  function isTransportSessionReady(transport) {
+    if (transport === "can2") return mavlinkCan2SessionReady;
+    if (transport === "can1") return mavlinkCan1SessionReady;
+    return slcanSessionReady;
+  }
+
+  function anySessionReady() {
+    return slcanSessionReady || mavlinkCan1SessionReady || mavlinkCan2SessionReady;
+  }
 
   function getCachedFramesForCan(nodeId, canId) {
     const nid = Number(nodeId);
     const cid = String(canId || "");
     if (!Number.isFinite(nid) || !cid) return [];
-    const byCan = browserCanMonitor.nodeCanIdFrames.get(nid);
+    const store = getActiveRuntime();
+    const byCan = store.nodeCanIdFrames.get(nid);
     if (byCan && typeof byCan.get === "function") {
       const ring = byCan.get(cid);
       if (Array.isArray(ring) && ring.length) return ring;
     }
-    return (browserCanMonitor.nodeRecentFrames.get(nid) || []).filter((f) => f?.canId === cid);
+    return (store.nodeRecentFrames.get(nid) || []).filter((f) => f?.canId === cid);
   }
 
-  function recountNodeFrameCounts(nodeId) {
+  function recountNodeFrameCounts(nodeId, runtime) {
+    const store = runtime || getActiveRuntime();
     const nid = Number(nodeId);
     if (!Number.isFinite(nid) || nid <= 0) return {};
-    const recent = browserCanMonitor.nodeRecentFrames.get(nid) || [];
+    const recent = store.nodeRecentFrames.get(nid) || [];
     const counts = {};
     recent.forEach((frame) => {
       if (!frame?.canId) return;
       counts[frame.canId] = (counts[frame.canId] || 0) + 1;
     });
-    browserCanMonitor.nodeFrameCounts.set(nid, counts);
-    const node = browserCanMonitor.nodes.get(nid);
+    store.nodeFrameCounts.set(nid, counts);
+    const node = store.nodes.get(nid);
     if (node) {
       node.rxCount = recent.length;
-      browserCanMonitor.nodes.set(nid, node);
+      store.nodes.set(nid, node);
     }
     return counts;
   }
@@ -219,16 +363,102 @@
     return !!(window.port && window.port.bridge);
   }
 
-  function shouldPollBrowserCan() {
+  function shouldPollBrowserSlcan() {
     if (slcanBoundPort === "webserial" && typeof window.isSlcanWebSerialActive === "function" && window.isSlcanWebSerialActive()) {
       return true;
     }
     return false;
   }
 
-  function inferBrowserNodeMeta(nodeId) {
-    const frameIdCounts = browserCanMonitor.nodeFrameCounts.get(nodeId) || {};
-    const stub = { nodeId, frameIdCounts };
+  function isSlcanCanFeedActive() {
+    if (currentView === "inspector") {
+      return inspectorTransport === "slcan" || (inspectorTransport == null && isSlcanTransportAvailable());
+    }
+    return currentTransport === "slcan";
+  }
+
+  function isMavlinkCanFeedActive(bus) {
+    const busUi = (Number(bus) || 0) + 1;
+    const transport = busUi === 2 ? "can2" : "can1";
+    if (currentView === "inspector") {
+      const active = inspectorTransport || resolveInspectorTransport();
+      return active === transport;
+    }
+    return currentTransport === transport;
+  }
+
+  function isSlcanTransportAvailable() {
+    if (detectSlcanAdapterPort()) return true;
+    const eligible = typeof window.countSlcanEligibleWebPorts === "function"
+      ? window.countSlcanEligibleWebPorts()
+      : 0;
+    if (eligible >= 1) return true;
+    const sysPorts = systemComPorts();
+    if (sysPorts.some((p) => p?.probeRole === "slcan" || p?.isSlcanAdapter)) return true;
+    return false;
+  }
+
+  function resolveInspectorTransport() {
+    if (isSlcanTransportAvailable()) return "slcan";
+    if (isGcsSerialConnected()) return "can1";
+    return "none";
+  }
+
+  function inspectorTransportLabel(transport) {
+    if (transport === "slcan") return dcText("SLCAN Direct", "SLCAN 直连");
+    if (transport === "can2") return "MAVLink CAN2";
+    if (transport === "can1") return "MAVLink CAN1";
+    return dcText("Unavailable", "不可用");
+  }
+
+  function syncTransportTabs() {
+    const slcanOk = isSlcanTransportAvailable();
+    document.querySelectorAll('[data-dc-transport="slcan"]').forEach((btn) => {
+      btn.hidden = !slcanOk;
+      btn.disabled = !slcanOk;
+    });
+    const portCard = document.querySelector(".sc-dc-toolbar-card");
+    if (portCard) portCard.hidden = !slcanOk || currentTransport !== "slcan";
+    const fcCan = getFlightControllerCanIdentity();
+    document.querySelectorAll('[data-dc-transport="can2"]').forEach((btn) => {
+      const can2Ok = !!fcCan?.canDrivers?.[1];
+      btn.disabled = !can2Ok;
+      btn.title = can2Ok ? "" : dcText("CAN2 not configured on flight controller", "飞控未启用 CAN2");
+    });
+    if (!slcanOk && currentTransport === "slcan") {
+      setTransport(isGcsSerialConnected() ? "can1" : "can1", { skipSession: true });
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent = dcText(
+          "Only one serial port detected; SLCAN direct is unavailable. Using MAVLink CAN1.",
+          "当前仅 1 路串口，SLCAN 直连不可用；已切换到 MAVLink CAN1。"
+        );
+      }
+    }
+    updateTransportTabActiveState();
+  }
+
+  function updateTransportTabActiveState() {
+    document.querySelectorAll("[data-dc-transport]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.dcTransport === currentTransport && currentView === "nodes");
+    });
+    document.querySelectorAll("[data-dc-view]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.dcView === currentView);
+    });
+    const portCard = document.querySelector(".sc-dc-toolbar-card");
+    if (portCard) portCard.hidden = !isSlcanTransportAvailable() || currentTransport !== "slcan";
+  }
+
+  function inferBrowserNodeMeta(nodeId, nodeRef) {
+    const frameIdCounts = nodeRef?.frameIdCounts
+      || getActiveRuntime().nodeFrameCounts.get(nodeId)
+      || {};
+    const stub = {
+      nodeId,
+      frameIdCounts,
+      rawName: nodeRef?.rawName || nodeRef?.canonicalName || nodeRef?.name || "",
+      name: nodeRef?.name || "",
+      displayName: nodeRef?.displayName || "",
+    };
     const matched = dronecanRegistry()?.matchDevice?.(stub);
     if (matched) {
       return {
@@ -239,8 +469,13 @@
         profile: matched.profile,
       };
     }
-    if (nodeId === 1) {
-      return { name: "org.ardupilot", displayName: "Flight Controller", deviceHint: "Autopilot" };
+    const fc = getFlightControllerCanIdentity();
+    if (fc.nodeId === nodeId && fc.nodeId > 0) {
+      return {
+        name: "org.ardupilot",
+        displayName: dcText("Flight Controller (param)", "飞控（参数配置）"),
+        deviceHint: "Autopilot",
+      };
     }
     if (nodeId === 34 || nodeId === 51) {
       return { name: "org.cuav.can_pmu_lite", displayName: "CUAV CAN PMU Lite", deviceHint: "Power module" };
@@ -248,30 +483,38 @@
     return { name: `node-${nodeId}`, displayName: `Node ${nodeId}`, deviceHint: "Unknown" };
   }
 
-  function feedBrowserCanFrame(frameId, dlc, dataBytes, bus, source) {
+  function feedRuntimeCanFrame(runtime, frameId, dlc, dataBytes, bus, source) {
+    if (!runtime) return;
     const now = Date.now() / 1000;
-    browserCanMonitor.lastFrameAt = now;
-    browserCanMonitor.frameTimes.push(now);
+    runtime.lastFrameAt = now;
+    runtime.frameTimes.push(now);
     const cutoff = now - 1.0;
-    browserCanMonitor.frameTimes = browserCanMonitor.frameTimes.filter((t) => t >= cutoff);
+    runtime.frameTimes = runtime.frameTimes.filter((t) => t >= cutoff);
+    runtime.framesPerSecond = runtime.frameTimes.length;
 
     const nodeId = frameId & 0x7f;
     if (nodeId <= 0 || nodeId > 127) return;
 
     const data = dataBytes instanceof Uint8Array ? dataBytes : new Uint8Array(dataBytes || []);
     const hex = Array.from(data).map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
-    const meta = inferBrowserNodeMeta(nodeId);
-    const prev = browserCanMonitor.nodes.get(nodeId) || {
+    const meta = inferBrowserNodeMeta(nodeId, { source, bus: Number(bus) || 0 });
+    const prev = runtime.nodes.get(nodeId) || {
       nodeId,
       rxCount: 0,
       first_seen: now,
     };
+    const transportHint = runtime === mavlinkCan2Runtime ? "can2" : runtime === mavlinkCan1Runtime ? "can1" : "slcan";
+    const busUi = normalizeBusUi(bus, transportHint);
+    const nodeSource = source || (transportHint === "slcan"
+      ? `SLCAN Direct CAN${busUi}`
+      : `MAVLink CAN${busUi}`);
     const node = {
       ...prev,
       ...meta,
       name: meta.displayName || meta.name,
       status: "online",
-      source: source || `MAVLink CAN${(Number(bus) || 0) + 1}`,
+      source: nodeSource,
+      bus: busUi,
       rxCount: Number(prev.rxCount || 0) + 1,
       last_seen: now,
       lastCanId: `0x${(frameId >>> 0).toString(16).toUpperCase()}`,
@@ -279,23 +522,22 @@
       lastDataHex: hex,
       first_seen: prev.first_seen || now,
     };
-    browserCanMonitor.nodes.set(nodeId, node);
+    runtime.nodes.set(nodeId, node);
 
-    const recent = browserCanMonitor.nodeRecentFrames.get(nodeId) || [];
+    const recent = runtime.nodeRecentFrames.get(nodeId) || [];
     recent.push({
       ts: Math.round(now * 1000),
       canId: node.lastCanId,
       dlc: node.lastDlc,
       dataHex: hex,
-      bus: Number(bus) || 0,
+      bus: busUi,
     });
-    const trimmedRecent = recent.slice(-FRAME_RING_PER_NODE);
-    browserCanMonitor.nodeRecentFrames.set(nodeId, trimmedRecent);
+    runtime.nodeRecentFrames.set(nodeId, recent.slice(-FRAME_RING_PER_NODE));
 
-    let byCan = browserCanMonitor.nodeCanIdFrames.get(nodeId);
+    let byCan = runtime.nodeCanIdFrames.get(nodeId);
     if (!byCan) {
       byCan = new Map();
-      browserCanMonitor.nodeCanIdFrames.set(nodeId, byCan);
+      runtime.nodeCanIdFrames.set(nodeId, byCan);
     }
     const cid = node.lastCanId;
     const perCan = byCan.get(cid) || [];
@@ -304,25 +546,53 @@
       canId: cid,
       dlc: node.lastDlc,
       dataHex: hex,
-      bus: Number(bus) || 0,
+      bus: busUi,
     });
     byCan.set(cid, perCan.slice(-FRAME_RING_PER_CAN_ID));
-    recountNodeFrameCounts(nodeId);
+    recountNodeFrameCounts(nodeId, runtime);
   }
 
-  function cacheSnapshotFramesForNode(rawNode) {
+  function feedSlcanCanFrame(frameId, dlc, dataBytes, bus, source) {
+    if (!isSlcanCanFeedActive()) return;
+    const cport = Number(bus) >= 1 ? Number(bus) : getSlcanCport();
+    feedRuntimeCanFrame(
+      slcanRuntime,
+      frameId,
+      dlc,
+      dataBytes,
+      cport,
+      source || `SLCAN Direct CAN${cport}`,
+    );
+  }
+
+  function feedMavlinkCanFrameIfActive(frameId, dlc, dataBytes, bus, source) {
+    if (isSerialViaBridge() || window._comBridgeOnline) return;
+    if (!isMavlinkCanFeedActive(bus)) return;
+    const transportHint = Number(bus) === 1 ? "can2" : "can1";
+    const busUi = normalizeBusUi(bus, transportHint);
+    const runtime = busUi === 2 ? mavlinkCan2Runtime : mavlinkCan1Runtime;
+    feedRuntimeCanFrame(runtime, frameId, dlc, dataBytes, busUi, source || `MAVLink CAN${busUi}`);
+  }
+
+  window.feedMavlinkCanFrameIfActive = feedMavlinkCanFrameIfActive;
+  window.feedSlcanCanFrame = feedSlcanCanFrame;
+  window.isSlcanCanFeedActive = isSlcanCanFeedActive;
+  window.getDronecanSlcanCport = getSlcanCport;
+
+  function cacheSnapshotFramesForNode(rawNode, runtime) {
+    const store = runtime || getActiveRuntime();
     const nodeId = Number(rawNode?.nodeId || 0);
     const frames = Array.isArray(rawNode?.recentFrames) ? rawNode.recentFrames : [];
     if (!Number.isFinite(nodeId) || nodeId <= 0 || !frames.length) return;
 
-    const existingRecent = browserCanMonitor.nodeRecentFrames.get(nodeId) || [];
+    const existingRecent = store.nodeRecentFrames.get(nodeId) || [];
     const recentSeen = new Set(existingRecent.map((f) => `${Number(f.ts) || 0}|${f.canId}|${f.dataHex}|${Number(f.dlc) || 0}`));
     const mergedRecent = existingRecent.slice();
 
-    let byCan = browserCanMonitor.nodeCanIdFrames.get(nodeId);
+    let byCan = store.nodeCanIdFrames.get(nodeId);
     if (!byCan) {
       byCan = new Map();
-      browserCanMonitor.nodeCanIdFrames.set(nodeId, byCan);
+      store.nodeCanIdFrames.set(nodeId, byCan);
     }
     frames.forEach((frame) => {
       if (!frame?.canId || !frame?.dataHex) return;
@@ -355,16 +625,16 @@
     });
 
     mergedRecent.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
-    browserCanMonitor.nodeRecentFrames.set(nodeId, mergedRecent.slice(-FRAME_RING_PER_NODE));
-    recountNodeFrameCounts(nodeId);
+    store.nodeRecentFrames.set(nodeId, mergedRecent.slice(-FRAME_RING_PER_NODE));
+    recountNodeFrameCounts(nodeId, store);
   }
 
-  function getBrowserCanStatus() {
+  function runtimeToNodeStatus(runtime) {
     const now = Date.now() / 1000;
     const nodes = [];
-    browserCanMonitor.nodes.forEach((node, nodeId) => {
+    runtime.nodes.forEach((node, nodeId) => {
       if (now - (node.last_seen || 0) > 15) return;
-      const metaHint = inferBrowserNodeMeta(nodeId);
+      const metaHint = inferBrowserNodeMeta(nodeId, node);
       nodes.push({
         nodeId,
         name: metaHint.displayName || node.name,
@@ -372,25 +642,24 @@
         deviceHint: metaHint.deviceHint || node.deviceHint,
         status: "online",
         source: node.source,
+        bus: node.bus,
         rxCount: node.rxCount,
         lastCanId: node.lastCanId,
         lastDataHex: node.lastDataHex,
         lastDlc: node.lastDlc,
         firstSeenAt: Math.round((node.first_seen || now) * 1000),
         lastSeenAt: Math.round((node.last_seen || now) * 1000),
-        recentFrames: browserCanMonitor.nodeRecentFrames.get(nodeId) || [],
-        frameIdCounts: browserCanMonitor.nodeFrameCounts.get(nodeId) || {},
+        recentFrames: runtime.nodeRecentFrames.get(nodeId) || [],
+        frameIdCounts: runtime.nodeFrameCounts.get(nodeId) || {},
       });
     });
     nodes.sort((a, b) => a.nodeId - b.nodeId);
     return {
-      framesPerSecond: browserCanMonitor.frameTimes.length,
-      errorCount: browserCanMonitor.errorCount,
+      framesPerSecond: runtime.frameTimes.length,
+      errorCount: runtime.errorFrames,
       nodes,
     };
   }
-
-  window.feedMavlinkCanFrame = feedBrowserCanFrame;
 
   async function ensureDcBridgeOnce() {
     if (dcBridgeEnsured) return;
@@ -453,7 +722,7 @@
     const ports = systemComPorts();
     const hit = ports.find((p) => p && (p.isSlcanAdapter || /slcan/i.test(String(p.name || ""))));
     const found = hit?.deviceId || "";
-    if (!found && slcanBoundPort && slcanBoundPort !== "mavlink") {
+    if (!found && slcanBoundPort) {
       slcanPortLostAt = slcanPortLostAt || Date.now();
       return slcanBoundPort;
     }
@@ -463,10 +732,6 @@
 
   function isGcsSerialConnected() {
     return (window._gcsConnState || "").toLowerCase() === "connected" && !!(window.writer || window.port);
-  }
-
-  function preferMavlinkCanTransport() {
-    return !detectSlcanAdapterPort() && isGcsSerialConnected();
   }
 
   function wireSlcanPortPicker() {
@@ -549,14 +814,8 @@
       } catch (_) { /* ignore */ }
       slcanBoundPort = "";
       slcanInitDone = false;
-      currentMode = "slcan";
-      document.querySelectorAll(".sc-dc-mode-tab").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.dcMode === "slcan");
-      });
-      document.querySelectorAll(".sc-dc-panel").forEach((panel) => {
-        panel.classList.toggle("active", panel.dataset.dcPanel === "slcan");
-      });
-      await ensureSlcanDirectSession();
+      setTransport("slcan");
+      await ensureSlcanSession();
       await tick();
     }
 
@@ -598,7 +857,7 @@
         }
         slcanBoundPort = "";
         slcanInitDone = false;
-        ensureSlcanDirectSession().then(() => tick()).catch(() => tick());
+        ensureSlcanSession().then(() => tick()).catch(() => tick());
       } catch (_) { /* ignore */ }
     });
     fill().catch(() => {});
@@ -624,15 +883,160 @@
   }
 
   async function maybeRefreshCanForward(bus = 1) {
-    if (!isGcsSerialConnected() || slcanBoundPort !== "mavlink") return;
-    const now = Date.now();
-    if (now - lastCanForwardAt < 8000) return;
-    lastCanForwardAt = now;
-    if (typeof window.sendCommandLong === "function") {
+    // Legacy hook: 1s keepalive in startCanForwardKeepalive() owns CAN_FORWARD refresh.
+    if (canForwardKeepaliveTimer && activeMavlinkForwardBus === bus) return;
+    const transport = bus === 2 ? "can2" : "can1";
+    if (!isGcsSerialConnected() || !isTransportSessionReady(transport)) return;
+    if (currentView === "inspector" && inspectorTransport !== transport) return;
+    if (currentView !== "inspector" && currentTransport !== transport) return;
+    try {
+      await sendMavlinkCanForward(bus, false);
+      lastCanForwardAt = Date.now();
+    } catch (_) { /* ignore */ }
+  }
+
+  function getEgressTransport() {
+    if (currentView === "inspector") {
+      return inspectorTransport || resolveInspectorTransport();
+    }
+    return currentTransport;
+  }
+
+  function stopCanForwardKeepalive() {
+    if (canForwardKeepaliveTimer) {
+      clearInterval(canForwardKeepaliveTimer);
+      canForwardKeepaliveTimer = 0;
+    }
+  }
+
+  async function bridgePostWithLegacy(path, body, legacyPath) {
+    try {
+      return await bridgeJson(path, body);
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (!/\(404\)/.test(msg)) throw e;
+      if (legacyPath) {
+        return await bridgeJson(legacyPath, body);
+      }
+      throw e;
+    }
+  }
+
+  async function sendMavlinkCanForward(bus, disable = false) {
+    const busVal = disable ? 0 : Number(bus) || 1;
+    const viaBrowser = !isSerialViaBridge() && !window._comBridgeOnline;
+    if (viaBrowser && typeof window.sendCommandLong === "function") {
+      await window.sendCommandLong(MAV_CMD_CAN_FORWARD, busVal, 0, 0, 0, 0, 0, 0, 0);
+      return;
+    }
+    if (disable) {
+      await bridgePostWithLegacy("/mavlink-can-forward-disable", { bus: 0 }, "/slcan-forward-enable");
+      return;
+    }
+    await bridgePostWithLegacy("/mavlink-can-forward-enable", { bus: busVal }, "/slcan-forward-enable");
+  }
+
+  async function applyMavlinkCanFilter(bus) {
+    if (mavlinkFilterAppliedForBus === bus) return;
+    if (isSerialViaBridge() || window._comBridgeOnline) {
       try {
-        await window.sendCommandLong(183, bus, 0, 0, 0, 0, 0, 0, 0);
+        await bridgeJson("/mavlink-can-filter", { bus });
+        mavlinkFilterAppliedForBus = bus;
+      } catch (e) {
+        if (!/\(404\)/.test(String(e?.message || e))) throw e;
+        // Older bridge without filter API: keepalive CAN_FORWARD still works.
+      }
+    }
+  }
+
+  async function teardownMavlinkCanSession() {
+    stopCanForwardKeepalive();
+    if (activeMavlinkForwardBus > 0) {
+      try {
+        await sendMavlinkCanForward(activeMavlinkForwardBus, true);
       } catch (_) { /* ignore */ }
     }
+    activeMavlinkForwardBus = 0;
+    mavlinkFilterAppliedForBus = 0;
+    resetMavlinkSessionState();
+  }
+
+  function deactivateSlcanPoll() {
+    slcanSessionReady = false;
+    slcanPollActive = false;
+  }
+
+  function activateSlcanPoll() {
+    slcanPollActive = true;
+  }
+
+  async function teardownTransportLeaving(prev) {
+    if (prev === "can1" || prev === "can2") {
+      await teardownMavlinkCanSession();
+    } else if (prev === "slcan") {
+      deactivateSlcanPoll();
+    }
+  }
+
+  function startCanForwardKeepalive(bus) {
+    stopCanForwardKeepalive();
+    activeMavlinkForwardBus = bus;
+    const tickForward = () => {
+      if (Date.now() < canForwardFailureUntil) return;
+      sendMavlinkCanForward(bus, false)
+        .then(() => {
+          canForwardFailureUntil = 0;
+          lastCanForwardAt = Date.now();
+        })
+        .catch((e) => {
+          canForwardFailureUntil = Date.now() + 8000;
+          stopCanForwardKeepalive();
+          activeMavlinkForwardBus = 0;
+          if ($("sc-dc-hint")) {
+            $("sc-dc-hint").textContent = `MAVLink CAN 转发失败: ${e?.message || e}`;
+          }
+        });
+    };
+    tickForward();
+    canForwardKeepaliveTimer = window.setInterval(tickForward, 1000);
+  }
+
+  function updateMavlinkCanDiagnostics(transport, activeRuntime) {
+    if (!$("sc-dc-hint")) return;
+    if (transport !== "can1" && transport !== "can2") return;
+    if (currentView === "nodes" && currentTransport !== transport) return;
+    const fps = Number(activeRuntime?.framesPerSecond || 0);
+    const ack = window._lastCanForwardAck;
+    const ackAge = ack?.ts ? Date.now() - ack.ts : Infinity;
+    const busLabel = transport === "can2" ? "MAVLink CAN2" : "MAVLink CAN1";
+    if (ack && ackAge < 15000 && ack.result === 3) {
+      $("sc-dc-hint").textContent = dcText(
+        "Firmware does not support MAVLink CAN_FORWARD.",
+        "飞控固件不支持 MAVLink CAN_FORWARD。"
+      );
+      return;
+    }
+    if (fps > 0) {
+      $("sc-dc-hint").textContent = dcText(
+        `${busLabel} forwarding active (${fps} frames/s). COM12 SLCAN may stay open; this view uses COM11 MAVLink only.`,
+        `${busLabel} 转发正常（${fps} 帧/s）。COM12 SLCAN 可保持打开；本视图仅使用 COM11 MAVLink。`,
+      );
+      return;
+    }
+    if (ack && ackAge < 15000 && (ack.result === 0 || ack.result === 5)) {
+      $("sc-dc-hint").textContent = dcText(
+        `${busLabel} forward enabled but no CAN frames yet. Check CAN wiring, CAN_P1_DRIVER, and powered DroneCAN devices.`,
+        `${busLabel} 转发已启用但尚无 CAN 帧。请检查 CAN 接线、CAN_P1_DRIVER 与 DroneCAN 设备供电。`,
+      );
+      return;
+    }
+    if (!isTransportSessionReady(transport)) {
+      return;
+    }
+    $("sc-dc-hint").textContent = dcText(
+      `${busLabel}: waiting for CAN_FORWARD ACK or first CAN_FRAME on COM11.`,
+      `${busLabel}：等待 COM11 上 CAN_FORWARD 确认或首个 CAN_FRAME。`,
+    );
   }
 
   function num(v, fallback = 0) {
@@ -667,11 +1071,23 @@
       canDrivers: drivers,
       primaryDriver,
       nodeId: Math.round(num(getParam(`CAN_D${primaryDriver}_UC_NODE`), 0)),
+      can1NodeId: Math.round(num(getParam("CAN_D1_UC_NODE"), 0)),
+      can2NodeId: Math.round(num(getParam("CAN_D2_UC_NODE"), 0)),
     };
   }
 
+  function configuredFcNodeIdForTransport(transport) {
+    const fc = getFlightControllerCanIdentity();
+    if (transport === "can2") return fc.can2NodeId || 0;
+    if (transport === "can1") return fc.can1NodeId || fc.nodeId || 0;
+    const cport = getSlcanCport();
+    return cport === 2 ? (fc.can2NodeId || 0) : (fc.can1NodeId || fc.nodeId || 0);
+  }
+
   function softwareVersionForNode(node) {
-    return node.softwareVersion || dcText("live", "实时");
+    const version = node.softwareVersion;
+    if (version && version !== "live") return version;
+    return "—";
   }
 
   function hardwareVersionForNode(node) {
@@ -866,46 +1282,58 @@
     return null;
   }
 
-  function applySlcanNodeSnapshot(status) {
-    slcanRuntime.framesPerSecond = Number(status?.framesPerSecond || 0);
-    slcanRuntime.errorFrames = Number(status?.errorCount || 0);
+  function applyNodeSnapshot(runtime, status, sessionReadyFn) {
+    runtime.framesPerSecond = Number(status?.framesPerSecond || 0);
+    runtime.errorFrames = Number(status?.errorCount || 0);
     const now = Date.now();
     const incomingNodes = Array.isArray(status?.nodes) ? status.nodes : [];
     if (incomingNodes.length > 0) {
       lastLiveSnapshotAt = now;
     }
-    incomingNodes.forEach((rawNode) => cacheSnapshotFramesForNode(rawNode));
+    incomingNodes.forEach((rawNode) => cacheSnapshotFramesForNode(rawNode, runtime));
+    const transportFilter = runtimeTransportForStore(runtime);
     const nextNodes = new Map();
     for (const rawNode of incomingNodes) {
-      const registry = dronecanRegistry();
-      const matched = registry?.matchDevice?.(rawNode) || null;
+      if (!rawNodeMatchesTransport(rawNode, transportFilter)) continue;
+      const nodeInfo = nodeInfoState.cache.get(rawNode.nodeId);
+      const identity = resolveNodeIdentity(rawNode, nodeInfo);
+      const matched = identity.matched;
       const node = mkNode({
         ...rawNode,
         status: "online",
         stale: false,
-        name: matched?.displayName || rawNode.displayName || rawNode.name || `Node ${rawNode.nodeId}`,
-        rawName: rawNode.name || "",
-        displayName: matched?.displayName || rawNode.displayName || rawNode.name || `Node ${rawNode.nodeId}`,
+        name: identity.displayLabel,
+        rawName: identity.getNodeInfoRaw || rawNode.name || "",
+        displayName: identity.displayLabel,
         deviceHint: matched?.deviceHint || rawNode.deviceHint || "Unknown",
         asciiHint: rawNode.asciiHint || "",
         recentFrames: Array.isArray(rawNode.recentFrames) ? rawNode.recentFrames : [],
         frameIdCounts: rawNode.frameIdCounts || {},
-        source: rawNode.source || "MAVLink CAN_FRAME",
-        hardwareVersion: matched?.hardwareVersion || rawNode.hardwareVersion || "DroneCAN",
-        canonicalName: matched?.name || rawNode.name || "",
-        softwareVersion: rawNode.softwareVersion || "live",
+        source: rawNode.source || (transportFilter === "can2"
+          ? "MAVLink CAN2"
+          : transportFilter === "can1"
+            ? "MAVLink CAN1"
+            : `SLCAN Direct CAN${getSlcanCport()}`),
+        bus: normalizeBusUi(rawNode.bus, transportFilter),
+        hardwareVersion: nodeInfo?.hardwareVersion || matched?.hardwareVersion || rawNode.hardwareVersion || "DroneCAN",
+        canonicalName: identity.canonicalName || matched?.name || rawNode.name || "",
+        softwareVersion: nodeInfo?.softwareVersion || rawNode.softwareVersion || "—",
         uptimeSec: extractNodeStatusUptime(rawNode),
         dsdlData: buildNodeDsdlEntries({
           lastCanId: rawNode.lastCanId,
           lastDataHex: rawNode.lastDataHex,
           lastDlc: rawNode.lastDlc,
           dsdlData: {
-            "transport.source": rawNode.source || "MAVLink CAN_FRAME",
+            "transport.source": rawNode.source || "",
+            "transport.bus": String(rawNode.bus ?? ""),
             "device.raw_name": rawNode.name || "",
             "device.canonical_name": matched?.name || rawNode.name || "",
             "device.profile": matched?.profile || "unknown",
-            "device.display_name": matched?.displayName || rawNode.displayName || rawNode.name || `Node ${rawNode.nodeId}`,
+            "device.display_name": identity.displayLabel,
             "device.ascii_hint": rawNode.asciiHint || "",
+            "device.getnodeinfo.name": identity.getNodeInfoRaw || "",
+            "device.software_version": nodeInfo?.softwareVersion || rawNode.softwareVersion || "—",
+            "device.hardware_version": nodeInfo?.hardwareVersion || rawNode.hardwareVersion || "—",
             "frame.can_id": rawNode.lastCanId || "--",
             "frame.dlc": String(rawNode.lastDlc ?? 0),
             "frame.data": rawNode.lastDataHex || "--",
@@ -916,37 +1344,70 @@
       });
       nextNodes.set(node.nodeId, node);
     }
+    const sessionReady = typeof sessionReadyFn === "function" ? sessionReadyFn() : false;
     const shouldKeepCachedNodes =
       incomingNodes.length === 0
-      && slcanRuntime.nodes.size > 0
-      && (slcanSessionReady || (now - lastLiveSnapshotAt) <= nodeRetentionMs);
+      && runtime.nodes.size > 0
+      && (sessionReady || (now - lastLiveSnapshotAt) <= nodeRetentionMs);
     if (shouldKeepCachedNodes) {
-      slcanRuntime.nodes.forEach((cachedNode, nodeId) => {
+      runtime.nodes.forEach((cachedNode, nodeId) => {
+        if (!rawNodeMatchesTransport(cachedNode, transportFilter)) return;
         nextNodes.set(nodeId, mkNode({
           ...cachedNode,
           stale: true,
           status: "stale",
+          source: cachedNode.source || (transportFilter === "can2"
+            ? "MAVLink CAN2"
+            : transportFilter === "can1"
+              ? "MAVLink CAN1"
+              : `SLCAN Direct CAN${getSlcanCport()}`),
+          bus: normalizeBusUi(cachedNode.bus, transportFilter),
           uptimeSec: cachedNode.uptimeSec,
           dsdlData: buildNodeDsdlEntries(cachedNode),
         }));
       });
     }
-    slcanRuntime.nodes = nextNodes;
+    runtime.nodes = nextNodes;
   }
 
-  async function pollSlcanTraffic() {
+  async function pollTransportTraffic() {
     if (isInspectorDemoMode()) return;
-    if (!slcanSessionReady && !isSlcanAutotestMode()) return;
-    if (shouldPollBrowserCan()) {
-      applySlcanNodeSnapshot(getBrowserCanStatus());
+    const transport = getActiveTransport();
+    if (transport === "none") return;
+
+    if (transport === "slcan") {
+      if (!slcanPollActive || (!slcanSessionReady && !isSlcanAutotestMode())) return;
+      if (shouldPollBrowserSlcan()) {
+        applyNodeSnapshot(slcanRuntime, runtimeToNodeStatus(slcanRuntime), () => slcanSessionReady);
+        return;
+      }
+      await ensureHealthySlcanBridge();
+      try {
+        const status = await bridgeJson("/slcan-nodes", null, { skipEnsure: true });
+        applyNodeSnapshot(slcanRuntime, status, () => slcanSessionReady);
+      } catch (e) {
+        if (shouldPollBrowserSlcan()) {
+          applyNodeSnapshot(slcanRuntime, runtimeToNodeStatus(slcanRuntime), () => slcanSessionReady);
+          return;
+        }
+        throw e;
+      }
+      return;
+    }
+
+    const bus = transportBusNumber(transport);
+    const runtime = getRuntimeForTransport(transport);
+    if (!isTransportSessionReady(transport)) return;
+    if (!isSerialViaBridge() && isGcsSerialConnected()) {
+      applyNodeSnapshot(runtime, runtimeToNodeStatus(runtime), () => isTransportSessionReady(transport));
       return;
     }
     try {
-      const status = await bridgeJson("/slcan-nodes", null, { skipEnsure: true });
-      applySlcanNodeSnapshot(status);
+      const status = await bridgeJson(`/mavlink-can-nodes?bus=${bus}`, null, { skipEnsure: true });
+      applyNodeSnapshot(runtime, status, () => isTransportSessionReady(transport));
     } catch (e) {
-      if (shouldPollBrowserCan()) {
-        applySlcanNodeSnapshot(getBrowserCanStatus());
+      if (!isSerialViaBridge() && isGcsSerialConnected()) {
+        applyNodeSnapshot(runtime, runtimeToNodeStatus(runtime), () => isTransportSessionReady(transport));
         return;
       }
       throw e;
@@ -1000,14 +1461,17 @@
 
   function buildLiveNodes() {
     if (isInspectorDemoMode()) return demoInspectorNodes();
-    return Array.from(slcanRuntime.nodes.values())
+    return Array.from(getActiveRuntime().nodes.values())
       .filter((node) => node.status === "online" || node.status === "stale")
       .sort((a, b) => a.nodeId - b.nodeId);
   }
 
   function ensureWorkbenchMarkup() {
     const panel = panelRoot();
-    if (!panel || panel.querySelector(".sc-dc-workbench")) return;
+    if (!panel) return;
+    const existing = panel.querySelector(".sc-dc-workbench");
+    if (existing && existing.querySelector('[data-dc-transport="can1"]')) return;
+    if (existing) existing.remove();
     const page = panel.querySelector(".sc-page");
     if (!page) return;
     const oldSplit = page.querySelector(".sc-split");
@@ -1020,10 +1484,12 @@
         <div class="sc-dc-toolbar-block">
           <div class="sc-dc-toolbar-eyebrow">${dcText("Transport mode", "传输模式")}</div>
           <div class="sc-dc-mode-tabs" role="tablist" aria-label="${dcText("DroneCAN modes", "DroneCAN 模式")}">
-            <button type="button" class="sc-dc-mode-tab active" data-dc-mode="slcan">SLCAN 直连</button>
-            <button type="button" class="sc-dc-mode-tab" data-dc-mode="filter">${dcText("Filter", "筛选")}</button>
-            <button type="button" class="sc-dc-mode-tab" data-dc-mode="inspector">解析器</button>
-            <button type="button" class="sc-dc-mode-tab" data-dc-mode="stats">统计</button>
+            <button type="button" class="sc-dc-mode-tab sc-dc-transport-tab active" data-dc-transport="slcan">SLCAN 直连</button>
+            <button type="button" class="sc-dc-mode-tab sc-dc-transport-tab" data-dc-transport="can1">MAVLink CAN1</button>
+            <button type="button" class="sc-dc-mode-tab sc-dc-transport-tab" data-dc-transport="can2">MAVLink CAN2</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-view="filter">${dcText("Filter", "筛选")}</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-view="inspector">解析器</button>
+            <button type="button" class="sc-dc-mode-tab" data-dc-view="stats">统计</button>
           </div>
         </div>
         <div class="sc-dc-toolbar-card">
@@ -1057,7 +1523,7 @@
         </div>
       </div>
 
-      <div class="sc-dc-panel active" data-dc-panel="slcan">
+      <div class="sc-dc-panel active" data-dc-panel="nodes">
         <div class="sc-dc-grid sc-dc-grid--single">
           <div class="sc-dc-main">
             <div class="sc-card-head">
@@ -1073,6 +1539,7 @@
                     <th></th>
                     <th>编号</th>
                     <th>名称</th>
+                    <th>${dcText("Bus", "总线")}</th>
                     <th>模式</th>
                     <th>健康</th>
                     <th>运行时常</th>
@@ -1193,6 +1660,8 @@
         border-color:#d9ef8f !important;
         box-shadow:0 12px 28px rgba(142, 180, 56, 0.26);
       }
+      .sc-dc-mode-tabs .sc-dc-transport-tab { border-style:dashed; }
+      .sc-dc-mode-tabs .sc-dc-transport-tab.active { border-style:solid; }
       .sc-dc-mode-tabs .sc-dc-mode-tab.active::after {
         content:"";
         position:absolute;
@@ -1375,32 +1844,36 @@
       selectedCanId = canNodes[0]?.nodeId ?? 0;
     }
     const fcCan = getFlightControllerCanIdentity();
-    const observedStats = currentMode === "inspector" ? computeObservedFrameStats(canNodes) : null;
-    const fps = observedStats ? observedStats.fps : slcanRuntime.framesPerSecond;
+    const activeRuntime = getActiveRuntime();
+    const observedStats = currentView === "inspector" ? computeObservedFrameStats(canNodes) : null;
+    const fps = observedStats ? observedStats.fps : activeRuntime.framesPerSecond;
     const loadPct = observedStats ? observedStats.loadPct : Math.min(100, Math.round((fps / 1000) * 100));
     setLiveText("sc-dc-load", `${loadPct}%`);
     setLiveText("sc-dc-fps", String(fps));
-    setLiveText("sc-dc-err", String(slcanRuntime.errorFrames));
+    setLiveText("sc-dc-err", String(activeRuntime.errorFrames));
     setLiveText("sc-dc-stat-nodes", String(canNodes.length));
-    setLiveText("sc-dc-stat-buses", String(slcanSessionReady ? 1 : 0));
+    setLiveText("sc-dc-stat-buses", String(anySessionReady() ? 1 : 0));
     setLiveText("sc-dc-stat-slcan", detectSlcanAdapterPort() || "-");
     setLiveText("sc-dc-stat-fcnode", String(fcCan.nodeId));
+    updateMavlinkCanDiagnostics(getActiveTransport(), activeRuntime);
     const transportBadge = $("sc-dc-transport-badge");
     if (transportBadge) {
-      transportBadge.classList.toggle("sc-dc-live", !!slcanSessionReady);
-      setLiveText(
-        "sc-dc-transport-badge",
-        slcanSessionReady
-          ? `SLCAN 直连${detectSlcanAdapterPort() ? ` · ${detectSlcanAdapterPort()}` : ""}`
-          : "SLCAN 直连",
-      );
+      const activeTransport = getActiveTransport();
+      const liveReady = isTransportSessionReady(activeTransport);
+      transportBadge.classList.toggle("sc-dc-live", liveReady);
+      let badgeText = inspectorTransportLabel(activeTransport);
+      if (activeTransport === "slcan" && detectSlcanAdapterPort()) {
+        badgeText = `${badgeText} · ${detectSlcanAdapterPort()}`;
+      }
+      setLiveText("sc-dc-transport-badge", badgeText);
     }
-    if (currentMode === "slcan" && slcanSessionReady && $("sc-dc-hint")) {
+    if (currentTransport === "slcan" && currentView === "nodes" && slcanSessionReady && $("sc-dc-hint")) {
       const adapterPort = detectSlcanAdapterPort();
+      const cportHint = slcanCportHintText();
       if (slcanBoundPort === "webserial") {
-        $("sc-dc-hint").textContent = "SLCAN 直连（Chrome 第二路 Web Serial，无需 GCS.cmd）。顶部保持 MAVLink 连接；本页显示 SLCAN 监听到的节点。";
+        $("sc-dc-hint").textContent = `SLCAN 直连（Chrome 第二路 Web Serial，无需 GCS.cmd）。${cportHint}`;
       } else if (adapterPort) {
-        $("sc-dc-hint").textContent = `SLCAN 直连（COM 桥 ${adapterPort}）。顶部 MAVLink 与 DroneCAN 各走一路 USB，由 GCS.cmd 提供 8765 桥接。`;
+        $("sc-dc-hint").textContent = `SLCAN 直连（COM 桥 ${adapterPort}）。${cportHint}`;
       }
     }
   }
@@ -1412,7 +1885,7 @@
     canNodes.forEach((node) => {
       const tr = document.createElement("tr");
       tr.className = `sc-dc-row${node.nodeId === selectedCanId ? " active" : ""}`;
-      tr.innerHTML = `<td class="sc-dc-row-marker">${node.nodeId === selectedCanId ? "◉" : "○"}</td><td>${node.nodeId}</td><td>${node.name}</td><td>${nodeMode(node)}</td><td>${nodeHealth(node)}</td><td>${nodeUptime(node)}</td><td>${hardwareVersionForNode(node)}</td><td>${softwareVersionForNode(node)}</td><td>${nodeCrc(node)}</td><td><button type="button" class="sc-btn sc-btn-ghost sc-btn-sm" data-dc-menu-node="${node.nodeId}" onclick="event.stopPropagation(); window.openDronecanNodeMenu?.(${node.nodeId}, this);">设置菜单</button></td>`;
+      tr.innerHTML = `<td class="sc-dc-row-marker">${node.nodeId === selectedCanId ? "◉" : "○"}</td><td>${node.nodeId}</td><td>${node.name}</td><td>${nodeBusLabel(node)}</td><td>${nodeMode(node)}</td><td>${nodeHealth(node)}</td><td>${nodeUptime(node)}</td><td>${hardwareVersionForNode(node)}</td><td>${softwareVersionForNode(node)}</td><td>${nodeCrc(node)}</td><td><button type="button" class="sc-btn sc-btn-ghost sc-btn-sm" data-dc-menu-node="${node.nodeId}" onclick="event.stopPropagation(); window.openDronecanNodeMenu?.(${node.nodeId}, this);">设置菜单</button></td>`;
       tr.addEventListener("click", () => selectCanNode(node.nodeId));
       tbody.appendChild(tr);
     });
@@ -1479,15 +1952,15 @@
 
   function nodePreferredTransportMode(node) {
     const source = String(node?.source || "").trim();
-    if (source === "MAVLink CAN2") return "can2";
-    if (source === "MAVLink CAN1" || source === "MAVLink CAN_FRAME") return "can1";
-    if (source === "SLCAN Direct") return "slcan";
+    if (source.startsWith("SLCAN")) return "slcan";
+    if (source === "MAVLink CAN2" || source.startsWith("MAVLink CAN2")) return "can2";
+    if (source === "MAVLink CAN1" || source.startsWith("MAVLink CAN1")) return "can1";
     return "";
   }
 
   function nodeParameterAccessHint(node) {
     const preferredMode = nodePreferredTransportMode(node);
-    if (!preferredMode || preferredMode === currentMode) return "";
+    if (!preferredMode || preferredMode === currentTransport) return "";
     if (preferredMode === "can2") {
       return dcText(
         "This node is currently visible via MAVLink CAN2 metadata. Switch to the MAVLink CAN2 tab before opening Parameters.",
@@ -1751,7 +2224,7 @@
   function unpackTailStringBits(stream, cursor, maxLen, tao = true) {
     if (tao) {
       const remainingBits = String(stream || "").slice(cursor);
-      const byteLen = Math.floor(remainingBits.length / 8);
+      const byteLen = Math.min(maxLen, Math.floor(remainingBits.length / 8));
       const bytes = bytesFromBits(remainingBits.slice(0, byteLen * 8)).slice(0, byteLen);
       return { value: new TextDecoder().decode(bytes), cursor: cursor + byteLen * 8 };
     }
@@ -1853,6 +2326,158 @@
     return { ok, argument: argument.value };
   }
 
+  function sanitizeDronecanNodeName(text) {
+    const raw = String(text || "").replace(/\0/g, "").trim();
+    if (!raw) return "";
+    const domainMatch = raw.match(/org\.[a-z0-9._-]+/i);
+    if (domainMatch) return domainMatch[0].toLowerCase();
+    if (/^[a-z0-9._-]+$/.test(raw)) return raw;
+    const cleaned = raw.toLowerCase().replace(/[^a-z0-9._-]/g, "");
+    const fromCleaned = cleaned.match(/org\.[a-z0-9._-]+/);
+    if (fromCleaned) return fromCleaned[0];
+    return cleaned.length >= 3 ? cleaned : "";
+  }
+
+  function resolveNodeIdentity(rawNode, nodeInfo) {
+    const getNodeInfoRaw = String(nodeInfo?.name || "").trim();
+    const canonicalName = sanitizeDronecanNodeName(getNodeInfoRaw)
+      || sanitizeDronecanNodeName(rawNode?.name)
+      || "";
+    const registry = dronecanRegistry();
+    const matched = registry?.matchDevice?.({
+      ...rawNode,
+      name: canonicalName || getNodeInfoRaw || rawNode?.name || "",
+      rawName: getNodeInfoRaw || rawNode?.name || "",
+      canonicalName,
+    }) || null;
+    const displayLabel = matched?.displayName
+      || rawNode?.displayName
+      || canonicalName
+      || rawNode?.name
+      || `Node ${rawNode?.nodeId ?? 0}`;
+    return {
+      matched,
+      canonicalName,
+      getNodeInfoRaw,
+      displayLabel,
+    };
+  }
+
+  function decodeGetNodeInfoResponse(bytes) {
+    const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    const stream = bitsFromBytes(arr);
+    let cursor = 0;
+    const uptime = unpackUnsignedBits(stream, cursor, 32);
+    cursor = uptime.cursor;
+    cursor = unpackUnsignedBits(stream, cursor, 2).cursor;
+    cursor = unpackUnsignedBits(stream, cursor, 3).cursor;
+    cursor = unpackUnsignedBits(stream, cursor, 3).cursor;
+    cursor = unpackUnsignedBits(stream, cursor, 16).cursor;
+
+    const swMajor = unpackUnsignedBits(stream, cursor, 8);
+    cursor = swMajor.cursor;
+    const swMinor = unpackUnsignedBits(stream, cursor, 8);
+    cursor = swMinor.cursor;
+    const optFlags = unpackUnsignedBits(stream, cursor, 8);
+    cursor = optFlags.cursor;
+    if (optFlags.value & 1) cursor = unpackUnsignedBits(stream, cursor, 32).cursor;
+    if (optFlags.value & 2) cursor = unpackUnsignedBits(stream, cursor, 64).cursor;
+
+    const hwMajor = unpackUnsignedBits(stream, cursor, 8);
+    cursor = hwMajor.cursor;
+    const hwMinor = unpackUnsignedBits(stream, cursor, 8);
+    cursor = hwMinor.cursor;
+    cursor += 128; // unique_id is uint8[16]
+    const certLen = unpackUnsignedBits(stream, cursor, 8);
+    cursor = certLen.cursor + certLen.value * 8;
+
+    // name is the last field — tail array optimization (no length prefix)
+    const nameDecoded = unpackTailStringBits(stream, cursor, 80, true);
+    const swText = swMajor.value || swMinor.value ? `${swMajor.value}.${swMinor.value}` : "—";
+    const hwText = hwMajor.value || hwMinor.value ? `${hwMajor.value}.${hwMinor.value}` : "—";
+    return {
+      name: sanitizeDronecanNodeName(nameDecoded.value),
+      softwareVersion: swText,
+      hardwareVersion: hwText,
+      uptimeSec: uptime.value,
+    };
+  }
+
+  function applyNodeInfoToRuntime(runtime, nodeId, info) {
+    const node = runtime.nodes.get(nodeId);
+    if (!node || !info?.name) return;
+    const canonicalName = sanitizeDronecanNodeName(info.name) || info.name;
+    const identity = resolveNodeIdentity(node, { name: info.name });
+    const matched = identity.matched;
+    const enriched = {
+      ...node,
+      name: identity.displayLabel,
+      rawName: info.name,
+      canonicalName,
+      softwareVersion: info.softwareVersion || node.softwareVersion,
+      hardwareVersion: info.hardwareVersion || node.hardwareVersion,
+    };
+    runtime.nodes.set(nodeId, mkNode({
+      ...enriched,
+      displayName: identity.displayLabel,
+      deviceHint: matched?.deviceHint || node.deviceHint,
+      dsdlData: {
+        ...(node.dsdlData || {}),
+        "device.getnodeinfo.name": info.name,
+        "device.software_version": info.softwareVersion || "—",
+        "device.hardware_version": info.hardwareVersion || "—",
+      },
+    }));
+  }
+
+  async function dronecanGetNodeInfo(nodeId) {
+    await ensureHealthyTransport();
+    const tx = await sendDronecanServiceRequest(
+      nodeId,
+      DRONECAN_GET_NODE_INFO_SERVICE_ID,
+      new Uint8Array(0),
+      DRONECAN_GET_NODE_INFO_SIGNATURE,
+    );
+    const payload = await waitForServiceResponse(
+      tx.responderNodeId,
+      tx.responseCanId,
+      tx.transferId,
+      tx.requestStartedAt,
+      2200,
+    );
+    return decodeGetNodeInfoResponse(payload);
+  }
+
+  async function maybeQueryNodeInfo(runtime) {
+    const now = Date.now();
+    if (now - nodeInfoState.lastSweepAt < 2500) return;
+    nodeInfoState.lastSweepAt = now;
+    const transport = runtimeTransportForStore(runtime);
+    if (!isTransportSessionReady(transport)) return;
+    if (nodeInfoState.inflight.size > 0) return;
+
+    for (const node of runtime.nodes.values()) {
+      if (node.status !== "online" && !node.stale) continue;
+      const nid = Number(node.nodeId || 0);
+      if (!nid || nid === GCS_NODE_ID || nid === 127) continue;
+      const cached = nodeInfoState.cache.get(nid);
+      if (cached?.name && now - (cached.fetchedAt || 0) < 60000) continue;
+      nodeInfoState.inflight.add(nid);
+      try {
+        const info = await dronecanGetNodeInfo(nid);
+        if (info?.name) {
+          nodeInfoState.cache.set(nid, { ...info, fetchedAt: Date.now() });
+          applyNodeInfoToRuntime(runtime, nid, info);
+        }
+      } catch (_) {
+        // Retry on next sweep.
+      } finally {
+        nodeInfoState.inflight.delete(nid);
+      }
+      return;
+    }
+  }
+
   function dronecanBaseCrc(signature) {
     const sig = BigInt(signature);
     let crc = 0xffff;
@@ -1896,45 +2521,36 @@
   async function sendSlcanAsciiLine(line) {
     const text = String(line || "");
     if (!text) return false;
+    if (currentTransport !== "slcan") {
+      throw new Error(dcText(
+        "Parameter egress blocked: switch to SLCAN Direct transport.",
+        "参数下发被阻止：请切换到「SLCAN 直连」传输标签。"
+      ));
+    }
     if (slcanBoundPort === "webserial" && typeof window.sendSlcanWebSerialLine === "function") {
       return window.sendSlcanWebSerialLine(text.endsWith("\r") ? text : `${text}\r`);
     }
+    const payload = btoa(text.endsWith("\r") ? text : `${text}\r`);
+    await bridgeJson("/slcan-write", { data: payload });
+    return true;
+  }
 
-    const wantsMavlinkForward = currentMode === "can1" || currentMode === "can2";
-
-    // DroneCAN 面板当前处于 SLCAN 直连模式时，优先把 ASCII 帧写到 SLCAN 通道。
-    // 这样即便 slcanBoundPort 遗留成 "mavlink"，也不会把参数请求误发到 MAVLink 转发分支。
-    if (!wantsMavlinkForward) {
-      const payload = btoa(text.endsWith("\r") ? text : `${text}\r`);
-      await bridgeJson("/slcan-write", { data: payload });
+  async function sendMavlinkCanEgressFrame(frameId, dataBytes, busUi) {
+    const data = dataBytes instanceof Uint8Array ? dataBytes : new Uint8Array(dataBytes || []);
+    if (isSerialViaBridge() || window._comBridgeOnline) {
+      await bridgeJson("/mavlink-can-write", {
+        bus: busUi,
+        id: frameId >>> 0,
+        len: data.length,
+        data: btoa(String.fromCharCode(...data)),
+      });
       return true;
     }
-
-    // MAVLink CAN转发模式下,不应通过普通 SLCAN 口发送
-    if (slcanBoundPort === "mavlink" || wantsMavlinkForward) {
-      // 检查COM桥是否在线
-      if (!window._comBridgeOnline) {
-        throw new Error(dcText(
-          "COM bridge offline. MAVLink CAN forwarding requires GCS.cmd bridge service. Please start GCS.cmd or switch to Web Serial mode.",
-          "COM桥未连接。MAVLink CAN转发需要GCS.cmd桥接服务。请启动GCS.cmd或切换到Web Serial模式。"
-        ));
-      }
-      // 如果COM桥在线,尝试通过它发送(可能需要重新配置端口)
-      try {
-        const payload = btoa(text.endsWith("\r") ? text : `${text}\r`);
-        await bridgeJson("/slcan-write", { data: payload });
-        return true;
-      } catch (err) {
-        const errMsg = String(err?.message || err || "");
-        if (/PermissionError|WriteFile failed|设备不识别|Access denied|EACCES/i.test(errMsg)) {
-          throw new Error(dcText(
-            "MAVLink CAN forwarding failed: COM port access denied. The bridge may be trying to write to a blocked serial port. Try restarting GCS.cmd as administrator, or use Web Serial direct connection.",
-            "MAVLink CAN转发失败: COM端口访问被拒绝。桥接服务可能正在尝试写入被阻止的串口。请以管理员身份重启GCS.cmd,或使用Web Serial直连。"
-          ));
-        }
-        throw err;
-      }
+    if (typeof window.sendMavlinkCanFrame === "function") {
+      await window.sendMavlinkCanFrame(frameId, data, busUi);
+      return true;
     }
+    throw new Error(dcText("MAVLink CAN send unavailable.", "MAVLink CAN 发送不可用。"));
   }
 
   async function sendDronecanServiceRequest(nodeId, serviceId, payloadBytes, signature) {
@@ -1965,10 +2581,17 @@
       frames.push(frame);
       if (!payload.length) break;
     }
+    const egressTransport = getEgressTransport();
+    await ensureHealthyTransport();
+    const busUi = transportBusNumber(egressTransport);
     for (const frame of frames) {
-      const dataHex = Array.from(frame).map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
-      const line = `T${canId.toString(16).toUpperCase().padStart(8, "0")}${frame.length.toString(16).toUpperCase()}${dataHex}`;
-      await sendSlcanAsciiLine(line);
+      if (egressTransport === "can1" || egressTransport === "can2") {
+        await sendMavlinkCanEgressFrame(canId, frame, busUi);
+      } else {
+        const dataHex = Array.from(frame).map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
+        const line = `T${canId.toString(16).toUpperCase().padStart(8, "0")}${frame.length.toString(16).toUpperCase()}${dataHex}`;
+        await sendSlcanAsciiLine(line);
+      }
       await new Promise((r) => setTimeout(r, 14));
     }
     return {
@@ -1981,32 +2604,58 @@
   }
 
   async function refreshServiceResponseCache() {
-    if (shouldPollBrowserCan()) {
-      applySlcanNodeSnapshot(getBrowserCanStatus());
-      return;
-    }
     try {
-      const status = await bridgeJson("/slcan-nodes", null, { skipEnsure: true });
-      applySlcanNodeSnapshot(status);
+      await pollTransportTraffic();
     } catch (_) {
       // Keep waiting logic resilient if a single cache refresh fails.
     }
   }
 
-  async function ensureHealthySlcanBridge() {
-    if (slcanBoundPort === "webserial" || shouldPollBrowserCan()) return;
-    if (!slcanBoundPort || slcanBoundPort === "mavlink") return;
+  async function ensureHealthyTransport() {
+    const t = getEgressTransport();
+    if (t === "slcan") {
+      await ensureHealthySlcanBridge();
+      return;
+    }
+    if (t === "can1" || t === "can2") {
+      const bus = t === "can2" ? 2 : 1;
+      if (!isTransportSessionReady(t)) {
+        await ensureMavlinkCanSession(bus);
+      }
+    }
+  }
+
+  function isSlcanBridgeUnhealthy(status) {
+    if (!status?.open) return false;
+    const errText = String(status.error || "");
+    if (!status.readerAlive) return true;
+    if (/PermissionError|ClearCommError failed|设备不识别/i.test(errText)) return true;
+    const rxAge = Number(status.lastRxAgeSec);
+    return Number.isFinite(rxAge) && rxAge > 45;
+  }
+
+  async function ensureHealthySlcanBridge(force = false) {
+    if (slcanBoundPort === "webserial" || shouldPollBrowserSlcan()) return false;
+    const port = slcanBoundPort || detectSlcanAdapterPort();
+    if (!port || port.startsWith("auth:")) return false;
+    if (!force && slcanBridgeRecoverAt && Date.now() < slcanBridgeRecoverAt) return false;
     try {
       const status = await bridgeJson("/slcan-status", null, { skipEnsure: true });
-      const errText = String(status?.error || "");
-      const unhealthy = status?.open && (!status?.readerAlive || /PermissionError|ClearCommError failed/i.test(errText));
-      if (!unhealthy) return;
+      if (!isSlcanBridgeUnhealthy(status)) return false;
+      slcanBridgeRecoverAt = Date.now() + 8000;
       await bridgeJson("/slcan-close", null, { skipEnsure: true });
-      await bridgeJson("/slcan-open", { port: slcanBoundPort, baudrate: 115200, bitrate_kbps: 1000 });
+      await bridgeJson("/slcan-open", slcanOpenPayload(port));
+      slcanBoundPort = port;
       slcanInitDone = true;
+      slcanInitRetryAt = 0;
       slcanSessionReady = true;
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent = `SLCAN 串口已自动恢复（${port}）。${slcanCportHintText()}`;
+      }
+      return true;
     } catch (_) {
-      // Let the real request surface the error if recovery fails.
+      slcanBridgeRecoverAt = Date.now() + 8000;
+      return false;
     }
   }
 
@@ -2034,7 +2683,7 @@
   }
 
   async function dronecanGetSet(nodeId, index, valueUnion = null, name = "") {
-    await ensureHealthySlcanBridge();
+    await ensureHealthyTransport();
     const req = buildGetSetRequest(index, valueUnion, name);
     const tx = await sendDronecanServiceRequest(nodeId, DRONECAN_GETSET_SERVICE_ID, req, DRONECAN_GETSET_SIGNATURE);
     const payload = await waitForServiceResponse(tx.responderNodeId, tx.responseCanId, tx.transferId, tx.requestStartedAt, valueUnion ? 2600 : 2600);
@@ -2734,9 +3383,14 @@
     const summary = $("sc-dc-inspector-summary");
     const tree = $("sc-dc-inspector-tree");
     if (summary) {
+      const observeTransport = getActiveTransport();
+      const sourceLabel = inspectorTransportLabel(observeTransport);
+      const autoNote = observeTransport !== "slcan" && !isSlcanTransportAvailable()
+        ? dcText(" (no SLCAN, auto-switched)", "（无 SLCAN，已自动切换）")
+        : "";
       summary.textContent = node
-        ? `${dcText("Node", "节点")} ${node.nodeId} · ${node.name} · ${nodeHealth(node)} · ${(node.source || dcText("Direct", "直连"))}`
-        : dcText("No directly observed online nodes.", "暂无直接观测到的在线节点。");
+        ? `${dcText("Data source", "数据源")}: ${sourceLabel}${autoNote} · ${dcText("Node", "节点")} ${node.nodeId} · ${node.name} · ${nodeHealth(node)} · ${(node.source || dcText("Direct", "直连"))}`
+        : `${dcText("Data source", "数据源")}: ${sourceLabel}${autoNote} · ${dcText("No directly observed online nodes.", "暂无直接观测到的在线节点。")}`;
     }
     if (tree) tree.innerHTML = "";
     if (!node) {
@@ -2821,7 +3475,22 @@
   }
 
   function renderBand(node) {
-    if (!node) return;
+    const clearBand = (id, text = "-") => {
+      if ($(id)) $(id).textContent = text;
+    };
+    if (!node) {
+      clearBand("sc-dc-band-id");
+      clearBand("sc-dc-band-name");
+      clearBand("sc-dc-band-mode");
+      clearBand("sc-dc-band-health");
+      clearBand("sc-dc-band-uptime");
+      clearBand("sc-dc-band-vendor");
+      clearBand("sc-dc-band-sw");
+      clearBand("sc-dc-band-crc");
+      clearBand("sc-dc-band-hw");
+      clearBand("sc-dc-band-uid");
+      return;
+    }
     if ($("sc-dc-band-id")) $("sc-dc-band-id").textContent = String(node.nodeId);
     if ($("sc-dc-band-name")) $("sc-dc-band-name").textContent = node.name;
     if ($("sc-dc-band-mode")) $("sc-dc-band-mode").textContent = nodeMode(node);
@@ -2837,22 +3506,24 @@
   function renderCanBusMeta() {
     const fcCan = getFlightControllerCanIdentity();
     const onlineNodes = canNodes.filter((n) => n.status === "online" || n.status === "stale");
-    const directNodes = canNodes.filter((n) => n.source === "MAVLink CAN_FRAME" || n.source === "SLCAN Direct");
+    const activeRuntime = getActiveRuntime();
+    const activeTransport = getActiveTransport();
+    const configuredFcNode = configuredFcNodeIdForTransport(activeTransport);
     if ($("sc-dc-can1-meta")) {
       $("sc-dc-can1-meta").innerHTML = `
         <dt>${dcText("Bus", "总线")}</dt><dd>CAN1</dd>
-        <dt>${dcText("Transport", "传输")}</dt><dd>${slcanSessionReady ? dcText("SLCAN Direct", "SLCAN 直连") : dcText("Not ready", "未就绪")}</dd>
+        <dt>${dcText("Transport", "传输")}</dt><dd>${inspectorTransportLabel(activeTransport)}</dd>
         <dt>${dcText("FC Driver", "飞控驱动")}</dt><dd>CAN_D${fcCan.canDrivers[0] || 1}</dd>
-        <dt>${dcText("FC Node ID", "飞控节点 ID")}</dt><dd>${fcCan.nodeId}</dd>
+        <dt>${dcText("FC Node ID", "飞控节点 ID")}</dt><dd>${configuredFcNode || fcCan.can1NodeId || fcCan.nodeId || "—"}</dd>
         <dt>${dcText("Online nodes", "在线节点")}</dt><dd>${onlineNodes.length}</dd>
-        <dt>${dcText("Direct nodes", "直连节点")}</dt><dd>${directNodes.length}</dd>
-        <dt>${dcText("Frames/s", "帧率")}</dt><dd>${slcanRuntime.framesPerSecond}</dd>
-        <dt>${dcText("Errors", "错误帧")}</dt><dd>${slcanRuntime.errorFrames}</dd>
+        <dt>${dcText("Frames/s", "帧率")}</dt><dd>${activeRuntime.framesPerSecond}</dd>
+        <dt>${dcText("Errors", "错误帧")}</dt><dd>${activeRuntime.errorFrames}</dd>
         <dt>${dcText("SLCAN Port", "SLCAN 端口")}</dt><dd>${detectSlcanAdapterPort() || "-"}</dd>
+        <dt>${dcText("SLCAN CAN map", "SLCAN 映射")}</dt><dd>CAN${getSlcanCport()}</dd>
       `;
     }
     if ($("sc-dc-can2-meta")) {
-      $("sc-dc-can2-meta").innerHTML = `<dt>${dcText("Bus", "总线")}</dt><dd>CAN2</dd><dt>${dcText("Driver", "驱动")}</dt><dd>${fcCan.canDrivers[1] ? `CAN_D${fcCan.canDrivers[1]}` : dcText("Not enabled", "未启用")}</dd><dt>${dcText("Status", "状态")}</dt><dd>${fcCan.canDrivers[1] ? dcText("Configured", "已配置") : dcText("Unavailable", "不可用")}</dd><dt>${dcText("Transport", "传输")}</dt><dd>${dcText("MAVLink metadata only", "仅 MAVLink 元数据")}</dd>`;
+      $("sc-dc-can2-meta").innerHTML = `<dt>${dcText("Bus", "总线")}</dt><dd>CAN2</dd><dt>${dcText("Driver", "驱动")}</dt><dd>${fcCan.canDrivers[1] ? `CAN_D${fcCan.canDrivers[1]}` : dcText("Not enabled", "未启用")}</dd><dt>${dcText("Status", "状态")}</dt><dd>${fcCan.canDrivers[1] ? dcText("Configured", "已配置") : dcText("Unavailable", "不可用")}</dd><dt>${dcText("Transport", "传输")}</dt><dd>${isTransportSessionReady("can2") ? "MAVLink CAN2" : dcText("Not ready", "未就绪")}</dd>`;
     }
   }
 
@@ -3052,45 +3723,51 @@
     renderLogTable();
   }
 
-  async function ensureMavlinkCanForward(bus = 1) {
-    if (!isGcsSerialConnected()) return false;
-    const viaBrowser = !isSerialViaBridge();
-
-    const markMavlinkReady = (hint) => {
-      slcanSessionReady = true;
-      slcanBoundPort = "mavlink";
-      slcanInitDone = true;
-      slcanPortLostAt = 0;
-      setLiveText("sc-dc-transport-badge", bus === 2 ? "MAVLink CAN2" : "MAVLink CAN1");
-      if ($("sc-dc-hint") && hint) $("sc-dc-hint").textContent = hint;
-    };
-
-    if (viaBrowser && typeof window.sendCommandLong === "function") {
-      try {
-        await window.sendCommandLong(183, bus, 0, 0, 0, 0, 0, 0, 0);
-        markMavlinkReady(
-          "已启用 MAVLink CAN 转发（浏览器串口）。若节点仍为 0，请确认飞控 CAN_D1 已接 DroneCAN 设备且参数已启用 DroneCAN。"
+  async function ensureMavlinkCanSession(bus = 1) {
+    if (!isGcsSerialConnected()) {
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent = dcText(
+          "Connect the flight controller MAVLink port at the top of GCS first, then open MAVLink CAN1.",
+          "请先在 GCS 顶部连接飞控 [MAVLink] 串口，再使用「MAVLink CAN1」。"
         );
-        return true;
-      } catch (e) {
-        if ($("sc-dc-hint")) {
-          $("sc-dc-hint").textContent = `CAN_FORWARD 发送失败: ${e?.message || e}`;
-        }
       }
+      return false;
+    }
+    const transport = bus === 2 ? "can2" : "can1";
+    deactivateSlcanPoll();
+    if (Date.now() < mavlinkCanSessionRetryAt) {
+      return isTransportSessionReady(transport);
     }
 
-    try {
-      const resp = await bridgeJson("/slcan-forward-enable", { bus });
-      markMavlinkReady(
-        "经 COM 桥 MAVLink 转发 DroneCAN。若仍为 0 帧/s，请确认 CAN 接线与 DroneCAN 参数。"
-      );
-      const transport = resp?.transport || "mavlink";
-      if ($("sc-dc-transport-badge") && transport === "slcan") {
-        setLiveText("sc-dc-transport-badge", "MAVLink（SLCAN 汇聚）");
+    const markMavlinkReady = () => {
+      if (transport === "can2") {
+        mavlinkCan2SessionReady = true;
+      } else {
+        mavlinkCan1SessionReady = true;
       }
+    };
+
+    try {
+      if (activeMavlinkForwardBus !== bus) {
+        if (activeMavlinkForwardBus > 0) {
+          await sendMavlinkCanForward(activeMavlinkForwardBus, true);
+        }
+        await sendMavlinkCanForward(bus, false);
+        await applyMavlinkCanFilter(bus);
+        startCanForwardKeepalive(bus);
+      } else if (!canForwardKeepaliveTimer) {
+        startCanForwardKeepalive(bus);
+      }
+      markMavlinkReady();
+      mavlinkCanSessionRetryAt = 0;
+      updateMavlinkCanDiagnostics(transport, getRuntimeForTransport(transport));
       return true;
     } catch (e) {
-      slcanSessionReady = false;
+      mavlinkCanSessionRetryAt = Date.now() + 8000;
+      stopCanForwardKeepalive();
+      activeMavlinkForwardBus = 0;
+      if (transport === "can2") mavlinkCan2SessionReady = false;
+      else mavlinkCan1SessionReady = false;
       if ($("sc-dc-hint")) {
         $("sc-dc-hint").textContent = `MAVLink CAN 转发失败: ${e?.message || e}。请先在顶部连接 [MAVLink] 串口，或运行 GCS.cmd 启动 COM 桥。`;
       }
@@ -3106,9 +3783,11 @@
       const status = await bridgeJson("/slcan-status");
       const portChanged = !status.open || status.port !== adapterPort;
       if (portChanged) {
-        await bridgeJson("/slcan-open", { port: adapterPort, baudrate: 115200, bitrate_kbps: 1000 });
+        await bridgeJson("/slcan-open", slcanOpenPayload(adapterPort));
         slcanBoundPort = adapterPort;
         slcanInitDone = true;
+      } else if (isSlcanBridgeUnhealthy(status)) {
+        await ensureHealthySlcanBridge(true);
       } else if (!slcanInitDone) {
         await bridgeJson("/slcan-init", { bitrate_kbps: 1000 });
         slcanInitDone = true;
@@ -3118,7 +3797,7 @@
       slcanSessionReady = true;
       setLiveText("sc-dc-transport-badge", `SLCAN 直连 · ${adapterPort}`);
       if ($("sc-dc-hint")) {
-        $("sc-dc-hint").textContent = `SLCAN 直连（COM 桥 ${adapterPort}）。顶部 MAVLink 与 DroneCAN 各走一路 USB，由 GCS.cmd 提供 8765 桥接。`;
+        $("sc-dc-hint").textContent = `SLCAN 直连（COM 桥 ${adapterPort}）。${slcanCportHintText()}`;
       }
       return true;
     } catch (e) {
@@ -3139,19 +3818,25 @@
     }
   }
 
-  async function ensureSlcanDirectSession() {
+  async function ensureSlcanSession() {
     if (!isDronecanPanelActive()) return;
+    activateSlcanPoll();
     if (isSlcanAutotestMode()) {
       slcanSessionReady = true;
-      setLiveText("sc-dc-transport-badge", "SLCAN 自测");
       if ($("sc-dc-hint")) $("sc-dc-hint").textContent = "SLCAN 自测：帧来自 /slcan-inject（无需硬件）。";
       return;
     }
     if (slcanInitRetryAt && Date.now() < slcanInitRetryAt) {
       return;
     }
-    if (preferMavlinkCanTransport() && currentMode !== "slcan") {
-      await ensureMavlinkCanForward(currentMode === "can2" ? 2 : 1);
+    if (!isSlcanTransportAvailable()) {
+      slcanSessionReady = false;
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent = dcText(
+          "SLCAN hardware not available. Authorize a second USB serial port or switch to MAVLink CAN1.",
+          "未检测到 SLCAN 硬件。请授权第二路 USB 串口，或切换到「MAVLink CAN1」。"
+        );
+      }
       return;
     }
 
@@ -3164,22 +3849,11 @@
     const slcanEligible =
       typeof window.countSlcanEligibleWebPorts === "function" ? window.countSlcanEligibleWebPorts() : 0;
 
-    if (currentMode === "slcan" && isGcsSerialConnected() && slcanEligible < 1) {
-      const ok = await ensureMavlinkCanForward(1);
-      if ($("sc-dc-hint")) {
-        $("sc-dc-hint").textContent = ok
-          ? "当前仅授权 1 路串口（已被顶部 MAVLink 占用）。已自动 CAN_FORWARD 经同一 USB 读 DroneCAN；若仍为 0 帧/s：检查 CAN 线和参数，或在下拉「＋ 授权第二路」后重试 SLCAN 直连。"
-          : "仅 1 路串口且 CAN_FORWARD 失败。请在下拉点「＋ 授权第二路 USB 串口」，或改点「MAVLink CAN1」。";
-      }
-      if (ok) return;
-    }
-
     const pickerVal = document.getElementById("sc-dc-slcan-port")?.value || "";
     let adapterPort = detectSlcanAdapterPort();
 
     if (
       !window.__gcsLiveServerDev &&
-      currentMode === "slcan" &&
       adapterPort &&
       !adapterPort.startsWith("auth:") &&
       !pickerVal.startsWith("auth:")
@@ -3214,31 +3888,23 @@
           setLiveText("sc-dc-transport-badge", idx >= 0 ? `SLCAN 浏览器·第${idx + 1}路` : "SLCAN 浏览器串口");
         }
         if ($("sc-dc-hint")) {
-          $("sc-dc-hint").textContent = "SLCAN 直连（Chrome 第二路 Web Serial，无需 GCS.cmd）。顶部保持 MAVLink 连接；本页显示 SLCAN 监听到的节点。";
+          $("sc-dc-hint").textContent = `SLCAN 直连（Chrome 第二路 Web Serial，无需 GCS.cmd）。${slcanCportHintText()}`;
         }
         return;
       }
     }
 
-    adapterPort = adapterPort || (slcanBoundPort !== "mavlink" && slcanBoundPort !== "webserial" ? slcanBoundPort : "");
+    adapterPort = adapterPort || (slcanBoundPort !== "webserial" ? slcanBoundPort : "");
     if (!adapterPort || adapterPort.startsWith("auth:")) {
-      if (isGcsSerialConnected()) {
-        const ok = await ensureMavlinkCanForward(1);
-        if (currentMode === "slcan" && $("sc-dc-hint")) {
-          $("sc-dc-hint").textContent = ok
-            ? "SLCAN 桥不可用；已用顶部 MAVLink 口 CAN_FORWARD。若仍为 0：确认 CAN_D1 接 DroneCAN 设备。"
-            : "SLCAN 未就绪且 CAN_FORWARD 失败。请「＋ 授权第二路」或运行 GCS.cmd。";
-        }
-        return;
-      }
-      if (slcanBoundPort && slcanBoundPort !== "mavlink" && slcanPortLostAt && (Date.now() - slcanPortLostAt) < 30000) {
+      if (slcanBoundPort && slcanPortLostAt && (Date.now() - slcanPortLostAt) < 30000) {
         return;
       }
       slcanSessionReady = false;
       slcanInitDone = false;
-      slcanBoundPort = "";
-      slcanRuntime.nodes.clear();
-      slcanRuntime.framesPerSecond = 0;
+      if (!slcanBoundPort) {
+        slcanRuntime.nodes.clear();
+        slcanRuntime.framesPerSecond = 0;
+      }
       if ($("sc-dc-hint")) {
         $("sc-dc-hint").textContent =
           "未找到 SLCAN 口：请在上方下拉指定 SLCAN 虚拟口，或先在顶部用 [MAVLink] 口连接（会自动配对另一路为 SLCAN）。";
@@ -3250,9 +3916,12 @@
       const status = await bridgeJson("/slcan-status");
       const portChanged = !status.open || status.port !== adapterPort;
       if (portChanged) {
-        await bridgeJson("/slcan-open", { port: adapterPort, baudrate: 115200, bitrate_kbps: 1000 });
+        await bridgeJson("/slcan-open", slcanOpenPayload(adapterPort));
         slcanBoundPort = adapterPort;
         slcanInitDone = true;
+      } else if (isSlcanBridgeUnhealthy(status)) {
+        slcanBoundPort = adapterPort;
+        await ensureHealthySlcanBridge(true);
       } else if (!slcanInitDone) {
         await bridgeJson("/slcan-init", { bitrate_kbps: 1000 });
         slcanInitDone = true;
@@ -3261,13 +3930,14 @@
       slcanInitRetryAt = 0;
       slcanSessionReady = true;
       setLiveText("sc-dc-transport-badge", `SLCAN 直连 · ${adapterPort}`);
-      if ($("sc-dc-hint")) $("sc-dc-hint").textContent = `SLCAN 直连已绑定 ${adapterPort}，仅显示直接观测到的节点。`;
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent = `SLCAN 直连已绑定 ${adapterPort}。${slcanCportHintText()}`;
+      }
     } catch (e) {
       slcanSessionReady = false;
       slcanInitDone = false;
       slcanInitRetryAt = Date.now() + 30000;
-      if (!slcanBoundPort) {
-        slcanRuntime.nodes.clear();
+      if (!slcanBoundPort && slcanRuntime.nodes.size === 0) {
         slcanRuntime.framesPerSecond = 0;
       }
       if ($("sc-dc-hint")) {
@@ -3288,10 +3958,28 @@
           return;
         }
       }
-      if (isGcsSerialConnected() && currentMode === "slcan") {
-        await ensureMavlinkCanForward(1);
-      }
     }
+  }
+
+  async function ensureTransportSession(transport) {
+    if (transport === "can2") return ensureMavlinkCanSession(2);
+    if (transport === "can1") return ensureMavlinkCanSession(1);
+    if (transport === "slcan") return ensureSlcanSession();
+    return false;
+  }
+
+  async function ensureInspectorSession() {
+    inspectorTransport = resolveInspectorTransport();
+    if (inspectorTransport === "none") {
+      if ($("sc-dc-hint")) {
+        $("sc-dc-hint").textContent = dcText(
+          "Inspector needs SLCAN or MAVLink connection.",
+          "解析器需要 SLCAN 或 MAVLink 连接。"
+        );
+      }
+      return false;
+    }
+    return ensureTransportSession(inspectorTransport);
   }
 
   function resetSlcanSessionState() {
@@ -3305,35 +3993,74 @@
     }
   }
 
-  function setMode(mode) {
-    currentMode = mode;
-    document.querySelectorAll(".sc-dc-mode-tab").forEach((btn) => btn.classList.toggle("active", btn.dataset.dcMode === mode));
-    document.querySelectorAll(".sc-dc-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.dcPanel === mode));
-    const transportBadge = $("sc-dc-transport-badge");
-    if (transportBadge) {
-      const text =
-        mode === "slcan"
-          ? "SLCAN 直连"
-          : mode === "can1"
-            ? "MAVLink CAN1"
-            : mode === "can2"
-              ? "MAVLink CAN2"
-              : mode.toUpperCase();
-      setLiveText("sc-dc-transport-badge", text);
-      transportBadge.classList.toggle("sc-dc-live", mode === "slcan" && slcanSessionReady);
+  function resetMavlinkSessionState() {
+    mavlinkCan1SessionReady = false;
+    mavlinkCan2SessionReady = false;
+    inspectorTransport = null;
+  }
+
+  function setView(view) {
+    currentView = view;
+    document.querySelectorAll(".sc-dc-panel").forEach((panel) => {
+      panel.classList.toggle("active", panel.dataset.dcPanel === view);
+    });
+    updateTransportTabActiveState();
+    if (view === "inspector") {
+      inspectorTransport = resolveInspectorTransport();
     }
-    if (mode === "can1" || mode === "can2") {
-      ensureMavlinkCanForward(mode === "can2" ? 2 : 1).then(() => tick()).catch(() => tick());
-      return;
+    ensureActiveSession().then(() => tick()).catch(() => tick());
+  }
+
+  function setTransport(transport, opts = {}) {
+    const prev = currentTransport;
+    currentTransport = transport;
+    if (!opts.keepView) {
+      currentView = "nodes";
+      document.querySelectorAll(".sc-dc-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.dataset.dcPanel === "nodes");
+      });
     }
-    ensureSlcanDirectSession().then(() => tick()).catch(() => tick());
+    updateTransportTabActiveState();
+    const run = async () => {
+      if (prev !== transport && !opts.skipSession) {
+        await teardownTransportLeaving(prev);
+        nodeInfoState.cache.clear();
+        nodeInfoState.inflight.clear();
+        if (transport === "slcan") {
+          clearTransportRuntime(mavlinkCan1Runtime);
+          clearTransportRuntime(mavlinkCan2Runtime);
+        } else if (transport === "can1") {
+          clearTransportRuntime(slcanRuntime);
+          clearTransportRuntime(mavlinkCan2Runtime);
+          clearTransportRuntime(mavlinkCan1Runtime);
+        } else if (transport === "can2") {
+          clearTransportRuntime(slcanRuntime);
+          clearTransportRuntime(mavlinkCan1Runtime);
+          clearTransportRuntime(mavlinkCan2Runtime);
+        }
+        resetBridgeMonitorForTransport(transport);
+      }
+      if (!opts.skipSession) {
+        await ensureActiveSession();
+        tick();
+      }
+    };
+    run().catch(() => tick());
+  }
+
+  async function ensureActiveSession() {
+    if (currentView === "inspector") return ensureInspectorSession();
+    return ensureTransportSession(currentTransport);
   }
 
   async function tick() {
     try {
       await injectSlcanAutotestFrame();
-      await maybeRefreshCanForward(currentMode === "can2" ? 2 : 1);
-      await pollSlcanTraffic();
+      await ensureActiveSession();
+      const refreshBus = getActiveTransport() === "can2" ? 2 : 1;
+      await maybeRefreshCanForward(refreshBus);
+      await pollTransportTraffic();
+      maybeQueryNodeInfo(getActiveRuntime()).catch(() => {});
     } catch (_) {
       // Keep the UI alive even if a single poll fails.
     }
@@ -3361,17 +4088,18 @@
 
   function startDcTelemetry() {
     stopDcTelemetry();
-    ensureSlcanDirectSession().then(async () => {
+    syncTransportTabs();
+    ensureActiveSession().then(async () => {
       await tick();
       dcClockTimer = window.setInterval(() => {
         refreshDroneCanClock();
       }, 1000);
       dcTimer = window.setInterval(() => {
-        if (slcanSessionReady || currentMode === "can1" || currentMode === "can2") {
+        if (anySessionReady() || currentView === "inspector" || currentTransport !== "slcan") {
           tick().catch(() => tick());
           return;
         }
-        ensureSlcanDirectSession().then(() => tick()).catch(() => tick());
+        ensureActiveSession().then(() => tick()).catch(() => tick());
       }, 1500);
     }).catch(() => {
       tick();
@@ -3379,11 +4107,11 @@
         refreshDroneCanClock();
       }, 1000);
       dcTimer = window.setInterval(() => {
-        if (slcanSessionReady || currentMode === "can1" || currentMode === "can2") {
+        if (anySessionReady() || currentView === "inspector" || currentTransport !== "slcan") {
           tick().catch(() => tick());
           return;
         }
-        ensureSlcanDirectSession().then(() => tick()).catch(() => tick());
+        ensureActiveSession().then(() => tick()).catch(() => tick());
       }, 1500);
     });
   }
@@ -3399,8 +4127,16 @@
     if (uiBound) return;
     uiBound = true;
     document.addEventListener("click", async (ev) => {
-      const modeBtn = ev.target.closest(".sc-dc-mode-tab");
-      if (modeBtn) setMode(modeBtn.dataset.dcMode || "slcan");
+      const transportBtn = ev.target.closest("[data-dc-transport]");
+      if (transportBtn) {
+        setTransport(transportBtn.dataset.dcTransport || "slcan");
+        return;
+      }
+      const viewBtn = ev.target.closest("[data-dc-view]");
+      if (viewBtn) {
+        setView(viewBtn.dataset.dcView || "filter");
+        return;
+      }
       if (ev.target && ev.target.id === "sc-dc-scan") tick();
       const menuBtn = ev.target.closest("[data-dc-menu-node]");
       if (menuBtn) {
@@ -3663,7 +4399,7 @@
       ensureExtraStyles();
       bindDroneCan();
       if (isInspectorDemoMode()) {
-        currentMode = "inspector";
+        currentView = "inspector";
         selectedCanId = 51;
         selectedInspectorMessage = { nodeId: 51, canId: "0x18044433" };
         slcanSessionReady = true;
@@ -3674,18 +4410,14 @@
       refreshDroneCanModel();
       selectCanNode(selectedCanId || canNodes[0]?.nodeId || 0);
       prepareSlcanPickerForPanel().then(() => {
-        const hasWebSlcan2 =
-          typeof window.countSlcanEligibleWebPorts === "function" && window.countSlcanEligibleWebPorts() > 0;
-        const bridgeSlcan =
-          !!window.__gcsRuntimeNative &&
-          typeof window.getSlcanDeviceId === "function" &&
-          !!window.getSlcanDeviceId();
-        const hasSlcan2 = hasWebSlcan2 || bridgeSlcan;
-        const initialMode = hasSlcan2 ? "slcan" : preferMavlinkCanTransport() ? "can1" : "slcan";
-        setMode(initialMode);
+        syncTransportTabs();
+        const initialTransport = isSlcanTransportAvailable() ? "slcan" : "can1";
+        setTransport(initialTransport, { skipSession: true });
+        if (isInspectorDemoMode()) setView("inspector");
         startDcTelemetry();
       }).catch(() => {
-        setMode(preferMavlinkCanTransport() ? "can1" : "slcan");
+        syncTransportTabs();
+        setTransport(isSlcanTransportAvailable() ? "slcan" : "can1", { skipSession: true });
         startDcTelemetry();
       });
     } else if (!active && dronecanPanelWasActive) {
@@ -3696,6 +4428,7 @@
       if (exitSlcan?.checked) {
         bridgeJson("/slcan-close", null, { skipEnsure: true }).catch(() => {});
         resetSlcanSessionState();
+        resetMavlinkSessionState();
       }
     } else if (active) {
       ensureWorkbenchMarkup();
@@ -3735,11 +4468,8 @@
     document.addEventListener("gcs-connection", () => {
       if (typeof window._fillSlcanPortPicker === "function") window._fillSlcanPortPicker();
       if (isDronecanPanelActive()) {
-        if (detectSlcanAdapterPort()) {
-          ensureSlcanDirectSession().catch(() => {});
-        } else if (preferMavlinkCanTransport()) {
-          ensureMavlinkCanForward(1).catch(() => {});
-        }
+        syncTransportTabs();
+        ensureActiveSession().catch(() => {});
       }
       window.requestAnimationFrame(syncDronecanPanel);
     });

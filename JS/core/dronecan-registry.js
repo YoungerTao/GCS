@@ -3,13 +3,20 @@
     {
       key: "ardupilot_fc",
       match(node) {
-        return Number(node?.nodeId) === 10;
+        const text = [
+          node?.canonicalName,
+          node?.name,
+          node?.rawName,
+          node?.displayName,
+        ].join(" ").toLowerCase();
+        const canonical = (text.match(/org\.[a-z0-9._-]+/) || [""])[0];
+        return canonical === "org.ardupilot";
       },
       info: {
         name: "org.ardupilot",
         displayName: "ArduPilot Flight Controller",
         deviceHint: "Flight controller",
-        hardwareVersion: "ArduPilot CAN1",
+        hardwareVersion: "ArduPilot FC",
       },
     },
     {

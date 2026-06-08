@@ -249,3 +249,102 @@ Historical `tools/watchdog.stderr.log` also showed watchdog activity under:
 - Related to Windows Store Python environment problems
 ```
 
+---
+
+## Issue 4
+
+Title:
+
+```text
+[bug] DroneCAN page mixes SLCAN and MAVLink CAN sources; transport tabs not isolated
+```
+
+Body:
+
+```md
+## Summary
+
+On `初始设置 -> DroneCAN`, the UI could show `SLCAN 直连` while the node list, inspector, and parameter paths still mixed data or fell back to MAVLink CAN_FORWARD. Users could click nodes from the wrong transport (e.g. `MAVLink CAN2` on the SLCAN tab), causing misleading `Parameter service response timeout` errors.
+
+With only one USB serial port (MAVLink occupied), the SLCAN tab remained visible and silently fell back to MAVLink instead of hiding unavailable transport.
+
+## Environment
+
+- OS: Windows
+- Hardware: ArduPilot FC; optional second USB virtual port or USB-CAN SLCAN adapter
+- Connection mode: single-port MAVLink only, or dual-port MAVLink + SLCAN
+- Browser: In-app browser / Chrome Web Serial
+- GCS commit / branch: local workspace, fixed 2026-06-07
+
+## Reproduction Steps
+
+1. Connect MAVLink on the only available COM port.
+2. Open `初始设置 -> DroneCAN` — SLCAN tab still visible.
+3. Observe nodes with `source: MAVLink CAN2` while badge says `SLCAN 直连`, or empty inspector.
+4. Alternatively: dual-path setup, stay on SLCAN tab, open Parameters on a MAVLink-sourced node → timeout.
+
+## Expected Result
+
+- Three isolated transport tabs: `SLCAN 直连`, `MAVLink CAN1`, `MAVLink CAN2`
+- SLCAN tab only uses SLCAN ASCII; MAVLink tabs only use CAN_FORWARD + CAN_FRAME
+- No automatic SLCAN → MAVLink fallback
+- Single serial / no SLCAN hardware: hide SLCAN tab, default to MAVLink CAN1
+- Inspector: prefer SLCAN when available, else MAVLink CAN1; single source, no merge
+
+## Actual Result
+
+- `SLCAN_MONITOR` aggregated both SLCAN and MAVLink hub data
+- `ensureSlcanDirectSession()` fell back to `ensureMavlinkCanForward()` in several branches
+- `pollSlcanTraffic()` always called `/slcan-nodes`; no `/mavlink-can-nodes`
+- `mavlink.js` fed all CAN_FRAME into one store regardless of active tab
+- MAVLink parameter egress incorrectly used `/slcan-write`
+
+## Logs / Screenshots
+
+Example mixed snapshot:
+
+```json
+{ "nodeId": 10, "source": "SLCAN Direct" }
+{ "nodeId": 25, "source": "MAVLink CAN2" }
+```
+
+## Technical Notes
+
+- Affected files / modules:
+  - `JS/ui/dronecan-setup.js`
+  - `JS/core/mavlink.js`
+  - `JS/services/serial.js`
+  - `JS/services/slcan-web-serial.js`
+  - `tools/com-bridge/server.py`
+- Related ports / services: 8765, COM bridge SLCAN + MAVLink hubs
+- Whether issue is stable or intermittent: stable design flaw; fallback intermittent
+
+## Root Cause
+
+Transport protocol, UI mode, node store, poll API, and egress path were not separated. SLCAN page could display or operate on MAVLink CAN metadata.
+
+## Fix
+
+- Split `currentTransport` / `currentView`; single-row toolbar with 7 tabs
+- Independent runtimes: `slcanRuntime`, `mavlinkCan1Runtime`, `mavlinkCan2Runtime`
+- `syncTransportTabs()` hides SLCAN when unavailable; remove all SLCAN→MAVLink fallback
+- Backend: `GET /mavlink-can-nodes?bus=1|2`, `POST /mavlink-can-write`, `status()` bus filter
+- `feedMavlinkCanFrameIfActive` / `feedSlcanCanFrame` gating; `resolveInspectorTransport()`
+- `sendMavlinkCanFrame` for MAVLink parameter egress
+
+## Verification
+
+- [x] Reproduced locally (mixed sources / single-port fallback)
+- [x] Fix applied
+- [ ] Verified in app browser (pending hardware regression)
+- [ ] Verified with real hardware
+- [x] Documentation updated
+
+## Related Issues
+
+- Issue 1: wrong GetSet transport selection
+- Issue 2: SLCAN zombie bridge state
+- Docs: `docs/dronecan-slcan-mavlink-source-mixing-20260606.md`
+- Plan: `docs/dronecan-transport-isolation-plan.md`
+```
+

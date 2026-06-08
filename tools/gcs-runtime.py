@@ -69,8 +69,10 @@ class GcsHttpHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path == "/__gcs/ensure-bridge":
-            # calls into supervisor which does mtime check vs disk for bridge; force-restarts if stale
-            ok = ensure_bridge_process(wait_s=15.0)
+            # calls into supervisor which does apiVersion/mtime check vs disk for bridge; force-restarts if stale
+            qs = self.path.split("?", 1)[1] if "?" in self.path else ""
+            force = "force=1" in qs or self.headers.get("X-GCS-Force-Bridge-Restart") == "1"
+            ok = ensure_bridge_process(wait_s=15.0, force_restart=force)
             body = json.dumps({"ok": ok, "bridgeReady": ok}).encode("utf-8")
             self.send_response(200 if ok else 503)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -132,7 +134,7 @@ def main() -> int:
     threading.Thread(target=bridge_warmup_loop, daemon=True).start()
     threading.Thread(
         target=ensure_tile_server_process,
-        kwargs={"wait_s": 3.0},
+        kwargs={"wait_s": 10.0},
         daemon=True,
     ).start()
     threading.Thread(target=watchdog_loop, daemon=True).start()

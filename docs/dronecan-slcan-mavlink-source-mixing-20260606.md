@@ -1,98 +1,114 @@
-# DroneCAN SLCAN / MAVLink CAN 来源混用问题记录
+# DroneCAN：SLCAN 与 MAVLink CAN 混源问题记录
 
-日期: 2026-06-06
+日期: 2026-06-06（问题发现） / 2026-06-07（隔离方案落地）
 
-## 现象
+## 问题是什么
 
-在 `初始设置 -> DroneCAN` 页面选择 `SLCAN 直连` 后，节点列表里仍可能出现并非来自 SLCAN 直连链路的节点。
+在 **初始设置 → DroneCAN** 页面，用户选择 **SLCAN 直连** 后，节点列表、参数读写、解析器观测仍可能混入 **MAVLink CAN1/CAN2** 的数据或走 MAVLink 通道，导致：
 
-现场抓到的典型数据:
+- 页面显示「SLCAN 直连」，但列表里出现 `source: MAVLink CAN2` 的节点
+- 对错误来源的节点读参数 → `Parameter service response timeout`
+- 仅 1 路 USB 串口时，SLCAN 标签仍可见，底层却偷偷 fallback 到 `CAN_FORWARD`
+- 解析器与 SLCAN/MAVLink 观测源未区分，单串口时可能空白
 
-- `Node 10` 的 `source` 为 `SLCAN Direct`
-- `Node 25` 的 `source` 为 `MAVLink CAN2`
+这不是「SLCAN 把 MAVLink 解析错了」，而是 **传输协议与 UI 标签未隔离**。
 
-这意味着用户虽然停留在 `SLCAN 直连` 页面，但实际上仍可能点到一个来自 `MAVLink CAN2` 的节点。
+---
 
-随后如果在这个页面里对该节点执行 `设置菜单 -> Parameters`，前端会尝试按当前 SLCAN 路径发起 DroneCAN `GetSet`，结果表现为:
+## 典型现象
 
-- 节点看起来“在线”
-- 但参数读取报 `Parameter service response timeout`
+### 1. 节点来源混显
 
-## 根因
-
-这次问题的关键不在于 “SLCAN 把 MAVLink CAN2 解析错了”，而在于:
-
-1. 后端 `SLCAN_MONITOR` 同时汇聚了两类来源的数据
-   - `SLCAN Direct`
-   - `MAVLink CAN_FRAME` / `MAVLink CAN1` / `MAVLink CAN2`
-
-2. 前端 DroneCAN 页面此前又把这些来源混在同一个节点模型里展示
-
-结果就是:
-
-- 页面标题和传输标签写的是 `SLCAN 直连`
-- 但节点列表里可能混入 `MAVLink CAN2` 节点
-- 用户在错误来源的节点上点击参数读取
-- 最终被包装成一次误导性的超时
-
-## 关键证据
-
-另一台 Windows 机器现场返回的 `/slcan-nodes` 数据中:
+同一次 `/slcan-nodes` 采样中曾出现：
 
 ```json
-{
-  "nodeId": 25,
-  "displayName": "Node 25",
-  "status": "online",
-  "source": "MAVLink CAN2"
-}
+{ "nodeId": 10, "displayName": "ArduPilot Flight Controller", "source": "SLCAN Direct" }
 ```
-
-同一次采样中，真正的 SLCAN 直连节点为:
 
 ```json
-{
-  "nodeId": 10,
-  "displayName": "ArduPilot Flight Controller",
-  "status": "online",
-  "source": "SLCAN Direct"
-}
+{ "nodeId": 25, "displayName": "Node 25", "source": "MAVLink CAN2" }
 ```
 
-所以这不是 “Node 25 一定不支持参数服务”，而是它根本不属于当前 SLCAN 页面应操作的数据来源。
+用户停留在 **SLCAN 直连** 页，却能点到 **MAVLink CAN2** 节点。
 
-## 影响
+### 2. 参数超时误导
 
-如果不把来源分开，会带来几类误导:
+在 SLCAN 页面对 Node 25 执行 **设置菜单 → Parameters**：
 
-1. 用户以为当前页是纯 SLCAN，实际上节点列表混入了 MAVLink CAN 元数据
-2. 参数超时会被误判成节点不支持 GetSet，或误判成串口/桥异常
-3. 当前页与后续要单独开发的 MAVLink CAN 页面边界不清晰，后续维护风险很高
+- 节点看起来在线
+- 实际按 SLCAN 路径发 GetSet
+- 结果：`Parameter service response timeout`
 
-## 修复方向
+根因：Node 25 不属于当前 SLCAN 链路，而非节点不支持参数服务。
 
-本次确认后的目标是:
+### 3. 单串口仍显示 SLCAN
 
-- 当前 DroneCAN 页面只负责 `SLCAN 直连`
-- `MAVLink CAN1 / CAN2` 另开页面实现
-- 两者在数据来源、UI 入口、参数操作路径上彻底分离
+只有 1 路串口（已被顶部 MAVLink 占用）、未识别到 SLCAN 硬件时：
 
-已开始落地的调整:
+- SLCAN 标签仍可点
+- 代码会 `ensureMavlinkCanForward()` 偷偷顶上
+- 用户以为在走 SLCAN，实际走 MAVLink
 
-1. `/slcan-nodes` 改为仅返回 `source` 以 `SLCAN` 开头的节点
-2. SLCAN 页面的节点列表只使用 SLCAN 来源数据
-3. 禁止在 SLCAN 页面对 `MAVLink CAN1 / CAN2` 来源节点执行参数操作
+### 4. 解析器数据源不明确
 
-## 后续建议
+解析器共用 `slcanRuntime`，无 SLCAN 时 poll 仍只拉 `/slcan-nodes`，列表可能为空；有双路时也未明确「优先 SLCAN，否则 MAVLink CAN」。
 
-为了彻底避免再次混源，后续还应继续完成:
+---
 
-1. 从当前页面中移除 `MAVLink CAN1 / CAN2` 标签与文案
-2. 去掉当前页自动 fallback 到 `ensureMavlinkCanForward()` 的逻辑
-3. 单独设计并实现 `MAVLink CAN` 页面，独立承载 CAN1/CAN2 元数据与交互
+## 根因分析
 
-## 相关文件
+| 层级 | 问题 |
+|------|------|
+| 后端 | `SLCAN_MONITOR` 同时吃 `SLCAN_HUB` + `MAVLINK_HUB`；早期仅 `/slcan-nodes` 做展示过滤 |
+| 前端状态 | `currentMode` 混合传输标签与功能页；`slcanBoundPort = "mavlink"` 与 SLCAN 共用 |
+| 会话逻辑 | `ensureSlcanDirectSession()` 多处 fallback 到 `ensureMavlinkCanForward()` |
+| 轮询 | `pollSlcanTraffic()` 固定 `/slcan-nodes`；CAN1/CAN2 无独立 poll |
+| 发送 | MAVLink 模式下参数仍写 `/slcan-write`（只连 `SLCAN_HUB`） |
+| MAVLink 注入 | `mavlink.js` 无条件 `feedMavlinkCanFrame`，不检查当前标签 |
 
-- [JS/ui/dronecan-setup.js](G:\soft\GCS\JS\ui\dronecan-setup.js)
-- [tools/com-bridge/server.py](G:\soft\GCS\tools\com-bridge\server.py)
-- [docs/dronecan-slcan-param-incident-20260606.md](G:\soft\GCS\docs\dronecan-slcan-param-incident-20260606.md)
+相关参数读取故障另见：[dronecan-slcan-param-incident-20260606.md](./dronecan-slcan-param-incident-20260606.md)（COM 桥 zombie、发送路径错位）。
+
+---
+
+## 确认的产品需求
+
+1. **三路传输标签**：SLCAN 直连 | MAVLink CAN1 | MAVLink CAN2 — 协议不混用，读写隔离。
+2. **单串口无 SLCAN**：自动隐藏 SLCAN 标签，只保留可用项，默认 MAVLink CAN1。
+3. **解析器**：有 SLCAN 优先 SLCAN 观测；否则 MAVLink CAN1；单源、不 merge。
+4. **筛选 / 统计**：跟随当前传输标签（解析器用 `inspectorTransport`）。
+5. **UI**：单行工具栏混排传输与功能标签，用 `data-dc-transport` / `data-dc-view` 区分。
+
+---
+
+## 解决方案（已实施）
+
+### 架构要点
+
+- 前端：`currentTransport` + `currentView`；`slcanRuntime` / `mavlinkCan1Runtime` / `mavlinkCan2Runtime` 独立存储
+- 后端：`GET /slcan-nodes`（仅 SLCAN）、`GET /mavlink-can-nodes?bus=1|2`、`POST /mavlink-can-write`
+- 删除 SLCAN → MAVLink 自动 fallback；`syncTransportTabs()` 控制 SLCAN 标签显隐
+- `feedMavlinkCanFrameIfActive` / `feedSlcanCanFrame` 门控；`resolveInspectorTransport()` 解析器选源
+
+### 文档与规划
+
+| 文档 | 内容 |
+|------|------|
+| [github-issues-20260606.md](./github-issues-20260606.md) | **Git 问题台账**（Issue 4，可直接贴 GitHub） |
+| [dronecan-transport-isolation-plan.md](./dronecan-transport-isolation-plan.md) | 完整实施规划（含流程图、API、清单） |
+| [dronecan-slcan-param-incident-20260606.md](./dronecan-slcan-param-incident-20260606.md) | 参数超时 / COM 桥半死状态 |
+
+### 关键代码
+
+- [JS/ui/dronecan-setup.js](../JS/ui/dronecan-setup.js)
+- [JS/core/mavlink.js](../JS/core/mavlink.js)
+- [JS/services/serial.js](../JS/services/serial.js)
+- [tools/com-bridge/server.py](../tools/com-bridge/server.py)
+- [tools/com-bridge/test_slcan_auto.py](../tools/com-bridge/test_slcan_auto.py)
+
+---
+
+## 使用注意
+
+- 重启 **GCS.cmd** 后新 API（`/mavlink-can-nodes` 等）才生效
+- 刷新页面加载 `dronecan-setup.js?v=175` 以看到新工具栏
+- 参数操作前确认节点 `source` 与当前传输标签一致

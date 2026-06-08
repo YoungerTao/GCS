@@ -10,6 +10,7 @@ const AUTO_CONNECT_MAX_ATTEMPTS = 20;
 const AUTO_CONNECT_LATE_RETRY_MS = [8000, 15000, 30000];
 const BRIDGE_API = "http://127.0.0.1:8765";
 let ensureBridgePromise = null;
+let _bridgeFreshInFlight = null;
 
 function hasWebSerialApi() {
   return !!(typeof navigator !== "undefined" && navigator.serial && window.isSecureContext);
@@ -122,14 +123,20 @@ async function getBridgeStartupError() {
 }
 window.getBridgeStartupError = getBridgeStartupError;
 
-async function requestBridgeStartup() {
+async function requestBridgeStartup(forceRestart = false) {
   const attempts = [
-    { url: "http://127.0.0.1:8766/__gcs/ensure-bridge", method: "POST" },
+    {
+      url: forceRestart
+        ? "http://127.0.0.1:8766/__gcs/ensure-bridge?force=1"
+        : "http://127.0.0.1:8766/__gcs/ensure-bridge",
+      method: "POST",
+      headers: forceRestart ? { "X-GCS-Force-Bridge-Restart": "1" } : undefined,
+    },
     { url: "http://127.0.0.1:8767/launch", method: "POST" },
   ];
-  for (const { url, method } of attempts) {
+  for (const { url, method, headers } of attempts) {
     try {
-      const resp = await fetch(url, { method, cache: "no-store" });
+      const resp = await fetch(url, { method, headers, cache: "no-store" });
       if (resp.ok) return true;
     } catch (_) {
       // try next launcher/runtime
@@ -137,6 +144,22 @@ async function requestBridgeStartup() {
   }
   return false;
 }
+
+async function ensureComBridgeFresh() {
+  if (_bridgeFreshInFlight) return _bridgeFreshInFlight;
+  _bridgeFreshInFlight = (async () => {
+    await requestBridgeStartup(true);
+    for (let i = 0; i < 15; i += 1) {
+      if (await probeBridgeHealth()) return true;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return !!window._comBridgeOnline;
+  })().finally(() => {
+    _bridgeFreshInFlight = null;
+  });
+  return _bridgeFreshInFlight;
+}
+window.ensureComBridgeFresh = ensureComBridgeFresh;
 
 function markBridgeOffline(message) {
   window._comBridgeOnline = false;
@@ -159,6 +182,11 @@ async function ensureComBridgeRunning() {
       return true;
     }
     return !!window._comBridgeOnline;
+  }
+  if (await probeBridgeHealth()) {
+    window._comBridgeOnline = true;
+    window._comBridgeBackoffUntil = 0;
+    return true;
   }
   if (typeof window.ensureGcsStackReady === "function") {
     if (liveDev) {
@@ -813,6 +841,10 @@ function initComPortAutoRefresh() {
   window._gcsJustReloaded = true;
   setTimeout(() => { window._gcsJustReloaded = false; }, 8000);
 
+  if (document.getElementById("comPort")) {
+    refreshPorts({ probeBridge: true, forceBridgeProbe: false }).catch(() => {});
+  }
+
   window.addEventListener("load", () => {
     const startRefresh = async () => {
       if (window.__gcsRuntimeNative && typeof ensureComBridgeRunning === "function") {
@@ -821,13 +853,17 @@ function initComPortAutoRefresh() {
         } catch (_) { /* ignore */ }
       }
       try {
-        await refreshPorts({ probeBridge: true, forceBridgeProbe: !!window.__gcsRuntimeNative });
+        await refreshPorts({ probeBridge: true, forceBridgeProbe: false });
+        setTimeout(
+          () => refreshPorts({ probeBridge: true, forceBridgeProbe: true }).catch(() => {}),
+          2000,
+        );
       } catch (_) { /* ignore */ }
       scheduleAutoReconnectAfterRefresh();
       tryAutoConnect().catch(() => {});
     };
     if (window.__gcsBootstrapPromise) {
-      window.__gcsBootstrapPromise.then(startRefresh).catch(startRefresh);
+      window.__gcsBootstrapPromise.finally(startRefresh);
     } else {
       startRefresh();
     }
