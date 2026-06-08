@@ -127,6 +127,7 @@
 
 - [dronecan-transport-isolation-plan.md](./dronecan-transport-isolation-plan.md) — 传输隔离总方案  
 - [dronecan-slcan-mavlink-source-mixing-20260606.md](./dronecan-slcan-mavlink-source-mixing-20260606.md) — 混源问题简版  
+- [dronecan-mavlink-can-f4-zero-frames-20260607.md](./dronecan-mavlink-can-f4-zero-frames-20260607.md) — **F4 平台 MAVLink CAN 0 帧结案台账**  
 - [FILE-CALL-FLOW.md](./FILE-CALL-FLOW.md) — stale bridge 与 ensure-bridge 流程  
 
 ---

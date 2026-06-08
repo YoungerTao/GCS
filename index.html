@@ -45,38 +45,7 @@
 
 <!-- 顶部控制栏 -->
 <div class="top-bar">
-  <select id="comPort">
-    <option value="__add__">＋ 选择飞控 USB 串口（首次连接）…</option>
-  </select>
-  <label class="top-bar-baud" for="serialBaud" title="USB 虚拟串口常可设较高波特率；须与飞控 SERIAL 端口波特率一致">波特率</label>
-  <select id="serialBaud" class="top-bar-baud-select" title="须与飞控该串口波特率一致（USB 可尝试 921600 等）">
-    <option value="57600">57600</option>
-    <option value="115200" selected>115200</option>
-    <option value="230400">230400</option>
-    <option value="460800">460800</option>
-    <option value="921600">921600</option>
-    <option value="1500000">1500000</option>
-    <option value="2000000">2000000</option>
-    <option value="3000000">3000000</option>
-  </select>
-  <label class="top-bar-baud-auto" for="autoBaudProbe" title="连接前自动扫描多档波特率并选用最高可用档">
-    <input type="checkbox" id="autoBaudProbe" checked>
-    自动匹配
-  </label>
-  <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
-  <span class="map-tile-controls">
-    <label for="mapBaseLayerSelect" title="切换地图底图">
-      底图
-    </label>
-    <select id="mapBaseLayerSelect" class="map-base-layer-select" aria-label="切换地图底图"></select>
-    <button id="mapPrefetchBtn" type="button" title="对当前地图视野预取瓦片">预取地图</button>
-    <label for="mapCacheOnly" title="仅使用已下载瓦片，不联网补图">
-      <input type="checkbox" id="mapCacheOnly">
-      仅缓存
-    </label>
-    <span id="mapTileStatus" class="map-tile-status" aria-live="polite">瓦片…</span>
-  </span>
-  <div class="main-tabs" aria-label="主功能切换">
+  <nav class="main-tabs" aria-label="主功能切换">
     <button class="main-tab active" data-view="flight-data">
       <img src="assets/icons/tab-flight.svg" alt="">
       <span>飞行数据</span>
@@ -93,6 +62,42 @@
       <img src="assets/icons/tab-debug.svg" alt="">
       <span>配置调试</span>
     </button>
+  </nav>
+  <div class="top-bar__divider" aria-hidden="true"></div>
+  <div class="top-bar__link">
+    <select id="comPort">
+      <option value="__add__">＋ 选择飞控 USB 串口（首次连接）…</option>
+    </select>
+    <label class="top-bar-baud" for="serialBaud" title="USB 虚拟串口常可设较高波特率；须与飞控 SERIAL 端口波特率一致">波特率</label>
+    <select id="serialBaud" class="top-bar-baud-select" title="须与飞控该串口波特率一致（USB 可尝试 921600 等）">
+      <option value="57600">57600</option>
+      <option value="115200" selected>115200</option>
+      <option value="230400">230400</option>
+      <option value="460800">460800</option>
+      <option value="921600">921600</option>
+      <option value="1500000">1500000</option>
+      <option value="2000000">2000000</option>
+      <option value="3000000">3000000</option>
+    </select>
+    <label class="top-bar-baud-auto" for="autoBaudProbe" title="连接前自动扫描多档波特率并选用最高可用档">
+      <input type="checkbox" id="autoBaudProbe" checked>
+      自动匹配
+    </label>
+    <button id="connectBtn" type="button" onclick="connect()">连接串口</button>
+  </div>
+  <div class="map-tile-controls map-tile-controls--compact">
+    <select id="mapBaseLayerSelect" class="map-base-layer-select map-base-layer-select--compact" aria-label="切换地图底图" title="切换地图底图"></select>
+    <span id="mapTileStatus" class="map-tile-status" aria-live="polite">瓦片…</span>
+    <div class="map-tile-menu">
+      <button type="button" id="mapTileMenuBtn" class="map-tile-menu-btn" aria-expanded="false" aria-haspopup="true" aria-controls="mapTileMenuPanel" title="地图高级设置">⋯</button>
+      <div id="mapTileMenuPanel" class="map-tile-menu-panel hidden" role="menu" aria-label="地图高级设置">
+        <button id="mapPrefetchBtn" type="button" role="menuitem" title="对当前地图视野预取瓦片">预取地图</button>
+        <label class="map-tile-menu-cache" for="mapCacheOnly" role="menuitem" title="仅使用已下载瓦片，不联网补图">
+          <input type="checkbox" id="mapCacheOnly">
+          仅缓存
+        </label>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -166,6 +171,20 @@
 </div>
 
 <div id="view-initial-setup" class="main-view">
+  <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false" class="ov-icon-sprite">
+    <symbol id="ov-icon-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5" fill="currentColor"/><rect x="13" y="3" width="8" height="5" rx="1.5" fill="currentColor"/><rect x="13" y="10" width="8" height="11" rx="1.5" fill="currentColor"/><rect x="3" y="13" width="8" height="8" rx="1.5" fill="currentColor"/></symbol>
+    <symbol id="ov-icon-airframe" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2L4 9v2h3l-1 9 6-3 6 3-1-9h3V9L12 2zm0 3.2L17 9v.5h-2.5l.8 7.2L12 15.5 8.7 16.7 9.5 9.5H7V9l5-3.8z"/></symbol>
+    <symbol id="ov-icon-rc" viewBox="0 0 24 24"><path fill="currentColor" d="M6 9a2 2 0 1 0 0 .01V9zm12 0a2 2 0 1 0 0 .01V9zM4 11h16a2 2 0 0 1 2 2v3a4 4 0 0 1-4 4h-1.2a2.8 2.8 0 0 1-5.6 0H8.2a2.8 2.8 0 0 1-5.6 0H4a4 4 0 0 1-4-4v-3a2 2 0 0 1 2-2zm2 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm12 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></symbol>
+    <symbol id="ov-icon-mode" viewBox="0 0 24 24"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h10v2H4v-2zm0 5h16v2H4v-2z"/><circle cx="18" cy="12" r="3" fill="currentColor"/></symbol>
+    <symbol id="ov-icon-motor" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 2a7 7 0 0 1 6.3 4H14l-1-2.5A7 7 0 0 1 12 5zm-2.2.6L8.8 8H5.7A7 7 0 0 1 9.8 5.6zM5 12c0-.7.1-1.4.3-2h3.4l-.6 2H5zm1.7 4a7 7 0 0 0 3.1 2.6L9 14H6.7c.2.7.3 1.3.3 2zm5.3 2.4L12 14h2.5l-1 4.4A7 7 0 0 1 12 18.4zm3.5-1.1 1-4.3H19a7 7 0 0 1-3.8 3.3zM19 10h-2.6l.6-2H19c.2.6.3 1.3.3 2zm-5.9-4 1 2.5H12a7 7 0 0 1-1.1-2.5H13.1z"/></symbol>
+    <symbol id="ov-icon-dronecan" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5" fill="currentColor"/><circle cx="18" cy="6" r="2.5" fill="currentColor"/><circle cx="18" cy="18" r="2.5" fill="currentColor"/><path fill="currentColor" d="M8.2 11.2 15.5 7.2l1 .8-7.3 4zm0 1.6 7.3 4-1 .8-7.3-4z"/></symbol>
+    <symbol id="ov-icon-sensors" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="currentColor"/><path fill="currentColor" d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="ov-icon-serial" viewBox="0 0 24 24"><path fill="currentColor" d="M8 7h8a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3zm0 2a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H8zm-3 1h1v6H5v-6zm13 0h1v6h-1v-6z"/></symbol>
+    <symbol id="ov-icon-power" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="14" rx="2" fill="currentColor"/><rect x="9" y="19" width="6" height="2" rx="1" fill="currentColor"/><rect x="10" y="6" width="4" height="8" rx="1" fill="#111525" opacity=".35"/></symbol>
+    <symbol id="ov-icon-safety" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3zm0 2.2 6 2.25V11c0 3.8-2.5 7.4-6 8.7-3.5-1.3-6-4.9-6-8.7V6.45l6-2.25z"/><path fill="currentColor" d="M11 8h2v5h-2V8zm0 6h2v2h-2v-2z"/></symbol>
+    <symbol id="ov-icon-params" viewBox="0 0 24 24"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h10v2H4v-2zm0 5h16v2H4v-2z"/><circle cx="18" cy="12" r="2" fill="currentColor"/></symbol>
+    <symbol id="ov-icon-help" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-.5 4.5a2.5 2.5 0 0 1 2.2 3.7c-.5.8-1.4 1-1.7 1.8V14h-2v-.5c0-1.2 1.2-1.7 1.7-2.5a.8.8 0 1 0-1.5-.5h-2a2.8 2.8 0 0 1 5.3 1.3c0 1.5-1.2 2-1.8 2.8-.3.5-.2.9-.2 1.4H12v2h2v-1.1c1-.3 2-1.2 2-2.9A4.8 4.8 0 0 0 11.5 8.5zM12 17.5a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5z"/></symbol>
+  </svg>
   <div class="ov-page">
     <div class="ov-top-alert">
       <div class="ov-link-status" id="ov-link-status">
@@ -177,27 +196,27 @@
       </div>
     </div>
 
-    <aside class="ov-sidebar">
+    <aside class="ov-sidebar" aria-label="初始设置导航">
       <div class="ov-sidebar-header">工业级重载无人机概览</div>
-      <button class="ov-nav-item active" data-setup-panel="overview">概览</button>
-      <button class="ov-nav-item" data-setup-panel="airframe">机体</button>
-      <button class="ov-nav-item" data-setup-panel="rc">遥控器</button>
-      <button class="ov-nav-item" data-setup-panel="mode">飞行模式</button>
-      <button class="ov-nav-item" data-setup-panel="motor">电机</button>
-      <button class="ov-nav-item" data-setup-panel="dronecan">DroneCAN</button>
-      <button class="ov-nav-item" data-setup-panel="sensors">传感器</button>
-      <button class="ov-nav-item" data-setup-panel="serial">serial</button>
-      <button class="ov-nav-item" data-setup-panel="power">电源</button>
-      <button class="ov-nav-item" data-setup-panel="safety">安全</button>
-      <button class="ov-nav-item" data-setup-panel="params">参数</button>
-      <button class="ov-nav-item" data-setup-panel="help">帮助</button>
+      <button type="button" class="ov-nav-item active" data-setup-panel="overview" aria-current="page"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-overview"/></svg><span class="ov-nav-label">概览</span><span class="ov-nav-badge ov-nav-badge--danger" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="airframe"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-airframe"/></svg><span class="ov-nav-label">机体</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="rc"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-rc"/></svg><span class="ov-nav-label">遥控器</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="mode"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-mode"/></svg><span class="ov-nav-label">飞行模式</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="motor"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-motor"/></svg><span class="ov-nav-label">电机</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="dronecan"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-dronecan"/></svg><span class="ov-nav-label">DroneCAN</span><span class="ov-nav-badge ov-nav-badge--alert" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="sensors"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-sensors"/></svg><span class="ov-nav-label">传感器</span><span class="ov-nav-badge ov-nav-badge--warn" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="serial"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-serial"/></svg><span class="ov-nav-label">串口</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="power"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-power"/></svg><span class="ov-nav-label">电源</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="safety"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-safety"/></svg><span class="ov-nav-label">安全</span><span class="ov-nav-badge ov-nav-badge--danger" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="params"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-params"/></svg><span class="ov-nav-label">参数</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="help"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-help"/></svg><span class="ov-nav-label">帮助</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
     </aside>
 
-    <section class="ov-main">
+    <section class="ov-main" data-setup-panel="overview">
       <div class="ov-panel active" id="setup-panel-overview">
       <div class="ov-cards ov-cards-deck">
         <div class="ov-cards-main-grid">
-        <article class="ov-card">
+        <article class="ov-card ov-card--airframe">
           <h4>载机与固件</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>机架类型（飞控参数）</span><span id="ov-airframe-type" class="muted" title="由飞控通过 MAVLink 参数 FRAME_CLASS / FRAME_TYPE（或 VTOL 的 Q_*）下发">未连接或未收到机架参数</span></div>
@@ -208,7 +227,7 @@
           </div>
         </article>
 
-        <article class="ov-card">
+        <article class="ov-card ov-card--link">
           <h4>链路与控制</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>数传链路</span><span class="ok">已连接 (115200 bps Web Serial / USB)</span></div>
@@ -218,7 +237,7 @@
           </div>
         </article>
 
-        <article class="ov-card">
+        <article class="ov-card ov-card--position">
           <h4>高精度定位</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>定位状态</span><span class="ok">3D RTK Fixed</span></div>
@@ -228,7 +247,7 @@
           </div>
         </article>
 
-        <article class="ov-card">
+        <article class="ov-card ov-card--power">
           <h4>动力与电池</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>电池规格</span><span>12S LiPo (50.4V)</span></div>
@@ -242,7 +261,7 @@
           </div>
         </article>
 
-        <article class="ov-card">
+        <article class="ov-card ov-card--flight">
           <h4>飞行模式与规划</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>当前模式</span><span class="warn">Stabilize</span></div>
@@ -252,7 +271,7 @@
           </div>
         </article>
 
-        <article class="ov-card">
+        <article class="ov-card ov-card--safety">
           <h4>安全与围栏</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>Geofence</span><span class="ok">已开启 (1000m / 120m)</span></div>
@@ -262,7 +281,7 @@
           </div>
         </article>
 
-        <article class="ov-card">
+        <article class="ov-card ov-card--payload">
           <h4>挂载 / 载荷状态</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>挂载设备</span><span class="ok">三轴光电吊舱</span></div>
@@ -272,7 +291,7 @@
           </div>
         </article>
 
-        <article class="ov-card">
+        <article class="ov-card ov-card--ekf">
           <h4>EKF / 导航健康</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>EKF 状态</span><span id="ov-ekf-status" class="muted">等待遥测</span></div>
@@ -282,7 +301,7 @@
           </div>
         </article>
 
-        <article class="ov-card">
+        <article class="ov-card ov-card--log">
           <h4>日志与告警摘要</h4>
           <div class="ov-card-scroll">
           <div class="ov-kv"><span>STATUSTEXT</span><span class="muted">见底部消息区</span></div>
@@ -294,7 +313,7 @@
         </div>
 
         <div class="ov-cards-sensor-rail">
-        <article class="ov-card ov-card-sensors">
+        <article class="ov-card ov-card-sensors ov-card--sensors">
           <h4>IMU 与传感器（飞控参数 / 遥测）</h4>
           <div class="ov-card-scroll">
           <div id="ov-sensor-overview-rows" class="ov-sensor-overview">
@@ -483,10 +502,14 @@
               <span class="sc-dc-stat-label">故障帧 Err</span>
               <span class="sc-dc-stat-main"><span id="sc-dc-err" class="sc-mono">0</span> <span class="sc-pill sc-pill-ok">正常</span></span>
             </div>
-            <div class="sc-dc-hint-row sc-dc-hint-row--bar">
-              <div id="sc-dc-transport-badge" class="sc-pill sc-pill-ok">SLCAN 直连</div>
-              <div id="sc-dc-hint" class="sc-prose sc-prose--sm">仅显示直接观测到的 SLCAN 节点，短暂轮询丢包会暂存并标记为过期。</div>
+            <div class="sc-dc-hint-row sc-dc-hint-row--bar sc-dc-quick-row">
+              <div class="sc-dc-quick-panels">
+                <button type="button" class="sc-dc-quick-panel sc-dc-quick-panel--slcan" data-dc-quick="slcan-params">SLCAN 参数</button>
+                <button type="button" class="sc-dc-quick-panel sc-dc-quick-panel--proto" data-dc-quick="can-protocol">CAN协议</button>
+                <button type="button" class="sc-dc-quick-panel sc-dc-quick-panel--config" data-dc-quick="can-config">CAN配置</button>
+              </div>
             </div>
+            <div id="sc-dc-hint" hidden aria-live="polite"></div>
           </div>
           <div class="sc-split sc-split-25">
             <section class="sc-card">
@@ -605,7 +628,7 @@
           </header>
 
           <div class="safety-grid">
-            <section class="card-dark safety-card">
+            <section class="card-dark safety-card safety-card--geofence">
               <h4>Geofence 围栏</h4>
               <div class="safety-form-grid">
                 <label>启用
@@ -640,16 +663,16 @@
               </div>
             </section>
 
-            <section class="card-dark safety-card" id="safety-rtl-card">
+            <section class="card-dark safety-card safety-card--rtl" id="safety-rtl-card">
               <h4>RTL 返航策略</h4>
               <div id="safety-rtl-type-banner" class="rtl-type-banner" hidden></div>
               <div id="safety-rtl-form" class="safety-form-grid" data-rtl-kind=""></div>
             </section>
 
-            <section class="card-dark safety-card" id="safety-linkfs-card">
+            <section class="card-dark safety-card safety-card--linkfs" id="safety-linkfs-card">
               <h4>链路失效保护</h4>
               <div class="safety-linkfs-grid">
-                <section class="card-dark safety-card safety-card--sub" id="safety-fs-action-card">
+                <section class="card-dark safety-card safety-card--sub safety-card--fs-action" id="safety-fs-action-card">
                   <h5>失效响应</h5>
                   <div class="safety-form-grid safety-form-grid--stack">
                     <label>遥控失联 <span class="safety-param-tag" id="safety-fs-thr-enable-tag">FS_THR_ENABLE</span>
@@ -674,7 +697,7 @@
                   <div id="safety-fs-options-grid" class="safety-fs-options-bits"></div>
                   <p id="safety-fs-options-readout" class="safety-note muted">等待参数…</p>
                 </section>
-                <section class="card-dark safety-card safety-card--sub" id="safety-fs-detect-card">
+                <section class="card-dark safety-card safety-card--sub safety-card--fs-detect" id="safety-fs-detect-card">
                   <h5>失联判定</h5>
                   <div id="safety-fs-detect-banner" class="rtl-type-banner" hidden></div>
                   <div id="safety-fs-detect-form" class="safety-form-grid safety-form-grid--stack" data-fs-kind=""></div>
@@ -682,7 +705,7 @@
               </div>
             </section>
 
-            <section class="card-dark safety-card" id="safety-prearm-card">
+            <section class="card-dark safety-card safety-card--prearm" id="safety-prearm-card">
               <h4>解锁检查（Pre-arm）</h4>
               <p class="safety-arming-intro muted">勾选 = 启用该项解锁前检查（固件未在 ARMING_SKIPCHK 中跳过）。</p>
               <p id="safety-arming-skip-banner" class="rtl-type-banner rtl-type-banner-warn" hidden>已跳过全部非强制检查（ARMING_SKIPCHK = -1）</p>
@@ -946,14 +969,14 @@
 <script src="JS/mission/terrain-survey-planner.js?v=20260531e" defer></script>
 <script src="JS/mission/terrain-plan-advisor.js" defer></script>
 <script src="JS/services/terrain-mavlink.js?v=20260531d" defer></script>
-<script src="JS/core/mavlink.js" defer></script>
+<script src="JS/core/mavlink.js?v=1" defer></script>
 <script src="JS/core/mavlink-helpers.js" defer></script>
 <script src="JS/core/ardupilot-telemetry.js" defer></script>
 <script src="JS/core/gcs-mission-debug.js" defer></script>
 <script src="JS/core/gcs-auto-start.js?v=10"></script>
 <script src="JS/core/startup-self-check.js?v=20260607a" defer></script>
 <script src="JS/services/baud-probe.js?v=2" defer></script>
-<script src="JS/services/serial.js?v=11" defer></script>
+<script src="JS/services/serial.js?v=12" defer></script>
 <script src="JS/services/com-bridge.js?v=14" defer></script>
 <script src="JS/services/slcan-web-serial.js?v=4" defer></script>
 <script src="JS/services/param-loader.js" defer></script>
@@ -965,6 +988,7 @@
 <script src="JS/ui/overview-sensors.js" defer></script>
 <script src="JS/core/vehicle-profile.js" defer></script>
 <script src="JS/ui/overview-preflight.js?v=8" defer></script>
+<script src="JS/ui/setup-nav.js?v=1" defer></script>
 <script src="JS/ui/vehicle-marker-icons.js" defer></script>
 <script src="JS/ui/hud-map-tabs.js" defer></script>
 <script src="JS/mission/mission-model.js" defer></script>
@@ -994,7 +1018,8 @@
 <script src="JS/ui/accel-calibration.js" defer></script>
 <script src="JS/ui/compass-calibration.js" defer></script>
 <script src="JS/ui/sensor-calibration.js" defer></script>
-<script src="JS/ui/dronecan-setup.js?v=176" defer></script>
+<script src="JS/core/dronecan-get-node-info.js?v=1" defer></script>
+<script src="JS/ui/dronecan-setup.js?v=188" defer></script>
 <script src="JS/ui/all-params.js?v=20260528a" defer></script>
 
 </body>

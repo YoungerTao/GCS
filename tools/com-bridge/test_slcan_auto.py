@@ -281,6 +281,61 @@ def test_command_long_encode_param7() -> None:
     print("  [ok] COMMAND_LONG encode includes param7")
 
 
+def test_clear_scope_preserves_mavlink_pool() -> None:
+    if not _pymavlink_available():
+        print("  [skip] clear_scope isolation (pymavlink not installed)")
+        return
+
+    from server import SlcanMavlinkMonitor
+
+    mon = SlcanMavlinkMonitor()
+    mon.reset()
+    mon.feed_slcan(f"{BATTERY_CAN_LINE}\r".encode("ascii"))
+    mon.feed_mavlink(_encode_mavlink_can_frame(0x18000005, bytes(8), bus=0))
+    mon.forward_enabled = True
+    mon.forward_bus = 1
+    mon.clear_scope("slcan")
+    slcan_nodes = mon.status(source_prefix="SLCAN")["nodes"]
+    mav_nodes = mon.status(source_prefix="MAVLink", bus_filter=1)["nodes"]
+    assert not slcan_nodes, slcan_nodes
+    assert any(n.get("nodeId") == 5 for n in mav_nodes), mav_nodes
+    assert mon.forward_enabled is True, "slcan close/open must not reset MAVLink forward state"
+    mon.clear_scope("mavlink")
+    mav_nodes = mon.status(source_prefix="MAVLink", bus_filter=1)["nodes"]
+    assert not mav_nodes, mav_nodes
+    print("  [ok] clear_scope keeps opposite transport + forward state")
+
+
+def test_hub_port_conflict_helper() -> None:
+    from server import HubPortConflictError, _assert_hub_port_free
+
+    class FakeHub:
+        def __init__(self, port, open_state=True):
+            self._port = port
+            self._open = open_state
+
+        def status(self):
+            return {"open": self._open, "port": self._port}
+
+    mav = FakeHub("/dev/cu.usbmodem1301")
+    slcan = FakeHub("/dev/cu.usbmodem1303")
+    _assert_hub_port_free("/dev/cu.usbmodem1301", "mavlink", mav, slcan)
+    _assert_hub_port_free("/dev/cu.usbmodem1303", "slcan", mav, slcan)
+    try:
+        _assert_hub_port_free("/dev/cu.usbmodem1301", "slcan", mav, slcan)
+        raise AssertionError("expected HubPortConflictError")
+    except HubPortConflictError as err:
+        assert err.owner == "mavlink"
+        assert err.requester == "slcan"
+    try:
+        _assert_hub_port_free("/dev/cu.usbmodem1303", "mavlink", mav, slcan)
+        raise AssertionError("expected HubPortConflictError for mavlink on slcan port")
+    except HubPortConflictError as err:
+        assert err.owner == "slcan"
+        assert err.requester == "mavlink"
+    print("  [ok] hub port conflict helper")
+
+
 def test_init_bitrate_codes() -> None:
     from server import SLCAN_BITRATE_CODE, init_slcan_adapter
 
@@ -313,6 +368,8 @@ def main() -> int:
         test_default_mavlink_can_filter_whitelist()
         test_can_filter_modify_writes()
         test_command_long_encode_param7()
+        test_clear_scope_preserves_mavlink_pool()
+        test_hub_port_conflict_helper()
         test_init_bitrate_codes()
         test_battery_can_id_layout()
 

@@ -5,9 +5,11 @@
 # 不修改任何 Windows 文件。
 # ============================================================
 
-# 从脚本位置推导项目根目录
+# 共享 macOS 环境（PATH / TMPDIR / GCS_ROOT）
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/macos/gcs-env.sh"
+cd "$GCS_ROOT"
 
 # 颜色
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
@@ -130,35 +132,31 @@ fi
 # ============================================================
 step 5 "创建 Python 虚拟环境并安装依赖..."
 
-if [ -f ".venv/bin/python" ]; then
+if [ -f "$VENV_PY" ]; then
   warn ".venv 已存在"
 else
-  "$PY" -m venv .venv
-  ok "虚拟环境已创建"
+  echo "  正在创建虚拟环境..."
 fi
 
-VENV_PY="$ROOT/.venv/bin/python"
-VENV_PIP="$ROOT/.venv/bin/pip"
-
-echo -e "${BLUE}  安装核心依赖 (requirements.txt)...${NC}"
-"$VENV_PIP" install -U pip setuptools wheel -q
-"$VENV_PIP" install -r "$ROOT/requirements.txt" -q
-ok "核心依赖安装完成"
-
-echo -e "${BLUE}  安装工具依赖 (Pillow, Playwright)...${NC}"
-"$VENV_PIP" install Pillow -q 2>/dev/null && ok "Pillow 安装完成" || warn "Pillow 安装失败（图标生成需要）"
-"$VENV_PIP" install playwright -q 2>/dev/null && ok "Playwright 安装完成" || warn "Playwright 安装失败（截图工具需要）"
-
-echo -e "${BLUE}  验证依赖...${NC}"
-if "$VENV_PY" -c "
-import serial; from pymavlink import mavutil; import dronecan; print('OK')
-" 2>/dev/null; then
-  ok "核心依赖验证通过 (pyserial, pymavlink, dronecan)"
-else
-  fail "依赖验证失败"
-  echo "  请检查网络连接后重新运行"
+echo -e "${BLUE}  检查 pip 并安装依赖（损坏时自动修复）...${NC}"
+if ! "$PY" "$GCS_ROOT/tools/gcs-venv-ensure.py"; then
+  fail "虚拟环境配置失败"
+  echo "  请检查网络后重新双击 install.command"
   read -p "  按回车退出..."
   exit 1
+fi
+ok "核心依赖安装完成 (pyserial, pymavlink, dronecan)"
+
+# 可选工具依赖（失败不阻断）
+if "$VENV_PY" -m pip show Pillow &>/dev/null; then
+  ok "Pillow 已就绪（图标生成）"
+else
+  warn "Pillow 未安装（图标生成需要，可稍后重跑 install.command）"
+fi
+if "$VENV_PY" -m pip show playwright &>/dev/null; then
+  ok "Playwright 已就绪（截图工具）"
+else
+  warn "Playwright 未安装（截图工具需要，可稍后重跑 install.command）"
 fi
 
 # ============================================================
@@ -255,9 +253,10 @@ if [[ "$ENABLE" != "n" && "$ENABLE" != "N" ]]; then
 
   PLIST="$LAUNCH_AGENTS/com.gcs.prewarm.plist"
 
-  # 检测 Homebrew Python 路径（用于 launchd 环境变量）
+  # launchd 子进程 PATH/TMPDIR 与 gcs-env.sh 保持一致
   BREW_PREFIX=$(brew --prefix 2>/dev/null || echo "/opt/homebrew")
   BREW_BIN="$BREW_PREFIX/bin"
+  LAUNCH_PATH="${GCS_ROOT}/.venv/bin:${BREW_BIN}:/usr/local/bin:/usr/bin:/bin"
 
   cat > "$PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -270,13 +269,14 @@ if [[ "$ENABLE" != "n" && "$ENABLE" != "N" ]]; then
 
     <key>ProgramArguments</key>
     <array>
-        <string>$ROOT/.venv/bin/python</string>
-        <string>$ROOT/tools/gcs_watchdog.py</string>
+        <string>$GCS_ROOT/.venv/bin/python</string>
+        <string>$GCS_ROOT/tools/gcs_watchdog.py</string>
+        <string>--prewarm-runtime</string>
         <string>--prewarm-runtime</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>$ROOT</string>
+    <string>$GCS_ROOT</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -286,17 +286,21 @@ if [[ "$ENABLE" != "n" && "$ENABLE" != "N" ]]; then
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>$BREW_BIN:/usr/local/bin:/usr/bin:/bin</string>
+        <string>$LAUNCH_PATH</string>
         <key>TMPDIR</key>
-        <string>/tmp</string>
+        <string>$TMPDIR</string>
         <key>HOME</key>
         <string>$HOME</string>
+        <key>GCS_ROOT</key>
+        <string>$GCS_ROOT</string>
+        <key>GCS_PLATFORM</key>
+        <string>macos</string>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>$ROOT/tools/logs/prewarm.stdout.log</string>
+    <string>$GCS_LOG_DIR/prewarm.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>$ROOT/tools/logs/prewarm.stderr.log</string>
+    <string>$GCS_LOG_DIR/prewarm.stderr.log</string>
 </dict>
 </plist>
 EOF

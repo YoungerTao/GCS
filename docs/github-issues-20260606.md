@@ -348,3 +348,45 @@ Transport protocol, UI mode, node store, poll API, and egress path were not sepa
 - Plan: `docs/dronecan-transport-isolation-plan.md`
 ```
 
+---
+
+## Issue 5（台账 · 已结案，非代码缺陷）
+
+Title:
+
+```text
+[doc/platform] F4 飞控 MAVLink CAN1 解析器 0 帧 — 平台能力限制
+```
+
+Body:
+
+```md
+## Summary
+
+DroneCAN 解析器在 **MAVLink CAN1** 下显示占位节点「飞控（参数配置）」**暂存 · 0 帧**，`CAN_FORWARD` 已 **ACCEPTED**，参数 `CAN_P1_*` / `CAN_D1_*` 配置正确，仍无 `CAN_FRAME`。
+
+## Root Cause
+
+**部分老旧 STM32F4 飞控** 对 **MAVLink CAN_FORWARD → CAN_FRAME 回传** 支持不完整或不可用；非 GCS 解析器 bug。
+
+## GCS Fixes (same investigation)
+
+- COM 桥 / 浏览器统一 `sendCommandLong(32000)`；`compid=0` 修复；桥接 `COMMAND_ACK` 同步。
+
+## Workaround
+
+- F4 + 单 USB：优先 **SLCAN 直连** 或升级 **F7/H7**。
+- 对比 Mission Planner MAVLink CAN1 fps。
+
+## Documentation
+
+- **主台账**：[docs/dronecan-mavlink-can-f4-zero-frames-20260607.md](./dronecan-mavlink-can-f4-zero-frames-20260607.md)
+
+## Status
+
+- [x] Root cause identified (F4 platform)
+- [x] GCS forwarding path verified (ACK ACCEPTED)
+- [x] Documentation written
+- [ ] Optional: UI hint for F4 boards (future)
+```
+

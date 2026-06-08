@@ -310,6 +310,39 @@ def _is_port_actively_bridged(dev_id):
             pass
     return False
 
+
+class HubPortConflictError(Exception):
+    def __init__(self, port, owner, requester):
+        self.port = str(port or "").strip()
+        self.owner = str(owner or "").strip()
+        self.requester = str(requester or "").strip()
+        super().__init__(
+            f"serial port {self.port} is already opened as {self.owner}; "
+            f"cannot open as {self.requester} (use separate USB ports for MAVLink and SLCAN)"
+        )
+
+
+def _assert_hub_port_free(port, requester_label, mavlink_hub=None, slcan_hub=None):
+    """Raise HubPortConflictError when the other hub already owns this port."""
+    dev = str(port or "").strip()
+    if not dev:
+        return
+    requester = str(requester_label or "").strip().lower()
+    mav_hub = mavlink_hub if mavlink_hub is not None else MAVLINK_HUB
+    slcan_hub = slcan_hub if slcan_hub is not None else SLCAN_HUB
+    owners = (("mavlink", mav_hub), ("slcan", slcan_hub))
+    for label, hub in owners:
+        if label == requester:
+            continue
+        try:
+            st = hub.status()
+            if st.get("open") and str(st.get("port") or "").strip() == dev:
+                raise HubPortConflictError(dev, label, requester)
+        except HubPortConflictError:
+            raise
+        except Exception:
+            pass
+
 def _should_probe_port(item):
     dev = str(item.get("deviceId", "")).lower()
     if any(x in dev for x in ("bluetooth", "incoming-port", "debug-console")):
@@ -1126,6 +1159,18 @@ def _monitor_node_key(transport, bus, node_id):
     return (str(transport), int(bus), int(node_id))
 
 
+MAV_CMD_CAN_FORWARD = 32000
+MAV_RESULT_NAMES = (
+    "ACCEPTED",
+    "TEMPORARILY_REJECTED",
+    "DENIED",
+    "UNSUPPORTED",
+    "FAILED",
+    "IN_PROGRESS",
+    "CANCELLED",
+)
+
+
 class SlcanMavlinkMonitor:
     def __init__(self):
         self.lock = threading.Lock()
@@ -1143,6 +1188,8 @@ class SlcanMavlinkMonitor:
         self.node_recent_frames = {}
         self.node_frame_counts = {}
         self.last_frame_at = 0.0
+        self.last_can_forward_ack = None
+        self.mavlink_can_frame_rx = 0
 
     def reset(self):
         with self.lock:
@@ -1159,6 +1206,26 @@ class SlcanMavlinkMonitor:
             self.node_recent_frames = {}
             self.node_frame_counts = {}
             self.last_frame_at = 0.0
+            self.last_can_forward_ack = None
+            self.mavlink_can_frame_rx = 0
+
+    def clear_scope(self, scope):
+        """Clear monitor pools for one transport without tearing down MAVLink forward state."""
+        scope = str(scope or "all").strip().lower()
+        with self.lock:
+            if scope == "mavlink":
+                keys = [k for k in self.nodes if k[0] == "mav"]
+            elif scope == "slcan":
+                keys = [k for k in self.nodes if k[0] == "slcan"]
+                self.slcan_ascii_buffer = bytearray()
+            else:
+                self.reset()
+                return
+            for key in keys:
+                self.nodes.pop(key, None)
+                self.node_ascii.pop(key, None)
+                self.node_recent_frames.pop(key, None)
+                self.node_frame_counts.pop(key, None)
 
     def _trim_frames(self, now):
         self.frame_times = [t for t in self.frame_times if now - t <= 1.0]
@@ -1251,14 +1318,39 @@ class SlcanMavlinkMonitor:
             transport="slcan",
         )
 
+    def _record_can_forward_ack(self, command, result, now):
+        if int(command) != MAV_CMD_CAN_FORWARD:
+            return
+        idx = int(result)
+        name = MAV_RESULT_NAMES[idx] if 0 <= idx < len(MAV_RESULT_NAMES) else f"UNKNOWN({idx})"
+        self.last_can_forward_ack = {
+            "command": MAV_CMD_CAN_FORWARD,
+            "result": idx,
+            "resultName": name,
+            "ts": int(now * 1000),
+        }
+
     def _handle_message(self, msg):
         now = time.time()
         mtype = msg.get_type()
         if mtype == "HEARTBEAT":
-            self.target_system = getattr(msg, "_srcSystem", 1) or 1
-            self.target_component = getattr(msg, "_srcComponent", 1) or 1
+            sys_id = getattr(msg, "_srcSystem", None)
+            if sys_id is not None and int(sys_id) > 0:
+                self.target_system = int(sys_id)
+            comp_id = getattr(msg, "_srcComponent", None)
+            if comp_id is not None and 0 <= int(comp_id) <= 255:
+                self.target_component = int(comp_id)
+            return
+        if mtype == "COMMAND_ACK":
+            msg_dict = msg.to_dict()
+            self._record_can_forward_ack(
+                int(msg_dict.get("command", 0)),
+                int(msg_dict.get("result", 0)),
+                now,
+            )
             return
         if mtype == "CAN_FRAME":
+            self.mavlink_can_frame_rx = int(getattr(self, "mavlink_can_frame_rx", 0) or 0) + 1
             msg_dict = msg.to_dict()
             frame_id = int(msg_dict.get("id", 0))
             raw_data = msg_dict.get("data", [])
@@ -1402,8 +1494,11 @@ class SlcanMavlinkMonitor:
             prefix = str(source_prefix or "").strip()
             return {
                 "forwardEnabled": self.forward_enabled,
+                "forwardBus": int(getattr(self, "forward_bus", 0) or 0),
                 "targetSystem": self.target_system,
                 "targetComponent": self.target_component,
+                "canForwardAck": self.last_can_forward_ack,
+                "mavlinkCanFrameRx": int(getattr(self, "mavlink_can_frame_rx", 0) or 0),
                 "framesPerSecond": len(self.frame_times),
                 "errorCount": self.error_count,
                 "nodes": sorted(
@@ -1756,6 +1851,7 @@ class Handler(BaseHTTPRequestHandler):
                 baudrate = int(payload.get("baudrate") or 115200)
                 if not port:
                     raise RuntimeError("port is required")
+                _assert_hub_port_free(port, "mavlink")
                 tab_id = _get_tab_id(self)
                 current = MAVLINK_HUB.status()
                 already_open = (
@@ -1797,6 +1893,7 @@ class Handler(BaseHTTPRequestHandler):
                 baudrate = int(payload.get("baudrate") or 115200)
                 if not port:
                     raise RuntimeError("port is required")
+                _assert_hub_port_free(port, "mavlink")
                 tab_id = _get_tab_id(self)
                 with _bridge_subscribers_lock:
                     _bridge_subscribers.clear()
@@ -1819,11 +1916,12 @@ class Handler(BaseHTTPRequestHandler):
                 bitrate_kbps = int(payload.get("bitrate_kbps") or 1000)
                 if not port:
                     raise RuntimeError("slcan adapter port not found")
+                _assert_hub_port_free(port, "slcan")
                 try:
                     cport = int(payload.get("slcan_cport") or payload.get("cport") or 1)
                     if cport not in (1, 2):
                         cport = 1
-                    SLCAN_MONITOR.reset()
+                    SLCAN_MONITOR.clear_scope("slcan")
                     SLCAN_MONITOR.slcan_cport = cport
                     status = SLCAN_HUB.open(port, baudrate)
                     init_slcan_adapter(SLCAN_HUB, bitrate_kbps=bitrate_kbps)
@@ -1856,7 +1954,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.path == "/slcan-close":
                 SLCAN_HUB.close()
-                SLCAN_MONITOR.reset()
+                SLCAN_MONITOR.clear_scope("slcan")
                 send_json(self, 200, {"ok": True})
                 return
             if self.path in ("/slcan-forward-enable", "/mavlink-can-forward-enable"):
@@ -1918,21 +2016,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.path == "/slcan-monitor-reset":
                 scope = str(payload.get("scope") or "all").strip().lower()
-                with SLCAN_MONITOR.lock:
-                    if scope == "mavlink":
-                        keys = [k for k in SLCAN_MONITOR.nodes if k[0] == "mav"]
-                        for key in keys:
-                            SLCAN_MONITOR.nodes.pop(key, None)
-                            SLCAN_MONITOR.node_recent_frames.pop(key, None)
-                            SLCAN_MONITOR.node_frame_counts.pop(key, None)
-                    elif scope == "slcan":
-                        keys = [k for k in SLCAN_MONITOR.nodes if k[0] == "slcan"]
-                        for key in keys:
-                            SLCAN_MONITOR.nodes.pop(key, None)
-                            SLCAN_MONITOR.node_recent_frames.pop(key, None)
-                            SLCAN_MONITOR.node_frame_counts.pop(key, None)
-                    else:
-                        SLCAN_MONITOR.reset()
+                SLCAN_MONITOR.clear_scope(scope)
                 send_json(self, 200, {"ok": True, "scope": scope})
                 return
             if self.path == "/slcan-inject":
@@ -2013,6 +2097,16 @@ class Handler(BaseHTTPRequestHandler):
                 OTA_SESSIONS.pop(node_id, None)
                 send_json(self, 200, finished)
                 return
+        except HubPortConflictError as e:
+            send_json(self, 409, {
+                "ok": False,
+                "error": str(e),
+                "conflict": True,
+                "port": e.port,
+                "owner": e.owner,
+                "requester": e.requester,
+            })
+            return
         except Exception as e:
             send_json(self, 500, {"ok": False, "error": str(e)})
             return

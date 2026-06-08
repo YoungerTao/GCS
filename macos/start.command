@@ -5,11 +5,11 @@
 # 不修改任何 Windows 文件
 # ============================================================
 
-# 从脚本位置推导项目根目录（不依赖环境变量）
+# 共享 macOS 环境（PATH / TMPDIR / GCS_ROOT）
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
-
-VENV_PY="$ROOT/.venv/bin/python"
+# shellcheck disable=SC1091
+source "$ROOT/macos/gcs-env.sh"
+cd "$GCS_ROOT"
 UI_URL="http://127.0.0.1:8766/index.html"
 BOOT_PAGE="$ROOT/boot.html"
 
@@ -31,23 +31,29 @@ echo -e "${BLUE}[第 1 步]${NC} 检查环境..."
 if [ ! -f "$VENV_PY" ]; then
   echo -e "  ${RED}✗ 未检测到 .venv${NC}"
   echo ""
-  echo "  请先运行安装器（仅需一次）："
-  echo "    双击 macos/install.command"
+  echo "  请先双击 macos/install.command（全自动，仅需一次）"
   echo ""
   read -p "  按回车退出..."
   exit 1
 fi
 
-# 快速检查核心依赖
 if ! "$VENV_PY" -c "import serial, pymavlink, dronecan" 2>/dev/null; then
   echo -e "  ${YELLOW}⚠ 依赖不完整，正在自动修复...${NC}"
-  "$VENV_PY" -m pip install -r "$ROOT/requirements.txt" -q 2>/dev/null
-  if ! "$VENV_PY" -c "import serial, pymavlink, dronecan" 2>/dev/null; then
-    echo -e "  ${RED}✗ 依赖修复失败${NC}"
-    echo "  请重新运行 macos/install.command"
+  if ! python3 "$GCS_ROOT/tools/gcs-venv-ensure.py"; then
+    echo -e "  ${RED}✗ 自动修复失败${NC}"
+    echo "  请双击 macos/install.command"
     read -p "  按回车退出..."
     exit 1
   fi
+  echo -e "  ${GREEN}✓${NC} 依赖已自动修复"
+fi
+if ! "$VENV_PY" -m pip --version &>/dev/null; then
+  echo -e "  ${YELLOW}⚠ pip 异常，正在自动修复...${NC}"
+  python3 "$GCS_ROOT/tools/gcs-venv-ensure.py" || {
+    echo -e "  ${RED}✗ pip 修复失败，请双击 macos/install.command${NC}"
+    read -p "  按回车退出..."
+    exit 1
+  }
 fi
 
 echo -e "  ${GREEN}✓${NC} 环境就绪"
@@ -59,6 +65,12 @@ echo -e "${BLUE}[第 2 步]${NC} 检查运行状态..."
 
 if curl -sf http://127.0.0.1:8766/__gcs/ping >/dev/null 2>&1; then
   echo -e "  ${GREEN}✓${NC} 服务已在运行（可能来自开机预热）"
+  echo -e "  ${BLUE}·${NC} 检查 COM 桥接是否为最新代码（git pull 后自动刷新）..."
+  if "$VENV_PY" "$GCS_ROOT/tools/gcs-mac-refresh.py" >/dev/null 2>&1; then
+    echo -e "  ${GREEN}✓${NC} COM 桥接已就绪"
+  else
+    echo -e "  ${YELLOW}⚠${NC} COM 桥接正在刷新，请稍候在浏览器中重连串口"
+  fi
   open "$UI_URL"
   echo -e "  ${GREEN}✓${NC} 浏览器已打开"
   sleep 1
@@ -84,13 +96,10 @@ fi
 # ============================================================
 echo -e "${BLUE}[第 4 步]${NC} 启动后台服务..."
 
-mkdir -p "$ROOT/tools/logs"
+mkdir -p "$GCS_LOG_DIR"
 
-# 设置 TMPDIR 并启动 gcs-launch.py
-# TMPDIR 替代 Windows 的 TEMP 环境变量，供 gcs-launch.py 的锁文件使用
-export TMPDIR="${TMPDIR:-/tmp}"
-nohup "$VENV_PY" "$ROOT/tools/gcs-launch.py" \
-  > "$ROOT/tools/logs/gcs-launch.stdout.log" 2>&1 &
+nohup "$VENV_PY" "$GCS_ROOT/tools/gcs-launch.py" \
+  > "$GCS_LOG_DIR/gcs-launch.stdout.log" 2>&1 &
 
 LAUNCH_PID=$!
 echo -e "  ${GREEN}✓${NC} 服务进程已启动 (PID: $LAUNCH_PID)"

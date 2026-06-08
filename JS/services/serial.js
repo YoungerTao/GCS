@@ -976,11 +976,26 @@ async function send_v2(msgid, payload, crc_extra) {
   await w.write(new Uint8Array(pkt));
 }
 
+function resolveMavlinkTargetSystem(explicit) {
+  if (explicit != null && Number(explicit) > 0) return Number(explicit);
+  const s = Number(window.fcSysid ?? window.sysid);
+  return Number.isFinite(s) && s > 0 ? s : 1;
+}
+
+function resolveMavlinkTargetComponent(explicit) {
+  if (explicit != null && Number(explicit) >= 0 && Number(explicit) <= 255) return Number(explicit);
+  const c = Number(window.fcCompid ?? window.compid);
+  return Number.isFinite(c) && c >= 0 && c <= 255 ? c : 1;
+}
+
+window.resolveMavlinkTargetSystem = resolveMavlinkTargetSystem;
+window.resolveMavlinkTargetComponent = resolveMavlinkTargetComponent;
+
 async function sendCommandLong(command, p1, p2, p3, p4, p5, p6, p7, confirmation, targetSystem, targetComponent) {
   if (!(window.writer || writer)) throw new Error("未连接串口");
 
-  const ts = targetSystem != null && Number(targetSystem) > 0 ? Number(targetSystem) : (window.sysid || 1);
-  const tc = targetComponent != null ? Number(targetComponent) : (window.compid || 1);
+  const ts = resolveMavlinkTargetSystem(targetSystem);
+  const tc = resolveMavlinkTargetComponent(targetComponent);
 
   const payload = [
     ...f32bytes(p1 || 0), ...f32bytes(p2 || 0), ...f32bytes(p3 || 0),
@@ -994,8 +1009,8 @@ async function sendCommandLong(command, p1, p2, p3, p4, p5, p6, p7, confirmation
 /** MAVLink CAN_FRAME (#386). busUi: 1=CAN1, 2=CAN2 (mavlink bus field is 0-indexed). */
 async function sendMavlinkCanFrame(frameId, dataBytes, busUi = 1, targetSystem, targetComponent) {
   if (!(window.writer || writer)) throw new Error("未连接串口");
-  const ts = targetSystem != null && Number(targetSystem) > 0 ? Number(targetSystem) : (window.sysid || 1);
-  const tc = targetComponent != null ? Number(targetComponent) : (window.compid || 1);
+  const ts = resolveMavlinkTargetSystem(targetSystem);
+  const tc = resolveMavlinkTargetComponent(targetComponent);
   const busMav = Math.max(0, (Number(busUi) || 1) - 1);
   const data = dataBytes instanceof Uint8Array ? dataBytes : new Uint8Array(dataBytes || []);
   const dlen = Math.min(64, data.length);
@@ -1009,6 +1024,29 @@ async function sendMavlinkCanFrame(frameId, dataBytes, busUi = 1, targetSystem, 
   raw.set(data.subarray(0, dlen), 14);
   const crcExtra = typeof window.getMavlinkCrcExtra === "function" ? window.getMavlinkCrcExtra(386) : 8;
   await send_v2(386, Array.from(raw.slice(0, 14 + dlen)), crcExtra || 8);
+}
+
+/** Mission Planner DroneCAN whitelist — must match the serial link used for CAN_FORWARD. */
+const DEFAULT_MAVLINK_CAN_FILTER_IDS = [
+  0, 341, 1, 5, 11, 10, 40, 48, 45, 390, 16383,
+];
+
+/** MAVLink CAN_FILTER_MODIFY (#388). busUi: 1=CAN1, 2=CAN2 (mavlink bus field is 0-indexed). */
+async function sendMavlinkCanFilterModify(busUi = 1, ids, operation = 0, targetSystem, targetComponent) {
+  if (!(window.writer || writer)) throw new Error("未连接串口");
+  const ts = resolveMavlinkTargetSystem(targetSystem);
+  const tc = resolveMavlinkTargetComponent(targetComponent);
+  const busMav = Math.max(0, (Number(busUi) || 1) - 1);
+  const idList = Array.isArray(ids) && ids.length ? ids.slice(0, 16) : DEFAULT_MAVLINK_CAN_FILTER_IDS.slice();
+  while (idList.length < 16) idList.push(0);
+  const numIds = Math.max(1, idList.filter((x) => Number(x) > 0).length);
+  const payload = [ts & 0xff, tc & 0xff, busMav & 0xff, operation & 0xff, numIds & 0xff];
+  for (let i = 0; i < 16; i += 1) {
+    const v = Number(idList[i]) & 0xffff;
+    payload.push(v & 0xff, (v >> 8) & 0xff);
+  }
+  const crcExtra = typeof window.getMavlinkCrcExtra === "function" ? window.getMavlinkCrcExtra(388) : 8;
+  await send_v2(388, payload, crcExtra || 8);
 }
 
 const MAV_CMD_REQUEST_MESSAGE = 512;
@@ -1334,6 +1372,7 @@ window.send_v2 = send_v2;
 window.sendMavlinkV2 = send_v2;
 window.sendCommandLong = sendCommandLong;
 window.sendMavlinkCanFrame = sendMavlinkCanFrame;
+window.sendMavlinkCanFilterModify = sendMavlinkCanFilterModify;
 window.sendHeartbeat = sendHeartbeat;
 window.sendAccelcalVehiclePos = sendAccelcalVehiclePos;
 

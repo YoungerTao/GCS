@@ -1,9 +1,5 @@
 /* GCS STATUSTEXT 消息栏 — 深色主题，等级仅用文字颜色 + Critical 行背景 */
 
-.log-tab {
-  position: relative;
-}
-
 .log-tab-badge {
   position: absolute;
   top: -4px;

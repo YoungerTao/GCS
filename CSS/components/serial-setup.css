@@ -137,6 +137,86 @@
   gap: 8px;
   min-height: 0;
   align-self: start;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.serial-port-card:focus-visible {
+  outline: 2px solid rgba(99, 115, 255, 0.75);
+  outline-offset: 2px;
+}
+
+.serial-port-card[class*="serial-port-card--n"] {
+  --serial-card-accent: #6373ff;
+  --serial-card-bg-a: rgba(32, 48, 88, 0.72);
+  --serial-card-bg-b: rgba(18, 24, 34, 0.94);
+  border-color: color-mix(in srgb, var(--serial-card-accent) 42%, #2b3150);
+  background: linear-gradient(165deg, var(--serial-card-bg-a), var(--serial-card-bg-b));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--serial-card-accent) 18%, transparent);
+}
+
+.serial-port-card[class*="serial-port-card--n"]:hover {
+  border-color: color-mix(in srgb, var(--serial-card-accent) 62%, #fff);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--serial-card-accent) 22%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--serial-card-accent) 16%, transparent),
+    0 0 16px color-mix(in srgb, var(--serial-card-accent) 12%, transparent);
+}
+
+.serial-port-card--selected {
+  border-color: color-mix(in srgb, var(--serial-card-accent) 82%, #fff) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--serial-card-accent) 30%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--serial-card-accent) 38%, transparent),
+    0 0 24px color-mix(in srgb, var(--serial-card-accent) 24%, transparent) !important;
+}
+
+.serial-port-card--n0 {
+  --serial-card-accent: #4a90e2;
+  --serial-card-bg-a: rgba(32, 56, 96, 0.78);
+  --serial-card-bg-b: rgba(16, 22, 38, 0.94);
+}
+
+.serial-port-card--n1 {
+  --serial-card-accent: #9b59b6;
+  --serial-card-bg-a: rgba(58, 36, 88, 0.78);
+  --serial-card-bg-b: rgba(20, 16, 34, 0.94);
+}
+
+.serial-port-card--n2 {
+  --serial-card-accent: #2ecc71;
+  --serial-card-bg-a: rgba(24, 72, 48, 0.78);
+  --serial-card-bg-b: rgba(14, 24, 20, 0.94);
+}
+
+.serial-port-card--n3 {
+  --serial-card-accent: #f1c40f;
+  --serial-card-bg-a: rgba(88, 68, 20, 0.78);
+  --serial-card-bg-b: rgba(28, 24, 12, 0.94);
+}
+
+.serial-port-card--n4 {
+  --serial-card-accent: #e67e22;
+  --serial-card-bg-a: rgba(88, 52, 24, 0.78);
+  --serial-card-bg-b: rgba(28, 20, 14, 0.94);
+}
+
+.serial-port-card--n5 {
+  --serial-card-accent: #ff5722;
+  --serial-card-bg-a: rgba(88, 36, 28, 0.78);
+  --serial-card-bg-b: rgba(28, 16, 14, 0.94);
+}
+
+.serial-port-card--n6 {
+  --serial-card-accent: #00bcd4;
+  --serial-card-bg-a: rgba(16, 68, 82, 0.78);
+  --serial-card-bg-b: rgba(12, 24, 30, 0.94);
+}
+
+.serial-port-card--n7 {
+  --serial-card-accent: #26a69a;
+  --serial-card-bg-a: rgba(20, 68, 64, 0.78);
+  --serial-card-bg-b: rgba(12, 26, 26, 0.94);
 }
 
 .serial-port-card-head {
@@ -144,12 +224,12 @@
   flex-direction: column;
   gap: 2px;
   padding-bottom: 6px;
-  border-bottom: 1px solid rgba(106, 127, 190, 0.2);
+  border-bottom: 1px solid color-mix(in srgb, var(--serial-card-accent, #6a7fbe) 28%, rgba(106, 127, 190, 0.2));
 }
 
 .serial-port-card-head strong {
   font-size: 14px;
-  color: #eef2ff;
+  color: color-mix(in srgb, var(--serial-card-accent, #eef2ff) 18%, #eef2ff);
 }
 
 .serial-port-card-sub {
