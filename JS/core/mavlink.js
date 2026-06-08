@@ -75,6 +75,48 @@ function getHomeState() {
   }
 }
 
+function ensureGpsTelemetryState() {
+  const root = window.gpsTelemetry || {};
+  if (!Array.isArray(root.instances) || root.instances.length < 2) {
+    root.instances = [
+      { index: 0, label: "GPS1" },
+      { index: 1, label: "GPS2" },
+    ];
+  }
+  root.instances = root.instances.map((item, index) => ({
+    index,
+    label: index === 0 ? "GPS1" : "GPS2",
+    rawMsgId: index === 0 ? 24 : 124,
+    fixType: 0,
+    satellitesVisible: 0,
+    lat: null,
+    lon: null,
+    altM: null,
+    eph: null,
+    epv: null,
+    velMps: null,
+    cogDeg: null,
+    hAccM: null,
+    vAccM: null,
+    velAccMps: null,
+    yawDeg: null,
+    lastUpdateMs: 0,
+    ...item,
+  }));
+  root.rtk = {
+    source: "none",
+    injectStatus: "idle",
+    health: "offline",
+    lastCorrectionMs: 0,
+    ageSec: null,
+    latencyMs: null,
+    boundInstance: 0,
+    ...(root.rtk || {}),
+  };
+  window.gpsTelemetry = root;
+  return root;
+}
+
 function refreshNavGuidanceValidity() {
   const nav = getNavGuidanceState();
   const gpsFix = Number(window.gps_fix_type) || 0;
@@ -450,14 +492,34 @@ if(id === 0){ // HEARTBEAT — 本项目约定线序（与 MAVLink common.xml �
   if ((id === 24 || id === 124) && payload.length >= 29) {
     // GPS_RAW_INT / GPS2_RAW_INT — fix_type @28, satellites_visible @29（非 @4）
     const dv = mavlinkPayloadView(payload);
+    const gpsState = ensureGpsTelemetryState();
+    const gpsIndex = id === 124 ? 1 : 0;
+    const inst = gpsState.instances[gpsIndex];
     const newFix = dv.getUint8(28);
     const prevFix = Number(window.gps_fix_type) || 0;
     window.gps_fix_type = Math.max(prevFix, newFix);
+    inst.fixType = newFix;
     if (payload.length >= 30) {
       const newSats = dv.getUint8(29);
       const prevSats = Number(window.gps_satellites_visible) || 0;
       window.gps_satellites_visible = Math.max(prevSats, newSats);
+      inst.satellitesVisible = newSats;
     }
+    if (payload.length >= 24) {
+      inst.lat = dv.getInt32(8, true) / 1e7;
+      inst.lon = dv.getInt32(12, true) / 1e7;
+      inst.altM = dv.getInt32(16, true) / 1000;
+      inst.eph = dv.getUint16(20, true) / 100;
+      inst.epv = dv.getUint16(22, true) / 100;
+    }
+    if (payload.length >= 26) {
+      inst.velMps = dv.getUint16(24, true) / 100;
+    }
+    if (payload.length >= 28) {
+      const cog = dv.getUint16(26, true);
+      inst.cogDeg = cog === 65535 ? null : cog / 100;
+    }
+    inst.lastUpdateMs = Date.now();
     window._lastGpsRawMs = Date.now();
     refreshNavGuidanceValidity();
     emitTelemetryFrame();

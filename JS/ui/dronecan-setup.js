@@ -602,9 +602,13 @@
     updateSlcanPortCardVisibility();
     const fcCan = getFlightControllerCanIdentity();
     document.querySelectorAll('[data-dc-transport="can2"]').forEach((btn) => {
-      const can2Ok = !!fcCan?.canDrivers?.[1];
-      btn.disabled = !can2Ok;
-      btn.title = can2Ok ? "" : dcText("CAN2 not configured on flight controller", "飞控未启用 CAN2");
+      const hasParamTable = window.params instanceof Map && window.params.size > 0;
+      const can2ExplicitlyConfigured = !!fcCan?.canDrivers?.[1];
+      const can2Ok = !hasParamTable || can2ExplicitlyConfigured;
+      btn.disabled = false;
+      btn.title = can2Ok
+        ? ""
+        : dcText("CAN2 not configured on flight controller", "飞控未启用 CAN2");
     });
     if (!slcanOk && currentTransport === "slcan") {
       setTransport("can1", { skipSession: true });
@@ -1700,7 +1704,6 @@
   }
 
   async function pollSlcanTraffic() {
-    if (isInspectorDemoMode()) return;
     if (!slcanPollActive || (!slcanSessionReady && !isSlcanAutotestMode())) return;
     if (shouldPollBrowserSlcan()) {
       applyNodeSnapshot(slcanRuntime, runtimeToNodeStatus(slcanRuntime), () => slcanSessionReady);
@@ -1735,7 +1738,6 @@
   }
 
   async function pollMavlinkCanTraffic(bus) {
-    if (isInspectorDemoMode()) return;
     const busUi = Number(bus) === 2 ? 2 : 1;
     const transport = busUi === 2 ? "can2" : "can1";
     const runtime = getRuntimeForTransport(transport);
@@ -1846,7 +1848,6 @@
   }
 
   function buildLiveNodes() {
-    if (isInspectorDemoMode()) return demoInspectorNodes();
     const transport = getActiveTransport();
     const nodes = Array.from(getActiveRuntime().nodes.values())
       .filter((node) => {
@@ -1959,47 +1960,7 @@
                 <tbody id="sc-dc-node-body"></tbody>
               </table>
             </div>
-            <div class="sc-dc-node-detail-band">
-              <div class="sc-dc-band-grid">
-                <div class="sc-dc-band-row">
-                  <div class="sc-dc-band-label">${dcText("Node", "节点")}</div>
-                  <div class="sc-dc-band-row-values">
-                    <div id="sc-dc-band-id" class="sc-dc-band-value">-</div>
-                    <div id="sc-dc-band-name" class="sc-dc-band-value">-</div>
-                  </div>
-                </div>
-                <div class="sc-dc-band-row">
-                  <div class="sc-dc-band-label">${dcText("State", "状态")}</div>
-                  <div class="sc-dc-band-row-values sc-dc-band-row-values-3">
-                    <div id="sc-dc-band-mode" class="sc-dc-band-value">-</div>
-                    <div id="sc-dc-band-health" class="sc-dc-band-value">-</div>
-                    <div id="sc-dc-band-uptime" class="sc-dc-band-value">-</div>
-                  </div>
-                </div>
-                <div class="sc-dc-band-row">
-                  <div class="sc-dc-band-label">${dcText("Vendor code", "厂商码")}</div>
-                  <div class="sc-dc-band-row-values">
-                    <div id="sc-dc-band-vendor" class="sc-dc-band-value sc-dc-band-value-wide">-</div>
-                  </div>
-                </div>
-                <div class="sc-dc-band-row">
-                  <div class="sc-dc-band-label">${dcText("Software", "软件")}</div>
-                  <div class="sc-dc-band-row-values">
-                    <div id="sc-dc-band-sw" class="sc-dc-band-value">-</div>
-                    <div id="sc-dc-band-crc" class="sc-dc-band-value">-</div>
-                  </div>
-                </div>
-                <div class="sc-dc-band-row">
-                  <div class="sc-dc-band-label">${dcText("Hardware", "硬件")}</div>
-                  <div class="sc-dc-band-row-values">
-                    <div id="sc-dc-band-hw" class="sc-dc-band-value">-</div>
-                    <div id="sc-dc-band-uid" class="sc-dc-band-value">-</div>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
-
         </div>
       </div>
 
@@ -2031,7 +1992,7 @@
       document.head.appendChild(style);
     }
     style.textContent = `
-      .sc-dc-workbench { margin-top:14px; position:relative; overflow:hidden; padding:18px; border-radius:18px; background:linear-gradient(180deg, rgba(18, 24, 38, 0.96), rgba(14, 19, 31, 0.98)); border:1px solid rgba(84, 99, 130, 0.34); box-shadow:0 22px 50px rgba(0,0,0,0.24); }
+      .sc-dc-workbench { margin-top:10px; position:relative; overflow:hidden; padding:12px; border-radius:16px; background:linear-gradient(180deg, rgba(18, 24, 38, 0.96), rgba(14, 19, 31, 0.98)); border:1px solid rgba(84, 99, 130, 0.34); box-shadow:0 18px 42px rgba(0,0,0,0.22); }
       .sc-dc-workbench::before {
         content:"";
         position:absolute;
@@ -2044,20 +2005,20 @@
       }
       .sc-dc-workbench [hidden] { display:none !important; }
       .sc-dc-toolbar, .sc-dc-hint-row { display:flex; gap:14px; align-items:stretch; justify-content:space-between; flex-wrap:wrap; position:relative; z-index:1; }
-      .sc-dc-toolbar { margin-bottom:14px; }
+      .sc-dc-toolbar { margin-bottom:10px; }
       .sc-dc-toolbar-card {
         min-width:min(100%, 320px);
         display:grid;
-        gap:10px;
-        padding:12px 14px;
-        border-radius:14px;
+        gap:8px;
+        padding:10px 12px;
+        border-radius:12px;
         background:rgba(14, 21, 34, 0.78);
         border:1px solid rgba(71, 87, 115, 0.44);
         box-shadow:inset 0 1px 0 rgba(255,255,255,0.03);
         align-content:center;
       }
-      .sc-dc-toolbar-card--mode { flex:1 1 520px; }
-      .sc-dc-toolbar-card--slcan { flex:1 1 420px; }
+      .sc-dc-toolbar-card--mode { flex:1 1 100%; }
+      .sc-dc-toolbar-card--slcan { flex:1 1 100%; }
       .sc-dc-toolbar-mode-row { display:flex; gap:12px; align-items:center; min-width:0; }
       .sc-dc-toolbar-mode-main { flex:1 1 auto; min-width:0; }
       .sc-dc-quick-row { flex:1 1 520px; align-self:stretch; margin-bottom:0; padding:10px 12px; border:none; background:transparent; }
@@ -2103,8 +2064,205 @@
       .sc-dc-can-quick-table th { color:#94a9ce; font-weight:600; }
       .sc-dc-can-quick-table td:first-child { font-family:var(--font-mono, monospace); color:#eef4ff; white-space:nowrap; }
       .sc-dc-can-quick-table td:nth-child(2) { color:#dff57d; font-family:var(--font-mono, monospace); }
+      .sc-dc-can-quick-wrap--protocol {
+        border:1px solid rgba(67, 84, 114, 0.42);
+        border-radius:14px;
+        overflow:hidden;
+        background:linear-gradient(180deg, rgba(9, 14, 26, 0.92), rgba(7, 11, 20, 0.98));
+        box-shadow:inset 0 1px 0 rgba(255,255,255,0.03);
+      }
+      .sc-dc-can-quick-table--protocol thead th {
+        position:sticky;
+        top:0;
+        z-index:2;
+        background:rgba(14, 21, 36, 0.96);
+        backdrop-filter:blur(6px);
+      }
+      .sc-dc-can-quick-table--protocol tbody tr {
+        position:relative;
+        isolation:isolate;
+        transition:transform .18s ease, filter .18s ease, box-shadow .18s ease;
+      }
+      .sc-dc-can-quick-table--protocol tbody tr::before {
+        content:"";
+        position:absolute;
+        inset:0;
+        pointer-events:none;
+        z-index:-2;
+        opacity:.95;
+      }
+      .sc-dc-can-quick-table--protocol tbody tr::after {
+        content:"";
+        position:absolute;
+        inset:0;
+        pointer-events:none;
+        z-index:-1;
+        background:linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.12) 48%, transparent 100%);
+        transform:translateX(-135%);
+        opacity:0;
+      }
+      .sc-dc-can-quick-table--protocol tbody tr:hover {
+        transform:translateX(2px) scale(1.005);
+        filter:brightness(1.06);
+        box-shadow:inset 0 0 0 1px rgba(255,255,255,0.06);
+      }
+      .sc-dc-can-quick-table--protocol tbody tr:hover::after {
+        opacity:1;
+        animation:sc-dc-row-sheen 1.35s ease;
+      }
+      .sc-dc-can-quick-table--protocol tbody tr td {
+        border-bottom-color:rgba(255,255,255,0.08);
+        background:transparent;
+      }
+      .sc-dc-can-quick-table--protocol tbody tr td:first-child {
+        font-weight:700;
+        color:#eff6ff;
+      }
+      .sc-dc-can-quick-table--protocol tbody tr td:nth-child(2) {
+        font-weight:700;
+        text-shadow:0 0 10px rgba(255,255,255,0.08);
+      }
+      .sc-dc-can-quick-row--tone1::before { background:linear-gradient(90deg, rgba(37, 99, 235, 0.26), rgba(37, 99, 235, 0.06)); }
+      .sc-dc-can-quick-row--tone2::before { background:linear-gradient(90deg, rgba(8, 145, 178, 0.26), rgba(8, 145, 178, 0.06)); }
+      .sc-dc-can-quick-row--tone3::before { background:linear-gradient(90deg, rgba(5, 150, 105, 0.24), rgba(5, 150, 105, 0.06)); }
+      .sc-dc-can-quick-row--tone4::before { background:linear-gradient(90deg, rgba(101, 163, 13, 0.24), rgba(101, 163, 13, 0.06)); }
+      .sc-dc-can-quick-row--tone5::before { background:linear-gradient(90deg, rgba(217, 119, 6, 0.24), rgba(217, 119, 6, 0.06)); }
+      .sc-dc-can-quick-row--tone6::before { background:linear-gradient(90deg, rgba(234, 88, 12, 0.24), rgba(234, 88, 12, 0.06)); }
+      .sc-dc-can-quick-row--tone7::before { background:linear-gradient(90deg, rgba(220, 38, 38, 0.22), rgba(220, 38, 38, 0.06)); }
+      .sc-dc-can-quick-row--tone8::before { background:linear-gradient(90deg, rgba(147, 51, 234, 0.22), rgba(147, 51, 234, 0.06)); }
+      .sc-dc-can-quick-row--animated { animation:sc-dc-row-breathe 4.6s ease-in-out infinite; }
+      .sc-dc-can-quick-row--tone1.sc-dc-can-quick-row--animated { animation-delay:0s; }
+      .sc-dc-can-quick-row--tone2.sc-dc-can-quick-row--animated { animation-delay:.2s; }
+      .sc-dc-can-quick-row--tone3.sc-dc-can-quick-row--animated { animation-delay:.4s; }
+      .sc-dc-can-quick-row--tone4.sc-dc-can-quick-row--animated { animation-delay:.6s; }
+      .sc-dc-can-quick-row--tone5.sc-dc-can-quick-row--animated { animation-delay:.8s; }
+      .sc-dc-can-quick-row--tone6.sc-dc-can-quick-row--animated { animation-delay:1s; }
+      .sc-dc-can-quick-row--tone7.sc-dc-can-quick-row--animated { animation-delay:1.2s; }
+      .sc-dc-can-quick-row--tone8.sc-dc-can-quick-row--animated { animation-delay:1.4s; }
+      @keyframes sc-dc-row-breathe {
+        0%, 100% { filter:saturate(1) brightness(1); }
+        50% { filter:saturate(1.08) brightness(1.05); }
+      }
+      @keyframes sc-dc-row-sheen {
+        from { transform:translateX(-135%); }
+        to { transform:translateX(135%); }
+      }
       .sc-dc-can-quick-empty { color:#94a9ce; font-size:13px; margin:0; }
-      .sc-dc-modal.sc-dc-modal--wide { width:min(920px, calc(100vw - 28px)); }
+      .sc-dc-modal.sc-dc-modal--wide { width:min(1040px, calc(100vw - 28px)); }
+      .sc-dc-canproto-form { display:grid; gap:10px; }
+      .sc-dc-canproto-table-wrap {
+        overflow-y:auto;
+        overflow-x:clip;
+        border:1px solid rgba(67, 84, 114, 0.42);
+        border-radius:14px;
+        max-height:min(62vh, 540px);
+        background:rgba(8, 12, 22, 0.6);
+      }
+      .sc-dc-canproto-table {
+        table-layout:fixed;
+        width:100%;
+        border-collapse:collapse;
+        font-size:12px;
+      }
+      .sc-dc-canproto-table thead th:nth-child(1),
+      .sc-dc-canproto-table tbody td:nth-child(1) { width:27%; }
+      .sc-dc-canproto-table thead th:nth-child(2),
+      .sc-dc-canproto-table tbody td:nth-child(2) { width:16%; }
+      .sc-dc-canproto-table thead th:nth-child(3),
+      .sc-dc-canproto-table tbody td:nth-child(3) { width:57%; }
+      .sc-dc-canproto-table thead th {
+        position:sticky;
+        top:0;
+        z-index:2;
+        text-align:left;
+        padding:9px 12px;
+        background:rgba(18, 24, 38, 0.98);
+        color:#8ea4cb;
+        font-weight:700;
+        border-bottom:1px solid rgba(67, 84, 114, 0.42);
+        white-space:nowrap;
+      }
+      .sc-dc-canproto-table tbody td {
+        padding:0 12px;
+        height:48px;
+        vertical-align:middle;
+        border-bottom:1px solid rgba(67, 84, 114, 0.18);
+        overflow:hidden;
+      }
+      .sc-dc-canproto-row {
+        position:relative;
+        transition:transform .18s ease, filter .18s ease, box-shadow .18s ease;
+        animation:sc-dc-row-breathe 4.6s ease-in-out infinite;
+      }
+      .sc-dc-canproto-row:hover {
+        transform:translateX(2px);
+        filter:brightness(1.06);
+      }
+      .sc-dc-canproto-row.is-selected {
+        box-shadow:inset 0 0 0 1px rgba(255,255,255,0.88), inset 0 0 0 3px rgba(91,140,255,0.28);
+        filter:brightness(1.08);
+      }
+      .sc-dc-canproto-row.is-dirty .sc-dc-canproto-input {
+        border-color:#d9ef8f;
+        box-shadow:0 0 0 1px rgba(217, 239, 143, 0.24);
+      }
+      .sc-dc-canproto-row--i1 td { background:linear-gradient(90deg, rgba(37, 99, 235, 0.24), rgba(16, 22, 34, 0.92)); }
+      .sc-dc-canproto-row--i2 td { background:linear-gradient(90deg, rgba(8, 145, 178, 0.24), rgba(16, 22, 34, 0.92)); }
+      .sc-dc-canproto-row--i3 td { background:linear-gradient(90deg, rgba(5, 150, 105, 0.22), rgba(16, 22, 34, 0.92)); }
+      .sc-dc-canproto-row--i4 td { background:linear-gradient(90deg, rgba(101, 163, 13, 0.22), rgba(16, 22, 34, 0.92)); }
+      .sc-dc-canproto-row--i5 td { background:linear-gradient(90deg, rgba(217, 119, 6, 0.22), rgba(16, 22, 34, 0.92)); }
+      .sc-dc-canproto-row--i6 td { background:linear-gradient(90deg, rgba(234, 88, 12, 0.22), rgba(16, 22, 34, 0.92)); }
+      .sc-dc-canproto-row--i7 td { background:linear-gradient(90deg, rgba(220, 38, 38, 0.2), rgba(16, 22, 34, 0.92)); }
+      .sc-dc-canproto-row--i8 td { background:linear-gradient(90deg, rgba(147, 51, 234, 0.2), rgba(16, 22, 34, 0.92)); }
+      .sc-dc-canproto-row--i1 { animation-delay:0s; }
+      .sc-dc-canproto-row--i2 { animation-delay:.15s; }
+      .sc-dc-canproto-row--i3 { animation-delay:.3s; }
+      .sc-dc-canproto-row--i4 { animation-delay:.45s; }
+      .sc-dc-canproto-row--i5 { animation-delay:.6s; }
+      .sc-dc-canproto-row--i6 { animation-delay:.75s; }
+      .sc-dc-canproto-row--i7 { animation-delay:.9s; }
+      .sc-dc-canproto-row--i8 { animation-delay:1.05s; }
+      .sc-dc-canproto-name {
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        font-family:var(--font-mono, monospace);
+        font-weight:700;
+        color:#eef4ff;
+      }
+      .sc-dc-canproto-value-cell { padding-right:12px; }
+      .sc-dc-canproto-input {
+        width:100%;
+        min-width:0;
+        box-sizing:border-box;
+        background:rgba(8, 12, 22, 0.74);
+        color:#e7f089;
+        border:1px solid rgba(255,255,255,0.16);
+        border-radius:6px;
+        padding:7px 10px;
+        height:34px;
+        font-size:12px;
+        max-width:132px;
+        font-family:var(--font-mono, monospace);
+        font-weight:700;
+        text-align:left;
+        transition:border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+      }
+      .sc-dc-canproto-input:focus {
+        outline:none;
+        border-color:#5b8cff;
+        box-shadow:0 0 0 1px rgba(91, 140, 255, 0.35);
+      }
+      .sc-dc-canproto-desc {
+        color:#d5deee;
+        white-space:normal;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        line-height:1.4;
+        padding-top:8px;
+        padding-bottom:8px;
+      }
+      .sc-dc-canproto-actions { display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; padding-top:4px; }
       .sc-dc-slcan-params-form { display:grid; gap:10px; }
       .sc-dc-slcan-table-wrap {
         overflow:auto;
@@ -2239,18 +2397,24 @@
       .sc-dc-result-card--err .sc-dc-result-icon { background:rgba(255, 120, 120, 0.16); color:#ffb4b4; }
       .sc-dc-result-title { margin:0; font-size:18px; color:#eef4ff; }
       .sc-dc-result-detail { margin:0; color:#94a9ce; font-size:13px; line-height:1.5; }
-      .sc-dc-mode-tabs { display:flex; gap:10px; flex-wrap:wrap; align-items:stretch; width:100%; min-height:52px; }
+      .sc-dc-mode-tabs { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:8px; align-items:stretch; width:100%; min-height:38px; }
       .sc-dc-mode-tabs .sc-dc-mode-tab {
-        flex:1 1 128px;
-        min-height:52px;
-        padding:10px 16px;
-        border-radius:12px;
+        width:100%;
+        min-height:38px;
+        padding:6px 10px;
+        border-radius:10px;
         border:1px solid;
-        font-size:13px;
+        font-size:12px;
         font-weight:700;
         letter-spacing:0.02em;
         cursor:pointer;
         transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;
+      }
+      .sc-dc-mode-tabs .sc-dc-mode-tab[data-dc-view] {
+        min-height:36px;
+        padding:6px 10px;
+        font-size:11px;
+        font-weight:600;
       }
       .sc-dc-mode-tabs .sc-dc-mode-tab:hover:not(.active) { transform:translateY(-1px); filter:brightness(1.06); }
       .sc-dc-mode-tabs .sc-dc-mode-tab:active { transform:translateY(0); }
@@ -2296,19 +2460,19 @@
         color:#f8fbff;
         box-shadow:
           inset 0 1px 0 rgba(255, 255, 255, 0.34),
-          0 0 0 3px rgba(255, 255, 255, 0.42),
-          0 12px 28px rgba(0, 0, 0, 0.28);
-        filter:brightness(1.24) saturate(1.06);
+          0 0 0 2px rgba(255, 255, 255, 0.24),
+          0 10px 22px rgba(0, 0, 0, 0.24);
+        filter:brightness(1.16) saturate(1.04);
         transform:translateY(-1px);
       }
-      .sc-dc-toolbar-right { display:flex; gap:12px; align-items:center; color:#d5dcf0; font-size:12px; position:relative; z-index:1; flex-wrap:wrap; min-height:40px; }
-      .sc-dc-slcan-port-label { display:grid; gap:6px; align-content:center; color:#b9c7e4; font-weight:600; margin:0; }
-      .sc-dc-slcan-port-controls { display:flex; gap:12px; align-items:center; }
-      .sc-dc-slcan-port-select { min-width: 220px; max-width: 280px; background:#121a2a; color:#e8edf8; border:1px solid #4a5c7d; border-radius:10px; padding:7px 10px; font-size:12px; }
+      .sc-dc-toolbar-right { display:flex; gap:8px 12px; align-items:end; color:#d5dcf0; font-size:11px; position:relative; z-index:1; flex-wrap:wrap; min-height:34px; }
+      .sc-dc-slcan-port-label { display:grid; gap:4px; align-content:center; color:#b9c7e4; font-weight:600; margin:0; }
+      .sc-dc-slcan-port-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+      .sc-dc-slcan-port-select { min-width: 260px; max-width: 400px; background:#121a2a; color:#e8edf8; border:1px solid #4a5c7d; border-radius:8px; padding:6px 8px; font-size:11px; }
       .sc-dc-slcan-port-select option { background:#1a2235; color:#e8edf8; }
-      .sc-dc-toolbar-right .sc-btn { align-self:center; min-height:36px; display:inline-flex; align-items:center; justify-content:center; }
+      .sc-dc-toolbar-right .sc-btn { align-self:center; min-height:32px; display:inline-flex; align-items:center; justify-content:center; }
       #sc-dc-auth-slcan2 { color:#f5eaf5; }
-      .sc-dc-check { display:inline-flex; gap:6px; align-items:center; min-height:36px; padding:0 2px; margin:0; line-height:1; }
+      .sc-dc-check { display:inline-flex; gap:5px; align-items:center; min-height:30px; padding:0 2px; margin:0; line-height:1; }
       .sc-dc-check--control-row { align-self:end; }
       .sc-dc-check input { margin:0; align-self:center; }
       .sc-dc-hint-row { padding:12px 14px 14px; border:1px solid rgba(70, 84, 112, 0.42); border-radius:14px; background:rgba(13, 18, 30, 0.7); margin-bottom:14px; }
@@ -2357,7 +2521,8 @@
       .sc-dc-checkline { display:flex; align-items:center; gap:8px; font-size:13px; color:#dbe5f4; }
       .sc-dc-fileline { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
       .sc-dc-fileline input[type="file"] { max-width:100%; }
-      .sc-dc-grid { display:grid; grid-template-columns:minmax(0, 1.58fr) minmax(340px, 0.8fr); gap:16px; align-items:start; }
+      .sc-dc-grid { display:grid; grid-template-columns:minmax(0, 1.58fr) minmax(340px, 0.8fr); gap:12px; align-items:start; }
+      .sc-dc-grid--nodes { grid-template-columns:minmax(0, 1.48fr) minmax(420px, 0.92fr); align-items:start; }
       .sc-dc-grid--single { grid-template-columns:minmax(0, 1fr); }
       .sc-dc-mini-grid, .sc-dc-filter-grid, .sc-dc-inspector-grid, .sc-dc-stats-grid { display:grid; gap:14px; }
       .sc-dc-mini-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
@@ -2367,25 +2532,151 @@
       .sc-dc-panel { display:none; }
       .sc-dc-panel.active { display:block; }
       .sc-dc-main, .sc-dc-side { min-width:0; }
-      .sc-dc-node-table-wrap { min-height:128px; max-height:360px; overflow:auto; scrollbar-gutter:stable; border:1px solid rgba(63, 76, 102, 0.48); border-radius:14px; background:rgba(12, 17, 29, 0.72); }
+      .sc-dc-node-table-wrap { min-height:132px; max-height:520px; overflow:auto; scrollbar-gutter:stable; border:1px solid rgba(63, 76, 102, 0.48); border-radius:12px; background:rgba(12, 17, 29, 0.72); }
       .sc-dc-param-list-body .sc-dc-node-table-wrap { flex:0 0 auto; min-height:180px; max-height:420px; }
-      .sc-dc-node-table thead th { position:sticky; top:0; z-index:1; background:#182033; }
-      .sc-dc-row { cursor:pointer; transition:background .16s ease, transform .16s ease; }
+      .sc-dc-node-table thead th { position:sticky; top:0; z-index:1; background:#182033; padding:10px 12px; font-size:11px; line-height:1.25; }
+      .sc-dc-node-table tbody td {
+        padding:11px 12px;
+        font-size:12px;
+        line-height:1.4;
+        vertical-align:middle;
+        background:rgba(18, 24, 38, 0.78);
+        border-bottom:1px solid rgba(66, 80, 107, 0.42);
+      }
+      .sc-dc-row { cursor:pointer; transition:background .16s ease, transform .16s ease, box-shadow .16s ease; }
       .sc-dc-row-marker { width:18px; text-align:center; color:#a8bbdf; font-size:12px; }
-      .sc-dc-row:hover td { background:rgba(144, 182, 58, 0.1); }
-      .sc-dc-row.active td { background:rgba(144, 182, 58, 0.18); }
-      .sc-dc-node-detail-band { margin-top:14px; border:1px solid rgba(74, 92, 125, 0.42); border-radius:16px; background:linear-gradient(180deg, rgba(20, 28, 43, 0.96), rgba(14, 21, 34, 0.96)); padding:14px; box-shadow:inset 0 1px 0 rgba(255,255,255,0.03); }
-      .sc-dc-band-head { display:grid; gap:4px; margin-bottom:12px; }
-      .sc-dc-band-head h4 { margin:0; font-size:14px; color:#eef4ff; }
-      .sc-dc-band-head p { margin:0; color:#8ea2c8; font-size:12px; }
-      .sc-dc-band-grid { display:grid; gap:8px; }
-      .sc-dc-band-row { display:grid; grid-template-columns:210px minmax(0, 1fr); gap:10px; align-items:center; }
-      .sc-dc-band-row-values { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; min-width:0; }
+      .sc-dc-row:hover td { background:rgba(34, 48, 74, 0.92); }
+      .sc-dc-row.active td {
+        background:linear-gradient(90deg, rgba(167, 244, 50, 0.12), rgba(77, 163, 255, 0.06));
+        box-shadow:inset 3px 0 0 rgba(167, 244, 50, 0.9);
+      }
+      .sc-dc-row td:first-child { border-left:1px solid rgba(66, 80, 107, 0.32); }
+      .sc-dc-row td:last-child { border-right:1px solid rgba(66, 80, 107, 0.32); }
+      .sc-dc-node-detail-band {
+        border:1px solid rgba(74, 92, 125, 0.42);
+        border-radius:14px;
+        background:linear-gradient(180deg, rgba(20, 28, 43, 0.98), rgba(14, 21, 34, 0.98));
+        padding:14px;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px rgba(0,0,0,0.18);
+        display:grid;
+        gap:12px;
+      }
+      .sc-dc-band-grid { display:grid; gap:10px; }
+      .sc-dc-band-row {
+        display:grid;
+        grid-template-columns:84px minmax(0, 1fr);
+        gap:10px;
+        align-items:start;
+      }
+      .sc-dc-band-row-values {
+        display:grid;
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+        gap:10px;
+        min-width:0;
+      }
       .sc-dc-band-row-values-3 { grid-template-columns:repeat(3, minmax(0, 1fr)); }
-      .sc-dc-band-label, .sc-dc-band-value { min-height:24px; display:flex; align-items:center; padding:0; font-size:12px; transition:background-color .18s ease, box-shadow .18s ease, transform .18s ease; }
-      .sc-dc-band-label { color:#8ea2c8; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; }
-      .sc-dc-band-value { min-height:34px; padding:7px 12px; border-radius:10px; background:rgba(255,255,255,0.04); border:1px solid rgba(77, 93, 121, 0.36); color:#ffffff; font-family:var(--sc-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+      .sc-dc-band-label,
+      .sc-dc-band-value {
+        min-width:0;
+        min-height:30px;
+        display:flex;
+        align-items:center;
+      }
+      .sc-dc-band-label {
+        color:#8ea2c8;
+        font-size:11px;
+        font-weight:700;
+        letter-spacing:0.05em;
+        text-transform:uppercase;
+        white-space:nowrap;
+      }
+      .sc-dc-band-value {
+        padding:9px 12px;
+        border-radius:10px;
+        border:1px solid rgba(77, 93, 121, 0.32);
+        background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+        color:#f2f6ff;
+        font-family:var(--sc-mono);
+        font-size:12px;
+        font-weight:700;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
       .sc-dc-band-value-wide { grid-column:1 / -1; }
+      .sc-dc-side--detail { position:sticky; top:14px; display:grid; align-self:start; min-width:0; }
+      .sc-dc-side--detail .sc-dc-node-detail-band { min-height:100%; }
+      .sc-dc-band-head { display:grid; gap:4px; margin-bottom:2px; }
+      .sc-dc-band-kicker { color:#8ea2c8; font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; }
+      .sc-dc-band-head h4 { margin:0; font-size:16px; line-height:1.2; color:#eef4ff; }
+      .sc-dc-band-status-row { display:flex; gap:6px; flex-wrap:wrap; }
+      .sc-dc-badge {
+        display:inline-flex;
+        align-items:center;
+        min-height:24px;
+        padding:0 10px;
+        border-radius:999px;
+        border:1px solid rgba(120, 160, 255, 0.28);
+        background:rgba(255,255,255,0.04);
+        color:#eaf2ff;
+        font-size:11px;
+        font-weight:700;
+        letter-spacing:0.02em;
+      }
+      .sc-dc-badge--mode { border-color:rgba(33, 214, 195, 0.36); background:rgba(33, 214, 195, 0.12); color:#b8f0ec; }
+      .sc-dc-badge--health { border-color:rgba(47, 224, 125, 0.36); background:rgba(47, 224, 125, 0.1); color:#c9f7da; }
+      .sc-dc-badge.is-warn { border-color:rgba(255, 176, 32, 0.4); background:rgba(255, 176, 32, 0.12); color:#ffe3a3; }
+      .sc-dc-badge.is-danger { border-color:rgba(255, 90, 95, 0.42); background:rgba(255, 90, 95, 0.12); color:#ffc3c6; }
+      .sc-dc-band-section {
+        display:grid;
+        gap:8px;
+        padding-top:10px;
+        border-top:1px solid rgba(120, 160, 255, 0.14);
+      }
+      .sc-dc-band-section:first-of-type { border-top:none; padding-top:0; }
+      .sc-dc-band-section-title {
+        color:#9db0d6;
+        font-size:11px;
+        font-weight:700;
+        letter-spacing:0.08em;
+        text-transform:uppercase;
+      }
+      .sc-dc-band-prop-grid { display:grid; gap:8px; }
+      .sc-dc-band-prop-grid--2 { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+      .sc-dc-band-prop {
+        min-width:0;
+        display:grid;
+        gap:4px;
+        padding:9px 11px;
+        border-radius:10px;
+        border:1px solid rgba(77, 93, 121, 0.32);
+        background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      }
+      .sc-dc-band-prop--wide { grid-column:1 / -1; }
+      .sc-dc-band-prop-label {
+        color:#8ea2c8;
+        font-size:11px;
+        font-weight:700;
+        letter-spacing:0.05em;
+        text-transform:uppercase;
+      }
+      .sc-dc-band-prop-value {
+        color:#ffffff;
+        font-family:var(--sc-mono);
+        font-size:13px;
+        font-weight:700;
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+      .sc-dc-band-prop-value--mono {
+        white-space:normal;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        line-height:1.35;
+        color:#dce8ff;
+      }
       #sc-dc-node-meta {
         display:grid;
         grid-template-columns:minmax(140px, 44%) minmax(0, 1fr);
@@ -2453,19 +2744,39 @@
         0%, 100% { box-shadow:0 0 0 0 rgba(224, 245, 125, 0.18); }
         50% { box-shadow:0 0 0 8px rgba(224, 245, 125, 0); }
       }
+      @media (max-width: 1320px) {
+        .sc-dc-mode-tabs { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+      }
       @media (max-width: 980px) {
-        .sc-dc-grid, .sc-dc-mini-grid, .sc-dc-filter-grid, .sc-dc-inspector-grid, .sc-dc-stats-grid { grid-template-columns:1fr; }
+        .sc-dc-grid, .sc-dc-grid--nodes, .sc-dc-mini-grid, .sc-dc-filter-grid, .sc-dc-inspector-grid, .sc-dc-stats-grid { grid-template-columns:1fr; }
         .sc-dc-modal-grid { grid-template-columns:1fr; }
-        .sc-dc-band-row { grid-template-columns:1fr; gap:6px; }
-        .sc-dc-band-row-values, .sc-dc-band-row-values-3 { grid-template-columns:1fr; }
+        .sc-dc-band-prop-grid--2 { grid-template-columns:1fr; }
         .sc-dc-side { position:static; }
         .sc-dc-toolbar-card { min-width:100%; }
+        .sc-dc-mode-tabs { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+        .sc-dc-slcan-port-select { min-width:220px; max-width:100%; }
+        .sc-dc-can-quick-table--protocol tbody tr:hover { transform:none; }
+        .sc-dc-canproto-table thead th:nth-child(1),
+        .sc-dc-canproto-table tbody td:nth-child(1),
+        .sc-dc-canproto-table thead th:nth-child(2),
+        .sc-dc-canproto-table tbody td:nth-child(2),
+        .sc-dc-canproto-table thead th:nth-child(3),
+        .sc-dc-canproto-table tbody td:nth-child(3) { width:auto; }
+        .sc-dc-canproto-row:hover { transform:none; }
         .sc-dc-slcan-table thead th:nth-child(1),
         .sc-dc-slcan-table tbody td:nth-child(1),
         .sc-dc-slcan-table thead th:nth-child(2),
         .sc-dc-slcan-table tbody td:nth-child(2),
         .sc-dc-slcan-table thead th:nth-child(3),
         .sc-dc-slcan-table tbody td:nth-child(3) { width:auto; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .sc-dc-can-quick-table--protocol tbody tr,
+        .sc-dc-can-quick-row--animated,
+        .sc-dc-can-quick-table--protocol tbody tr::after,
+        .sc-dc-canproto-row { animation:none !important; transition:none !important; }
+        .sc-dc-can-quick-table--protocol tbody tr:hover { transform:none; filter:none; }
+        .sc-dc-canproto-row:hover { transform:none; filter:none; }
       }
     `;
   }
@@ -2728,11 +3039,110 @@
     },
     "can-protocol": {
       title: () => dcText("CAN Protocol", "CAN协议"),
-      match: (name) => /^CAN_[PD][123]_PROTOCOL/i.test(name),
+      match: (name) => /^CAN_P[12]_/i.test(name),
     },
     "can-config": {
       title: () => dcText("CAN Configuration", "CAN配置"),
-      match: (name) => /^CAN_[PD][123]_/i.test(name) && !/PROTOCOL/i.test(name),
+      match: (name) => /^CAN_D\d+_/i.test(name),
+    },
+  };
+  const CAN_PROTOCOL_PARAM_NAMES = [
+    "CAN_P1_BITRATE",
+    "CAN_P1_DRIVER",
+    "CAN_P1_FDBITRATE",
+    "CAN_P1_OPTIONS",
+    "CAN_P2_BITRATE",
+    "CAN_P2_DRIVER",
+    "CAN_P2_FDBITRATE",
+    "CAN_P2_OPTIONS",
+  ];
+  const DC_PARAM_EDITOR_SPECS = {
+    "can-protocol": {
+      modalKey: "can-protocol",
+      title: () => dcText("CAN Protocol", "CAN协议"),
+      kicker: () => dcText("Flight controller CAN bus parameters", "飞控 CAN 总线参数"),
+      inputAttr: "data-can-protocol-param",
+      rowAttr: "data-can-protocol-row",
+      refreshBtnId: "sc-dc-canproto-refresh",
+      writeBtnId: "sc-dc-canproto-write",
+      refreshTitle: () => dcText("Refresh succeeded", "刷新成功"),
+      refreshDetail: () => dcText(
+        "The 8 CAN protocol parameters have been refreshed from the flight controller.",
+        "8 个 CAN 协议参数已从飞控重新读取。",
+      ),
+      writeSuccess: (ok) => dcText(
+        `Successfully wrote ${ok} CAN parameter(s).`,
+        `已成功写入 ${ok} 个 CAN 参数。`,
+      ),
+      emptyWrite: () => dcText(
+        "All 8 CAN protocol parameters already match the loaded values.",
+        "这 8 个 CAN 协议参数与当前加载值一致，无需写入。",
+      ),
+      note: () => dcText(
+        "This panel is fixed to the 8 CAN_P1/CAN_P2 bus parameters.",
+        "此面板固定显示 8 个 CAN_P1 / CAN_P2 总线参数。",
+      ),
+      names: () => [...CAN_PROTOCOL_PARAM_NAMES],
+    },
+    "slcan-params": {
+      modalKey: "slcan-params",
+      title: () => dcText("SLCAN Parameters", "SLCAN 参数"),
+      kicker: () => dcText("Flight controller SLCAN settings", "飞控 SLCAN 配置"),
+      inputAttr: "data-slcan-param",
+      rowAttr: "data-slcan-param-row",
+      refreshBtnId: "sc-dc-slcan-param-refresh",
+      writeBtnId: "sc-dc-slcan-param-write",
+      refreshTitle: () => dcText("Refresh succeeded", "刷新成功"),
+      refreshDetail: () => dcText(
+        "SLCAN parameters have been read back from the flight controller.",
+        "已从飞控回读 SLCAN 相关参数。",
+      ),
+      writeSuccess: (ok) => dcText(
+        `Successfully wrote ${ok} parameter(s) to the flight controller.`,
+        `已成功向飞控写入 ${ok} 个参数。`,
+      ),
+      emptyWrite: () => dcText(
+        "All values match the loaded flight-controller parameters.",
+        "所有参数与飞控当前值一致，没有待写入的修改。",
+      ),
+      names: () => [...SLCAN_PARAM_NAMES],
+    },
+    "can-config": {
+      modalKey: "can-config",
+      title: () => dcText("CAN Configuration", "CAN配置"),
+      kicker: () => dcText("Flight controller CAN driver parameters", "飞控 CAN 驱动参数"),
+      inputAttr: "data-can-config-param",
+      rowAttr: "data-can-config-row",
+      refreshBtnId: "sc-dc-canconfig-refresh",
+      writeBtnId: "sc-dc-canconfig-write",
+      refreshTitle: () => dcText("Refresh succeeded", "刷新成功"),
+      refreshDetail: () => dcText(
+        "CAN driver parameters have been refreshed from the flight controller.",
+        "CAN 驱动参数已从飞控重新读取。",
+      ),
+      writeSuccess: (ok) => dcText(
+        `Successfully wrote ${ok} CAN driver parameter(s).`,
+        `已成功写入 ${ok} 个 CAN 驱动参数。`,
+      ),
+      emptyWrite: () => dcText(
+        "All CAN driver parameters already match the loaded values.",
+        "CAN 驱动参数与当前加载值一致，无需写入。",
+      ),
+      note: () => dcText(
+        "This panel shows parameters that start with CAN_Dx_.",
+        "此面板显示所有以 CAN_Dx_ 开头的参数。",
+      ),
+      names: () => {
+        const params = window.params;
+        if (!(params instanceof Map)) return [];
+        const names = [];
+        for (const key of params.keys()) {
+          const name = String(key).toUpperCase();
+          if (/^CAN_D\d+_/i.test(name)) names.push(name);
+        }
+        names.sort((a, b) => a.localeCompare(b));
+        return names;
+      },
     },
   };
 
@@ -2764,25 +3174,30 @@
     return v == null ? "" : String(v);
   }
 
-  function slcanParamInputValue(name) {
-    const input = document.querySelector(`[data-slcan-param="${name}"]`);
+  function editorParamInputValue(spec, name) {
+    if (!spec?.inputAttr) return null;
+    const input = document.querySelector(`[${spec.inputAttr}="${name}"]`);
     if (!input) return null;
     const n = Number(input.value);
     return Number.isFinite(n) ? n : null;
   }
 
-  function updateSlcanParamDirtyStyle(input) {
-    if (!input) return;
-    const name = input.getAttribute("data-slcan-param") || "";
+  function updateEditorParamDirtyStyle(spec, input) {
+    if (!spec || !input) return;
+    const name = input.getAttribute(spec.inputAttr) || "";
     const loaded = getFcParamValue(name);
     const draft = String(input.value ?? "");
-    input.classList.toggle("dirty", loaded !== "" && draft !== loaded);
+    const row = input.closest(`[${spec.rowAttr}]`);
+    const dirty = loaded !== "" && draft !== loaded;
+    input.classList.toggle("dirty", dirty);
+    if (row) row.classList.toggle("is-dirty", dirty);
   }
 
-  function collectSlcanPendingWrites() {
+  function collectEditorPendingWrites(spec) {
     const pending = [];
-    for (const name of SLCAN_PARAM_NAMES) {
-      const draft = slcanParamInputValue(name);
+    const names = spec?.names?.() || [];
+    for (const name of names) {
+      const draft = editorParamInputValue(spec, name);
       if (draft == null) continue;
       const loaded = getParam(name);
       if (loaded == null || Math.abs(Number(loaded) - draft) > 1e-6) {
@@ -2790,6 +3205,14 @@
       }
     }
     return pending;
+  }
+
+  function setEditorSelectedRow(spec, name) {
+    if (!spec?.rowAttr) return;
+    document.querySelectorAll(`[${spec.rowAttr}].is-selected`).forEach((row) => row.classList.remove("is-selected"));
+    if (!name) return;
+    const row = document.querySelector(`[${spec.rowAttr}="${name}"]`);
+    if (row) row.classList.add("is-selected");
   }
 
   function showDcResultModal(ok, title, detail) {
@@ -2835,74 +3258,84 @@
     return { explain: text, values: "" };
   }
 
-  function buildSlcanParamRowHtml(name, index) {
+  function buildEditorParamRowHtml(spec, name, index) {
     const meta = getFcParamMeta(name);
     const value = getFcParamValue(name);
     const parts = splitParamDescription(meta.description);
-    const explain = escapeHtml(parts.explain || meta.description);
-    const fullDesc = escapeHtml(meta.description);
-    const label = escapeHtml(meta.displayName);
-    const tone = Number.isFinite(index) ? Math.max(0, Math.min(10, index)) : 0;
-    const nameTitle = escapeHtml(label ? `${name} · ${label}` : name);
+    const explain = escapeHtml(parts.explain || meta.description || "—");
+    const fullDesc = escapeHtml(meta.description || "—");
+    const tone = (Number(index) || 0) % 8;
+    const nameTitle = escapeHtml(meta.displayName ? `${name} · ${meta.displayName}` : name);
     return `
-      <tr class="sc-dc-slcan-param-row sc-dc-slcan-param-row--i${tone}" data-slcan-param-row="${name}">
-        <td class="sc-dc-slcan-name" title="${nameTitle}">${name}</td>
-        <td class="sc-dc-slcan-val">
-          <input type="number" step="1" class="sc-dc-slcan-param-input" data-slcan-param="${name}" value="${value === "" ? "" : value}">
+      <tr class="sc-dc-canproto-row sc-dc-canproto-row--i${tone + 1}" ${spec.rowAttr}="${name}">
+        <td class="sc-dc-canproto-name" title="${nameTitle}">${name}</td>
+        <td class="sc-dc-canproto-value-cell">
+          <input
+            type="number"
+            step="1"
+            class="sc-dc-canproto-input"
+            ${spec.inputAttr}="${name}"
+            value="${value === "" ? "" : escapeHtml(value)}"
+          >
         </td>
-        <td class="sc-dc-slcan-desc">
-          <span class="sc-dc-slcan-desc-text" title="${fullDesc}">${explain || "—"}</span>
-        </td>
+        <td class="sc-dc-canproto-desc" title="${fullDesc}">${explain}</td>
       </tr>`;
   }
 
-  async function renderSlcanParamsEditorModal() {
+  async function renderParamEditorModal(kind) {
     await ensureDcParamDb();
+    const spec = DC_PARAM_EDITOR_SPECS[kind];
+    if (!spec) return;
     const backdrop = $("sc-dc-modal-backdrop");
     const body = $("sc-dc-modal-body");
     const title = $("sc-dc-modal-title");
     const kicker = $("sc-dc-modal-kicker");
     const modal = backdrop?.querySelector(".sc-dc-modal");
     if (!backdrop || !body || !title) return;
-    dcMenuState.activeModal = "slcan-params";
+    dcMenuState.activeModal = spec.modalKey;
     document.querySelectorAll("[data-dc-quick]").forEach((btn) => {
-      btn.classList.toggle("active", btn.getAttribute("data-dc-quick") === "slcan-params");
+      btn.classList.toggle("active", btn.getAttribute("data-dc-quick") === spec.modalKey);
     });
     if (modal) modal.classList.add("sc-dc-modal--wide");
-    if (kicker) kicker.textContent = dcText("Flight controller SLCAN settings", "飞控 SLCAN 配置");
-    title.textContent = dcText("SLCAN Parameters", "SLCAN 参数");
+    if (kicker) kicker.textContent = spec.kicker();
+    title.textContent = spec.title();
     const connected = isGcsSerialConnected();
-    const rowsHtml = SLCAN_PARAM_NAMES.map((name, index) => buildSlcanParamRowHtml(name, index)).join("");
+    const names = spec.names();
+    const rowsHtml = names.map((name, index) => buildEditorParamRowHtml(spec, name, index)).join("");
     body.innerHTML = `
-      <div class="sc-dc-slcan-params-form">
+      <div class="sc-dc-canproto-form">
         ${connected ? "" : `<p class="sc-dc-can-quick-empty">${dcText(
           "Flight controller not connected. Values shown are from the last loaded parameter table.",
           "飞控未连接。显示的是上次加载的参数表数值。",
         )}</p>`}
-        <div class="sc-dc-slcan-table-wrap">
-          <table class="sc-dc-slcan-table" aria-label="${dcText("SLCAN parameters", "SLCAN 参数")}">
+        <div class="sc-dc-canproto-table-wrap">
+          <table class="sc-dc-canproto-table" aria-label="${spec.title()}">
             <thead>
               <tr>
-                <th scope="col">${dcText("Name", "名称")}</th>
-                <th scope="col">${dcText("Value", "值")}</th>
+                <th scope="col">${dcText("Parameter", "参数")}</th>
+                <th scope="col">${dcText("Value", "当前值")}</th>
                 <th scope="col">${dcText("Description", "说明")}</th>
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>
         </div>
-        <div class="sc-dc-slcan-param-actions">
-          <button type="button" id="sc-dc-slcan-param-refresh" class="sc-btn sc-btn-ghost sc-btn-sm">${dcText("Refresh", "刷新参数")}</button>
-          <button type="button" id="sc-dc-slcan-param-write" class="sc-btn sc-btn-primary sc-btn-sm">${dcText("Write", "写入参数")}</button>
+        <div class="sc-dc-canproto-actions">
+          <button type="button" id="${spec.refreshBtnId}" class="sc-btn sc-btn-ghost sc-btn-sm">${dcText("Refresh", "刷新参数")}</button>
+          <button type="button" id="${spec.writeBtnId}" class="sc-btn sc-btn-primary sc-btn-sm">${dcText("Write", "写入参数")}</button>
         </div>
+        ${spec.note ? `<p class="sc-dc-modal-note sc-prose sc-prose--sm">${spec.note()}</p>` : ""}
         <p id="sc-dc-modal-status" class="sc-dc-modal-status"></p>
       </div>`;
     backdrop.hidden = false;
-    document.querySelectorAll("[data-slcan-param]").forEach((input) => updateSlcanParamDirtyStyle(input));
+    document.querySelectorAll(`[${spec.inputAttr}]`).forEach((input) => updateEditorParamDirtyStyle(spec, input));
+    setEditorSelectedRow(spec, names[0] || "");
     setModalStatus("", "");
   }
 
-  async function refreshSlcanParamsFromFc() {
+  async function refreshParamEditorFromFc(kind) {
+    const spec = DC_PARAM_EDITOR_SPECS[kind];
+    if (!spec) return;
     if (!isGcsSerialConnected()) {
       showDcResultModal(false, dcText("Refresh failed", "刷新失败"), dcText(
         "Connect the flight controller MAVLink port first.",
@@ -2912,7 +3345,7 @@
     }
     setModalStatus(dcText("Refreshing parameters…", "正在刷新参数…"), "warn");
     if (typeof window.requestParamByName === "function") {
-      for (const name of SLCAN_PARAM_NAMES) {
+      for (const name of spec.names()) {
         try {
           await window.requestParamByName(name);
         } catch (_) { /* ignore */ }
@@ -2922,15 +3355,14 @@
       await window.loadParams({ force: true }).catch(() => {});
     }
     await new Promise((r) => setTimeout(r, 500));
-    await renderSlcanParamsEditorModal();
-    showDcResultModal(true, dcText("Refresh succeeded", "刷新成功"), dcText(
-      "SLCAN parameters have been read back from the flight controller.",
-      "已从飞控回读 SLCAN 相关参数。",
-    ));
+    await renderParamEditorModal(kind);
+    showDcResultModal(true, spec.refreshTitle(), spec.refreshDetail());
     setModalStatus("", "");
   }
 
-  async function writeSlcanParamsToFc() {
+  async function writeParamEditorToFc(kind) {
+    const spec = DC_PARAM_EDITOR_SPECS[kind];
+    if (!spec) return;
     if (!isGcsSerialConnected()) {
       showDcResultModal(false, dcText("Write failed", "写入失败"), dcText(
         "Connect the flight controller MAVLink port first.",
@@ -2945,12 +3377,9 @@
       ));
       return;
     }
-    const pending = collectSlcanPendingWrites();
+    const pending = collectEditorPendingWrites(spec);
     if (!pending.length) {
-      showDcResultModal(true, dcText("Nothing to write", "无需写入"), dcText(
-        "All values match the loaded flight-controller parameters.",
-        "所有参数与飞控当前值一致，没有待写入的修改。",
-      ));
+      showDcResultModal(true, dcText("Nothing to write", "无需写入"), spec.emptyWrite());
       return;
     }
     setModalStatus(dcText(`Writing ${pending.length} parameter(s)…`, `正在写入 ${pending.length} 个参数…`), "warn");
@@ -2972,11 +3401,8 @@
     }
     setModalStatus("", "");
     if (!failNames.length) {
-      showDcResultModal(true, dcText("Write succeeded", "写入成功"), dcText(
-        `Successfully wrote ${ok} parameter(s) to the flight controller.`,
-        `已成功向飞控写入 ${ok} 个参数。`,
-      ));
-      await renderSlcanParamsEditorModal();
+      showDcResultModal(true, dcText("Write succeeded", "写入成功"), spec.writeSuccess(ok));
+      await renderParamEditorModal(kind);
       return;
     }
     showDcResultModal(false, dcText("Write failed", "写入失败"), dcText(
@@ -3017,9 +3443,19 @@
     return "";
   }
 
+  function buildCanQuickRowHtml(row, index, kind) {
+    const hint = paramHintText(row.name);
+    const valText = row.value == null ? "—" : String(row.value);
+    const tone = Number.isFinite(index) ? (index % 8) + 1 : 1;
+    const rowClass = kind === "can-protocol"
+      ? `sc-dc-can-quick-row sc-dc-can-quick-row--tone${tone} sc-dc-can-quick-row--animated`
+      : "sc-dc-can-quick-row";
+    return `<tr class="${rowClass}"><td>${row.name}</td><td>${valText}</td><td>${hint || "—"}</td></tr>`;
+  }
+
   async function renderCanQuickPanelModal(kind) {
-    if (kind === "slcan-params") {
-      await renderSlcanParamsEditorModal();
+    if (DC_PARAM_EDITOR_SPECS[kind]) {
+      await renderParamEditorModal(kind);
       return;
     }
     await ensureDcParamDb();
@@ -3048,18 +3484,14 @@
         <p id="sc-dc-modal-status" class="sc-dc-modal-status"></p>`;
     } else {
       body.innerHTML = `
-        <div class="sc-table-wrap">
-          <table class="sc-dc-can-quick-table">
+        <div class="sc-table-wrap ${kind === "can-protocol" ? "sc-dc-can-quick-wrap sc-dc-can-quick-wrap--protocol" : ""}">
+          <table class="sc-dc-can-quick-table ${kind === "can-protocol" ? "sc-dc-can-quick-table--protocol" : ""}">
             <thead><tr>
               <th>${dcText("Parameter", "参数")}</th>
               <th>${dcText("Value", "当前值")}</th>
               <th>${dcText("Note", "说明")}</th>
             </tr></thead>
-            <tbody>${rows.map((row) => {
-              const hint = paramHintText(row.name);
-              const valText = row.value == null ? "—" : String(row.value);
-              return `<tr><td>${row.name}</td><td>${valText}</td><td>${hint || "—"}</td></tr>`;
-            }).join("")}</tbody>
+            <tbody>${rows.map((row, index) => buildCanQuickRowHtml(row, index, kind)).join("")}</tbody>
           </table>
         </div>
         <p class="sc-dc-modal-note sc-prose sc-prose--sm">${dcText(
@@ -4619,9 +5051,26 @@
     const clearBand = (id, text = "-") => {
       if ($(id)) $(id).textContent = text;
     };
+    const paintBadge = (id, text, kind = "mode") => {
+      const el = $(id);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.remove("is-warn", "is-danger");
+      const raw = String(text || "").toLowerCase();
+      if (/异常|故障|error|offline|离线/.test(raw)) {
+        el.classList.add("is-danger");
+      } else if (/警告|warn|stale|暂存/.test(raw)) {
+        el.classList.add("is-warn");
+      }
+      if (kind === "health" && /正常|online|ok/.test(raw)) {
+        el.classList.remove("is-warn", "is-danger");
+      }
+    };
     if (!node) {
+      clearBand("sc-dc-band-title", dcText("No node selected", "未选择节点"));
       clearBand("sc-dc-band-id");
       clearBand("sc-dc-band-name");
+      clearBand("sc-dc-band-bus");
       clearBand("sc-dc-band-mode");
       clearBand("sc-dc-band-health");
       clearBand("sc-dc-band-uptime");
@@ -4632,10 +5081,12 @@
       clearBand("sc-dc-band-uid");
       return;
     }
+    if ($("sc-dc-band-title")) $("sc-dc-band-title").textContent = `${node.nodeId} · ${node.name}`;
     if ($("sc-dc-band-id")) $("sc-dc-band-id").textContent = String(node.nodeId);
     if ($("sc-dc-band-name")) $("sc-dc-band-name").textContent = node.name;
-    if ($("sc-dc-band-mode")) $("sc-dc-band-mode").textContent = nodeMode(node);
-    if ($("sc-dc-band-health")) $("sc-dc-band-health").textContent = nodeHealth(node);
+    if ($("sc-dc-band-bus")) $("sc-dc-band-bus").textContent = nodeBusLabel(node);
+    paintBadge("sc-dc-band-mode", nodeMode(node), "mode");
+    paintBadge("sc-dc-band-health", nodeHealth(node), "health");
     if ($("sc-dc-band-uptime")) $("sc-dc-band-uptime").textContent = nodeUptime(node);
     if ($("sc-dc-band-vendor")) $("sc-dc-band-vendor").textContent = nodeVendorCode(node);
     if ($("sc-dc-band-sw")) $("sc-dc-band-sw").textContent = softwareVersionForNode(node);
@@ -5296,16 +5747,52 @@
         return;
       }
       if (ev.target && ev.target.id === "sc-dc-slcan-param-refresh") {
-        refreshSlcanParamsFromFc().catch((err) => {
+        refreshParamEditorFromFc("slcan-params").catch((err) => {
+          showDcResultModal(false, dcText("Refresh failed", "刷新失败"), String(err?.message || err));
+        });
+        return;
+      }
+      if (ev.target && ev.target.id === "sc-dc-canproto-refresh") {
+        refreshParamEditorFromFc("can-protocol").catch((err) => {
+          showDcResultModal(false, dcText("Refresh failed", "刷新失败"), String(err?.message || err));
+        });
+        return;
+      }
+      if (ev.target && ev.target.id === "sc-dc-canconfig-refresh") {
+        refreshParamEditorFromFc("can-config").catch((err) => {
           showDcResultModal(false, dcText("Refresh failed", "刷新失败"), String(err?.message || err));
         });
         return;
       }
       if (ev.target && ev.target.id === "sc-dc-slcan-param-write") {
-        writeSlcanParamsToFc().catch((err) => {
+        writeParamEditorToFc("slcan-params").catch((err) => {
           showDcResultModal(false, dcText("Write failed", "写入失败"), String(err?.message || err));
         });
         return;
+      }
+      if (ev.target && ev.target.id === "sc-dc-canproto-write") {
+        writeParamEditorToFc("can-protocol").catch((err) => {
+          showDcResultModal(false, dcText("Write failed", "写入失败"), String(err?.message || err));
+        });
+        return;
+      }
+      if (ev.target && ev.target.id === "sc-dc-canconfig-write") {
+        writeParamEditorToFc("can-config").catch((err) => {
+          showDcResultModal(false, dcText("Write failed", "写入失败"), String(err?.message || err));
+        });
+        return;
+      }
+      const canProtoRow = ev.target.closest("[data-can-protocol-row]");
+      if (canProtoRow) {
+        setEditorSelectedRow(DC_PARAM_EDITOR_SPECS["can-protocol"], canProtoRow.getAttribute("data-can-protocol-row"));
+      }
+      const slcanRow = ev.target.closest("[data-slcan-param-row]");
+      if (slcanRow) {
+        setEditorSelectedRow(DC_PARAM_EDITOR_SPECS["slcan-params"], slcanRow.getAttribute("data-slcan-param-row"));
+      }
+      const canConfigRow = ev.target.closest("[data-can-config-row]");
+      if (canConfigRow) {
+        setEditorSelectedRow(DC_PARAM_EDITOR_SPECS["can-config"], canConfigRow.getAttribute("data-can-config-row"));
       }
       if (ev.target && ev.target.id === "sc-dc-result-close") {
         hideDcResultModal();
@@ -5510,7 +5997,9 @@
     });
     document.addEventListener("input", (ev) => {
       if (ev.target && ev.target.id === "sc-dc-filter-input") renderFilterTable();
-      if (ev.target?.matches?.("[data-slcan-param]")) updateSlcanParamDirtyStyle(ev.target);
+      if (ev.target?.matches?.("[data-slcan-param]")) updateEditorParamDirtyStyle(DC_PARAM_EDITOR_SPECS["slcan-params"], ev.target);
+      if (ev.target?.matches?.("[data-can-protocol-param]")) updateEditorParamDirtyStyle(DC_PARAM_EDITOR_SPECS["can-protocol"], ev.target);
+      if (ev.target?.matches?.("[data-can-config-param]")) updateEditorParamDirtyStyle(DC_PARAM_EDITOR_SPECS["can-config"], ev.target);
       if (ev.target && ev.target.id === "sc-dc-param-search") {
         dcMenuState.paramSearch = String(ev.target.value || "");
         renderParametersModal(getSelectedNode());
@@ -5578,10 +6067,7 @@
       ensureExtraStyles();
       bindDroneCan();
       if (isInspectorDemoMode()) {
-        currentView = "inspector";
-        selectedCanId = 51;
         selectedInspectorMessage = { nodeId: 51, canId: "0x18044433" };
-        slcanSessionReady = true;
       }
       if (isSlcanAutotestMode()) {
         slcanSessionReady = true;

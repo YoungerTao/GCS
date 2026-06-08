@@ -55,6 +55,57 @@ window.gps_fix_type = 0;
 window.gps_satellites_visible = 0;
 window._lastGpsRawMs = 0;
 window._lastGposMs = 0;
+window.gpsTelemetry = window.gpsTelemetry || {
+  instances: [
+    {
+      index: 0,
+      rawMsgId: 24,
+      label: "GPS1",
+      fixType: 0,
+      satellitesVisible: 0,
+      lat: null,
+      lon: null,
+      altM: null,
+      eph: null,
+      epv: null,
+      velMps: null,
+      cogDeg: null,
+      hAccM: null,
+      vAccM: null,
+      velAccMps: null,
+      yawDeg: null,
+      lastUpdateMs: 0,
+    },
+    {
+      index: 1,
+      rawMsgId: 124,
+      label: "GPS2",
+      fixType: 0,
+      satellitesVisible: 0,
+      lat: null,
+      lon: null,
+      altM: null,
+      eph: null,
+      epv: null,
+      velMps: null,
+      cogDeg: null,
+      hAccM: null,
+      vAccM: null,
+      velAccMps: null,
+      yawDeg: null,
+      lastUpdateMs: 0,
+    },
+  ],
+  rtk: {
+    source: "none",
+    injectStatus: "idle",
+    health: "offline",
+    lastCorrectionMs: 0,
+    ageSec: null,
+    latencyMs: null,
+    boundInstance: 0,
+  },
+};
 window.ekf_status = false;
 window.armed = false;
 window.flight_mode = "UNKNOWN";
