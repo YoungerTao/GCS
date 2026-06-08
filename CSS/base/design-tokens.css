@@ -1,0 +1,217 @@
+:root {
+  /* Layout */
+  --gap: 10px;
+  --left-pane: 400px;
+  --log-min: 220px;
+  --splitter-w: 8px;
+  --hud-size: 400px;
+
+  /* Typography */
+  --font-sans: "Inter", "Segoe UI", "PingFang SC", sans-serif;
+  --font-display: "Montserrat", "Inter", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", "Courier New", monospace;
+
+  --font-size-2xs: 10px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 15px;
+  --font-size-2xl: 16px;
+  --font-size-3xl: 20px;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 14px;
+  --space-7: 16px;
+  --space-8: 20px;
+  --space-9: 24px;
+
+  /* Radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-pill: 999px;
+
+  /* Shadows */
+  --shadow-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.22);
+  --shadow-panel: 0 10px 28px rgba(0, 0, 0, 0.28);
+  --shadow-float: 0 14px 40px rgba(0, 0, 0, 0.34);
+
+  /* Core surfaces */
+  --color-bg-canvas: #071019;
+  --color-bg-canvas-alt: #0a1420;
+  --color-bg-panel: #0e1726;
+  --color-bg-panel-alt: #132033;
+  --color-bg-panel-strong: #17263d;
+  --color-bg-elevated: #1a2b42;
+  --color-bg-input: #10192a;
+  --color-bg-inset: #0a101c;
+  --color-bg-scrim: rgba(3, 8, 16, 0.72);
+
+  /* Atmosphere */
+  --color-atmo-blue: rgba(77, 163, 255, 0.16);
+  --color-atmo-cyan: rgba(33, 214, 195, 0.14);
+  --color-atmo-violet: rgba(123, 109, 255, 0.12);
+  --color-atmo-lime: rgba(167, 244, 50, 0.14);
+  --color-atmo-amber: rgba(245, 165, 36, 0.14);
+  --color-atmo-rose: rgba(232, 93, 147, 0.14);
+
+  /* Text */
+  --color-text-primary: #eaf2ff;
+  --color-text-secondary: #a9b8d0;
+  --color-text-muted: #6d7c96;
+  --color-text-disabled: #53627b;
+  --color-text-on-accent: #ffffff;
+  --color-text-on-bright: #09111c;
+
+  /* Borders */
+  --color-border-subtle: rgba(120, 160, 255, 0.14);
+  --color-border-default: rgba(120, 160, 255, 0.2);
+  --color-border-strong: rgba(120, 190, 255, 0.34);
+  --color-border-inverse: rgba(255, 255, 255, 0.72);
+
+  /* Generic interaction */
+  --color-focus-ring: rgba(96, 165, 250, 0.48);
+  --color-selection-fill: rgba(96, 165, 250, 0.16);
+  --color-selection-stroke: rgba(96, 165, 250, 0.5);
+
+  /* Module accents */
+  --accent-scan: #a7f432;
+  --accent-protocol: #4da3ff;
+  --accent-config: #f5a524;
+  --accent-link-a: #4da3ff;
+  --accent-link-b: #7b6dff;
+  --accent-filter: #f3a43b;
+  --accent-parser: #21d6c3;
+  --accent-stats: #e85d93;
+
+  /* Functional accents */
+  --color-info: #4da3ff;
+  --color-info-soft: rgba(77, 163, 255, 0.14);
+  --color-success: #2fe07d;
+  --color-success-soft: rgba(47, 224, 125, 0.14);
+  --color-warning: #ffb020;
+  --color-warning-soft: rgba(255, 176, 32, 0.14);
+  --color-danger: #ff5a5f;
+  --color-danger-soft: rgba(255, 90, 95, 0.14);
+  --color-offline: #6b7a90;
+  --color-offline-soft: rgba(107, 122, 144, 0.14);
+
+  /* Semantic aliases */
+  --color-status-normal: var(--color-success);
+  --color-status-running: var(--accent-parser);
+  --color-status-warning: var(--color-warning);
+  --color-status-error: var(--color-danger);
+  --color-status-offline: var(--color-offline);
+
+  /* Controlled glows */
+  --glow-blue: 0 0 18px rgba(77, 163, 255, 0.28);
+  --glow-cyan: 0 0 18px rgba(33, 214, 195, 0.24);
+  --glow-violet: 0 0 20px rgba(123, 109, 255, 0.24);
+  --glow-lime: 0 0 18px rgba(167, 244, 50, 0.24);
+  --glow-amber: 0 0 18px rgba(245, 165, 36, 0.24);
+  --glow-rose: 0 0 20px rgba(232, 93, 147, 0.24);
+  --glow-success: 0 0 16px rgba(47, 224, 125, 0.28);
+  --glow-warning: 0 0 16px rgba(255, 176, 32, 0.26);
+  --glow-danger: 0 0 18px rgba(255, 90, 95, 0.3);
+
+  /* Generic controls */
+  --button-bg: linear-gradient(180deg, #3d4f70 0%, #273753 55%, #1c2b43 100%);
+  --button-bg-hover: linear-gradient(180deg, #486084 0%, #2d4060 55%, #22324c 100%);
+  --button-bg-active: linear-gradient(180deg, #22324a 0%, #1a263b 100%);
+  --button-border: rgba(104, 147, 217, 0.34);
+  --button-text: var(--color-text-primary);
+  --button-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), var(--shadow-soft);
+
+  --control-bg: linear-gradient(180deg, #162238 0%, #101a2b 100%);
+  --control-border: rgba(106, 127, 190, 0.34);
+  --control-border-focus: rgba(96, 165, 250, 0.66);
+  --control-text: var(--color-text-primary);
+  --control-placeholder: var(--color-text-muted);
+
+  /* Status / loaders */
+  --overlay-bg: rgba(2, 6, 12, 0.66);
+  --progress-track: #111827;
+  --progress-fill: linear-gradient(90deg, #1f7cff 0%, #35d6c5 55%, #a7f432 100%);
+}
+
+body {
+  background:
+    radial-gradient(circle at top right, rgba(33, 214, 195, 0.1), transparent 28%),
+    radial-gradient(circle at top left, rgba(77, 163, 255, 0.1), transparent 30%),
+    linear-gradient(180deg, var(--color-bg-canvas-alt) 0%, var(--color-bg-canvas) 100%);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+
+button {
+  background: var(--button-bg);
+  color: var(--button-text);
+  border: 1px solid var(--button-border);
+  border-radius: var(--radius-xs);
+  font-weight: var(--font-weight-semibold);
+  box-shadow: var(--button-shadow);
+}
+
+button:hover {
+  background: var(--button-bg-hover);
+}
+
+button:active {
+  background: var(--button-bg-active);
+}
+
+select {
+  background: var(--control-bg);
+  color: var(--control-text);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  box-shadow: var(--shadow-hairline);
+}
+
+select option {
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+}
+
+#comPort.com-disconnected {
+  border: 1px solid var(--control-border);
+}
+
+#comPort.com-connecting {
+  border: 1px solid var(--color-info);
+  box-shadow: 0 0 0 2px rgba(77, 163, 255, 0.18), var(--glow-blue);
+}
+
+#comPort.com-connected {
+  border: 1px solid var(--color-success);
+  box-shadow: 0 0 0 2px rgba(47, 224, 125, 0.18), var(--glow-success);
+}
+
+#comPort.com-error {
+  border: 1px solid var(--color-danger);
+  box-shadow: 0 0 0 2px rgba(255, 90, 95, 0.16), var(--glow-danger);
+}
+
+#connectBtn.connected {
+  border-color: var(--color-success);
+}
+
+#connectBtn.error {
+  border-color: var(--color-danger);
+}

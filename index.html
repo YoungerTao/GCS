@@ -19,6 +19,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Montserrat:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="CSS/base/design-tokens.css">
 <link rel="stylesheet" href="CSS/base/layout.css">
 <link rel="stylesheet" href="CSS/components/quick-grid.css">
 <link rel="stylesheet" href="CSS/components/status-messages.css">
@@ -28,6 +29,7 @@
 <link rel="stylesheet" href="CSS/components/map-prefetch.css">
 <link rel="stylesheet" href="CSS/components/serial-setup.css">
 <link rel="stylesheet" href="CSS/components/safety-setup.css">
+<link rel="stylesheet" href="CSS/components/gps-setup.css">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css"/>
 </head>
 <body>
@@ -208,8 +210,8 @@
       <button type="button" class="ov-nav-item" data-setup-panel="serial"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-serial"/></svg><span class="ov-nav-label">串口</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
       <button type="button" class="ov-nav-item" data-setup-panel="power"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-power"/></svg><span class="ov-nav-label">电源</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
       <button type="button" class="ov-nav-item" data-setup-panel="safety"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-safety"/></svg><span class="ov-nav-label">安全</span><span class="ov-nav-badge ov-nav-badge--danger" hidden aria-hidden="true"></span></button>
-      <button type="button" class="ov-nav-item" data-setup-panel="params"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-params"/></svg><span class="ov-nav-label">参数</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
-      <button type="button" class="ov-nav-item" data-setup-panel="help"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-help"/></svg><span class="ov-nav-label">帮助</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="params"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-params"/></svg><span class="ov-nav-label">GPS设置</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
+      <button type="button" class="ov-nav-item" data-setup-panel="help"><svg class="ov-nav-icon" aria-hidden="true"><use href="#ov-icon-help"/></svg><span class="ov-nav-label">雷达设置</span><span class="ov-nav-badge" hidden aria-hidden="true"></span></button>
     </aside>
 
     <section class="ov-main" data-setup-panel="overview">
@@ -728,6 +730,361 @@
         </div>
       </div>
 
+      <div class="ov-panel" id="setup-panel-params">
+        <div class="gps-page gps-theme">
+          <header class="gps-header card-dark">
+            <div class="gps-header-copy">
+              <nav class="gps-breadcrumb" aria-label="GPS 设置导航">
+                <span>初始设置</span>
+                <span class="gps-breadcrumb-sep">/</span>
+                <span>传感器</span>
+                <span class="gps-breadcrumb-sep">/</span>
+                <span>GPS/GNSS</span>
+              </nav>
+              <div class="gps-title-row">
+                <div>
+                  <h3>GPS 设置</h3>
+                  <p class="muted">双实例定位配置、偏移校准、双 GPS 融合与写入控制</p>
+                </div>
+                <div class="gps-header-tags">
+                  <span id="gps-fw-tag" class="gps-tag">固件: 等待上报</span>
+                  <span id="gps-board-tag" class="gps-tag gps-tag--accent">机型: 等待上报</span>
+                  <button type="button" id="gps-conn-chip" class="gps-chip gps-chip--offline">串口未连接</button>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <section class="gps-top-status card-dark" aria-label="GPS 顶部状态栏">
+            <div class="gps-status-grid">
+              <div class="gps-status-pill">
+                <span class="gps-status-label">MAVLink</span>
+                <strong id="gps-status-link" class="gps-status-value is-offline">未连接</strong>
+              </div>
+              <div class="gps-status-pill">
+                <span class="gps-status-label">GPS1</span>
+                <strong id="gps-status-gps1" class="gps-status-value is-muted">未配置</strong>
+              </div>
+              <div class="gps-status-pill">
+                <span class="gps-status-label">GPS2</span>
+                <strong id="gps-status-gps2" class="gps-status-value is-muted">未配置</strong>
+              </div>
+              <div class="gps-status-pill">
+                <span class="gps-status-label">总卫星</span>
+                <strong id="gps-status-sats" class="gps-status-value">--</strong>
+              </div>
+              <div class="gps-status-pill">
+                <span class="gps-status-label">HDOP</span>
+                <strong id="gps-status-hdop" class="gps-status-value">--</strong>
+              </div>
+              <div class="gps-status-pill gps-status-pill--cta">
+                <span class="gps-status-label">RTK</span>
+                <strong id="gps-status-rtk" class="gps-status-value is-muted">无 RTK</strong>
+                <button type="button" id="gps-open-rtk-inline" class="gps-inline-link">进入 RTK 页面</button>
+              </div>
+            </div>
+          </section>
+
+          <div class="gps-main-layout">
+            <section class="gps-main-column">
+              <div id="gps-instance-grid" class="gps-instance-grid"></div>
+
+              <div class="gps-lower-grid">
+                <section class="gps-config-card card-dark">
+                  <div class="gps-card-head">
+                    <div>
+                      <h4>安装偏移</h4>
+                      <p class="muted">维护双天线在机体坐标系中的 X / Y / Z 位置</p>
+                    </div>
+                    <button type="button" id="gps-write-offset-btn" class="gps-card-action">写入此卡</button>
+                  </div>
+                  <div class="gps-config-fields gps-config-fields--triple">
+                    <label class="gps-field">
+                      <span>GPS1 X (m)</span>
+                      <input id="gps-pos1-x" data-param-key="GPS_POS1_X" type="number" step="0.01">
+                    </label>
+                    <label class="gps-field">
+                      <span>GPS1 Y (m)</span>
+                      <input id="gps-pos1-y" data-param-key="GPS_POS1_Y" type="number" step="0.01">
+                    </label>
+                    <label class="gps-field">
+                      <span>GPS1 Z (m)</span>
+                      <input id="gps-pos1-z" data-param-key="GPS_POS1_Z" type="number" step="0.01">
+                    </label>
+                    <label class="gps-field">
+                      <span>GPS2 X (m)</span>
+                      <input id="gps-pos2-x" data-param-key="GPS_POS2_X" type="number" step="0.01">
+                    </label>
+                    <label class="gps-field">
+                      <span>GPS2 Y (m)</span>
+                      <input id="gps-pos2-y" data-param-key="GPS_POS2_Y" type="number" step="0.01">
+                    </label>
+                    <label class="gps-field">
+                      <span>GPS2 Z (m)</span>
+                      <input id="gps-pos2-z" data-param-key="GPS_POS2_Z" type="number" step="0.01">
+                    </label>
+                  </div>
+                </section>
+
+                <section class="gps-config-card card-dark">
+                  <div class="gps-card-head">
+                    <div>
+                      <h4>双 GPS 融合</h4>
+                      <p class="muted">控制主 GPS、自动切换策略与精度权重</p>
+                    </div>
+                    <button type="button" id="gps-write-blend-btn" class="gps-card-action">写入此卡</button>
+                  </div>
+                  <div class="gps-config-fields">
+                    <label class="gps-field">
+                      <span>自动切换</span>
+                      <select id="gps-auto-switch" data-param-key="GPS_AUTO_SWITCH"></select>
+                    </label>
+                    <label class="gps-field">
+                      <span>主 GPS</span>
+                      <select id="gps-primary" data-param-key="GPS_PRIMARY"></select>
+                    </label>
+                    <label class="gps-field">
+                      <span>RTCM 注入目标</span>
+                      <select id="gps-inject-to" data-param-key="GPS_INJECT_TO"></select>
+                    </label>
+                    <label class="gps-field">
+                      <span>融合权重</span>
+                      <div id="gps-blend-mask" class="gps-check-grid" data-param-key="GPS_BLEND_MASK"></div>
+                    </label>
+                  </div>
+                </section>
+
+                <section class="gps-config-card card-dark">
+                  <div class="gps-card-head">
+                    <div>
+                      <h4>高级参数</h4>
+                      <p class="muted">导航滤波、驱动附加选项与配置持久化</p>
+                    </div>
+                    <button type="button" id="gps-write-advanced-btn" class="gps-card-action">写入此卡</button>
+                  </div>
+                  <div class="gps-config-fields">
+                    <label class="gps-field">
+                      <span>导航滤波</span>
+                      <select id="gps-navfilter" data-param-key="GPS_NAVFILTER"></select>
+                    </label>
+                    <label class="gps-field">
+                      <span>保存 GPS 配置</span>
+                      <select id="gps-save-cfg" data-param-key="GPS_SAVE_CFG"></select>
+                    </label>
+                    <label class="gps-field">
+                      <span>驱动选项</span>
+                      <div id="gps-drv-options" class="gps-check-grid" data-param-key="GPS_DRV_OPTIONS"></div>
+                    </label>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <aside class="gps-side-rail card-dark">
+              <section class="gps-rail-card">
+                <div class="gps-rail-head">
+                  <h4>RTK 摘要</h4>
+                  <button type="button" id="gps-open-rtk-rail" class="gps-inline-link">打开详情</button>
+                </div>
+                <div class="gps-rail-kv"><span>来源</span><strong id="gps-rtk-source">无 RTK</strong></div>
+                <div class="gps-rail-kv"><span>注入状态</span><strong id="gps-rtk-inject">未注入</strong></div>
+                <div class="gps-rail-kv"><span>最近校正</span><strong id="gps-rtk-last">--</strong></div>
+                <div class="gps-rail-kv"><span>Age / 延迟</span><strong id="gps-rtk-age">--</strong></div>
+              </section>
+
+              <section class="gps-rail-card">
+                <div class="gps-rail-head">
+                  <h4>DOP 精度</h4>
+                </div>
+                <div class="gps-precision-band">
+                  <span class="gps-precision-label">HDOP</span>
+                  <div class="gps-precision-track"><span id="gps-hdop-bar" class="gps-precision-fill" style="width:0%"></span></div>
+                  <strong id="gps-hdop-rail">--</strong>
+                </div>
+                <div class="gps-precision-band">
+                  <span class="gps-precision-label">VDOP</span>
+                  <div class="gps-precision-track"><span id="gps-vdop-bar" class="gps-precision-fill gps-precision-fill--secondary" style="width:0%"></span></div>
+                  <strong id="gps-vdop-rail">--</strong>
+                </div>
+                <div class="gps-precision-band">
+                  <span class="gps-precision-label">水平精度</span>
+                  <strong id="gps-hacc-rail">--</strong>
+                </div>
+              </section>
+
+              <section class="gps-rail-card">
+                <div class="gps-rail-head">
+                  <h4>GPS 快照</h4>
+                </div>
+                <div class="gps-rail-kv"><span>主实例</span><strong id="gps-primary-snapshot">GPS1</strong></div>
+                <div class="gps-rail-kv"><span>航向融合</span><strong id="gps-yaw-snapshot">未启用</strong></div>
+                <div class="gps-rail-kv"><span>经纬度</span><strong id="gps-latlon-snapshot">--</strong></div>
+                <div class="gps-rail-kv"><span>高度 / 速度</span><strong id="gps-altvel-snapshot">--</strong></div>
+              </section>
+
+              <section class="gps-rail-card">
+                <div class="gps-rail-head">
+                  <h4>PreArm</h4>
+                </div>
+                <p id="gps-prearm-summary" class="gps-note muted">等待飞控状态消息…</p>
+                <div id="gps-prearm-list" class="gps-alert-list"></div>
+              </section>
+            </aside>
+          </div>
+
+          <footer class="gps-footer card-dark">
+            <div class="gps-footer-copy">
+              <strong id="gps-dirty-count">无未写入修改</strong>
+              <p id="gps-footer-note" class="muted">修改后需写入飞控生效。局部写入仅提交对应卡片参数。</p>
+            </div>
+            <div class="gps-footer-actions">
+              <button type="button" id="gps-restore-default-btn">恢复默认</button>
+              <button type="button" id="gps-refresh-btn">刷新读取</button>
+              <button type="button" id="gps-save-local-btn">仅保存本地</button>
+              <button type="button" id="gps-write-all-btn" class="gps-btn-primary">写入飞控</button>
+            </div>
+            <p id="gps-write-status" class="muted gps-write-status"></p>
+          </footer>
+        </div>
+      </div>
+
+      <div class="ov-panel" id="setup-panel-rtk">
+        <div class="gps-page gps-theme gps-page--rtk">
+          <header class="gps-header card-dark">
+            <div class="gps-header-copy">
+              <nav class="gps-breadcrumb" aria-label="RTK 设置导航">
+                <span>初始设置</span>
+                <span class="gps-breadcrumb-sep">/</span>
+                <span>GPS/GNSS</span>
+                <span class="gps-breadcrumb-sep">/</span>
+                <span>RTK</span>
+              </nav>
+              <div class="gps-title-row">
+                <div>
+                  <h3>RTK 页面</h3>
+                  <p class="muted">专管差分来源、注入目标、链路健康与实例绑定</p>
+                </div>
+                <div class="gps-header-tags">
+                  <button type="button" id="rtk-back-to-gps" class="gps-inline-link gps-inline-link--boxed">返回 GPS 页面</button>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <section class="gps-top-status card-dark">
+            <div class="gps-status-grid gps-status-grid--rtk">
+              <div class="gps-status-pill">
+                <span class="gps-status-label">来源类型</span>
+                <strong id="rtk-source-pill" class="gps-status-value is-muted">无 RTK</strong>
+              </div>
+              <div class="gps-status-pill">
+                <span class="gps-status-label">注入状态</span>
+                <strong id="rtk-inject-pill" class="gps-status-value is-muted">未注入</strong>
+              </div>
+              <div class="gps-status-pill">
+                <span class="gps-status-label">最近校正</span>
+                <strong id="rtk-last-pill" class="gps-status-value">--</strong>
+              </div>
+              <div class="gps-status-pill">
+                <span class="gps-status-label">Age / 延迟</span>
+                <strong id="rtk-age-pill" class="gps-status-value">--</strong>
+              </div>
+              <div class="gps-status-pill">
+                <span class="gps-status-label">绑定实例</span>
+                <strong id="rtk-bind-pill" class="gps-status-value">GPS1</strong>
+              </div>
+            </div>
+          </section>
+
+          <div class="rtk-layout">
+            <section class="rtk-main-column">
+              <section class="gps-config-card card-dark">
+                <div class="gps-card-head">
+                  <div>
+                    <h4>差分来源</h4>
+                    <p class="muted">来源切换只影响 RTK 注入与链路状态摘要，不改变 GPS 主实例参数</p>
+                  </div>
+                  <button type="button" id="rtk-write-source-btn" class="gps-card-action">写入此卡</button>
+                </div>
+                <div id="rtk-source-tabs" class="rtk-source-tabs" role="tablist" aria-label="RTK 来源">
+                  <button type="button" class="rtk-source-tab active" data-rtk-source="none">无 RTK</button>
+                  <button type="button" class="rtk-source-tab" data-rtk-source="cors">千寻 / CORS</button>
+                  <button type="button" class="rtk-source-tab" data-rtk-source="moving">移动基站</button>
+                </div>
+                <div class="gps-config-fields">
+                  <label class="gps-field">
+                    <span>注入目标</span>
+                    <select id="rtk-inject-target" data-param-key="GPS_INJECT_TO"></select>
+                  </label>
+                  <label class="gps-field">
+                    <span>首选实例</span>
+                    <select id="rtk-primary-target" data-param-key="GPS_PRIMARY"></select>
+                  </label>
+                </div>
+              </section>
+
+              <section class="gps-config-card card-dark">
+                <div class="gps-card-head">
+                  <div>
+                    <h4>来源配置</h4>
+                    <p id="rtk-source-summary" class="muted">当前未启用 RTK 来源。</p>
+                  </div>
+                </div>
+                <div id="rtk-source-panels">
+                  <div class="rtk-source-panel active" data-rtk-source-panel="none">
+                    <div class="gps-note muted">RTK 未启用时，GPS 页面仍可独立配置接收机、偏移和双 GPS 融合。</div>
+                  </div>
+                  <div class="rtk-source-panel" data-rtk-source-panel="cors" hidden>
+                    <div class="gps-config-fields">
+                      <label class="gps-field">
+                        <span>接入方式</span>
+                        <select id="rtk-cors-mode">
+                          <option value="qx">千寻 CORS</option>
+                          <option value="ntrip">NTRIP / 网络差分</option>
+                        </select>
+                      </label>
+                      <label class="gps-field">
+                        <span>链路状态说明</span>
+                        <input id="rtk-cors-note" type="text" placeholder="例如：通过 WebSerial/外部网关注入">
+                      </label>
+                    </div>
+                  </div>
+                  <div class="rtk-source-panel" data-rtk-source-panel="moving" hidden>
+                    <div class="gps-config-fields">
+                      <label class="gps-field">
+                        <span>移动基站角色</span>
+                        <select id="rtk-moving-role">
+                          <option value="ublox-base">uBlox 移动基线基站</option>
+                          <option value="dronecan-base">DroneCAN 移动基线基站</option>
+                        </select>
+                      </label>
+                      <label class="gps-field">
+                        <span>链路说明</span>
+                        <input id="rtk-moving-note" type="text" placeholder="例如：专用 CAN 口 / UART2">
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <aside class="gps-side-rail card-dark">
+              <section class="gps-rail-card">
+                <div class="gps-rail-head"><h4>链路健康</h4></div>
+                <div class="gps-rail-kv"><span>状态</span><strong id="rtk-health-label">未连接</strong></div>
+                <div class="gps-rail-kv"><span>最近更新时间</span><strong id="rtk-last-update">--</strong></div>
+                <div class="gps-rail-kv"><span>延迟</span><strong id="rtk-latency">--</strong></div>
+                <div class="gps-rail-kv"><span>绑定关系</span><strong id="rtk-bind-side">GPS1</strong></div>
+              </section>
+              <section class="gps-rail-card">
+                <div class="gps-rail-head"><h4>说明</h4></div>
+                <p class="gps-note muted">RTK 页只管理差分链路与实例绑定；GPS 接收机类型、星座和安装偏移仍在 GPS 页面维护。</p>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </div>
+
       <div class="ov-panel" id="setup-panel-sensors">
         <div class="sc-page cal-tokens" data-active-module="accel">
           <nav class="sc-breadcrumb" aria-label="传感器校准导航">
@@ -1011,6 +1368,8 @@
 <script src="JS/ui/motor-setup.js?v=8" defer></script>
 <script src="JS/ui/power-setup.js" defer></script>
 <script src="JS/ui/safety-setup.js" defer></script>
+<script src="JS/ui/gps-setup.js" defer></script>
+<script src="JS/ui/rtk-setup.js" defer></script>
 <script src="JS/ui/geofence-viz-three.js" defer></script>
 <script src="https://unpkg.com/three@0.149.0/build/three.min.js" defer></script>
 <script src="JS/ui/accel-calib-three.js" defer></script>

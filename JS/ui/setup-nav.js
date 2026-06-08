@@ -3,9 +3,18 @@
  */
 (function initSetupNav() {
   let dronecanHasIssue = false;
+  const PANEL_NAV_ALIAS = {
+    rtk: "params",
+  };
+
+  function resolveNavPanel(panel) {
+    const key = String(panel || "overview");
+    return PANEL_NAV_ALIAS[key] || key;
+  }
 
   function getAccentForPanel(panel) {
-    const btn = document.querySelector(`.ov-nav-item[data-setup-panel="${CSS.escape(panel)}"]`);
+    const navPanel = resolveNavPanel(panel);
+    const btn = document.querySelector(`.ov-nav-item[data-setup-panel="${CSS.escape(navPanel)}"]`);
     if (!btn) return null;
     const accent = getComputedStyle(btn).getPropertyValue("--ov-nav-accent").trim();
     return accent || null;
@@ -13,8 +22,9 @@
 
   function syncNavState(panel) {
     const key = panel || "overview";
+    const navKey = resolveNavPanel(key);
     document.querySelectorAll(".ov-nav-item[data-setup-panel]").forEach((btn) => {
-      const isActive = btn.getAttribute("data-setup-panel") === key;
+      const isActive = btn.getAttribute("data-setup-panel") === navKey;
       btn.classList.toggle("active", isActive);
       if (isActive) btn.setAttribute("aria-current", "page");
       else btn.removeAttribute("aria-current");
